@@ -75,16 +75,22 @@ jobs:
           # fetch_chrome_binary keeps only the framework; re-fetch the .app tree
           # via CfT for a launch test.
           python3 - <<'PY'
-          import json, urllib.request, io, zipfile, os
+          import json, urllib.request
           plat = "${{ matrix.arch }}"
           data = json.load(urllib.request.urlopen(
             "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"))
           st = data["channels"]["Stable"]
           url = next(d["url"] for d in st["downloads"]["chrome"] if d["platform"] == plat)
           print("downloading", url)
-          buf = urllib.request.urlopen(url).read()
-          zipfile.ZipFile(io.BytesIO(buf)).extractall("_app")
+          with open("chrome.zip", "wb") as f:
+            f.write(urllib.request.urlopen(url).read())
           PY
+          # Expand with ditto, not python zipfile: zipfile drops the Unix exec
+          # bit (Chrome then fails to launch with EACCES) and rewrites the
+          # bundle's symlinks as plain files (breaking codesign --deep --strict).
+          # ditto round-trips a .app losslessly (perms + symlinks + xattrs).
+          ditto -x -k chrome.zip _app
+          rm -f chrome.zip
           APP=$(find _app -maxdepth 2 -name "*.app" -type d | head -1)
           BIN=$(find "$APP/Contents/MacOS" -maxdepth 1 -type f | head -1)
           echo "APP=$APP" >> "$GITHUB_ENV"
