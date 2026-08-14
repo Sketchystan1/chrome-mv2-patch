@@ -1280,7 +1280,7 @@ resign_one() {
     # on older macOS without --xml the dump fails and we drop to the fallbacks.
     local ent; ent="$(mktemp 2>/dev/null)" || ent=""
     if [[ -n "$ent" ]] \
-       && codesign -d --entitlements "$ent" --xml "$comp" 2>/dev/null \
+       && codesign -d --entitlements - --xml "$comp" >"$ent" 2>/dev/null \
        && [[ -s "$ent" ]]; then
         if codesign --force --sign - --entitlements "$ent" "$comp" 2>/dev/null; then
             rm -f "$ent"; return 0

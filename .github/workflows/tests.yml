@@ -100,6 +100,11 @@ jobs:
       - name: check (read-only) recognizes the layout
         run: |
           bash chrome-mv2.sh check "$APP"
+          # Diagnostic: record the STOCK Renderer helper entitlements so the
+          # post-patch dump below can be compared against Google's original.
+          R=$(find "$APP" -type d -name '*Helper (Renderer).app' | head -1)
+          echo "=== stock Renderer entitlements ($R) ==="
+          codesign -d --entitlements - --xml "$R" 2>&1 || true
 
       # Baseline BEFORE patching: at 151/152 the MV2 disable is a compiled-in
       # feature default (--enable-features no longer toggles it), so a stock CfT
@@ -133,6 +138,13 @@ jobs:
           # per-component re-sign (codesign --deep would have stripped it).
           R=$(find "$APP" -type d -name '*Helper (Renderer).app' | head -1)
           if [ -n "$R" ]; then
+            RBIN=$(find "$R/Contents/MacOS" -maxdepth 1 -type f | head -1)
+            echo "=== patched Renderer .app entitlements ($R) ==="
+            codesign -d --entitlements - --xml "$R" 2>&1 || true
+            echo "=== patched Renderer Mach-O entitlements ($RBIN) ==="
+            codesign -d --entitlements - --xml "$RBIN" 2>&1 || true
+            echo "=== patched Renderer signing info ==="
+            codesign -dvvv "$R" 2>&1 || true
             if codesign -d --entitlements - --xml "$R" 2>/dev/null | grep -q "allow-jit"; then
               echo "Renderer helper retained allow-jit entitlement"
             else
