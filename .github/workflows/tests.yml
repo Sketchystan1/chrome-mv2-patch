@@ -162,8 +162,33 @@ jobs:
       - name: headless launch must render (Killed:9 / LV / JIT proof)
         run: |
           BIN=$(find "$APP/Contents/MacOS" -maxdepth 1 -type f | head -1)
-          "$BIN" --headless=new --disable-gpu --no-sandbox --dump-dom "data:text/html,<title>ok</title>hi" > dom.html 2>launch.log || (cat launch.log; exit 1)
-          grep -qi "ok\|hi" dom.html
+          # Give headless its own scratch profile and bound its lifetime: new
+          # headless + --dump-dom can otherwise sit forever waiting on first-run
+          # / profile setup. --virtual-time-budget makes it advance and exit;
+          # the watchdog below guarantees we fast-fail instead of hanging the job.
+          PROF="$(mktemp -d)"
+          "$BIN" --headless=new --disable-gpu --no-sandbox --no-first-run \
+                 --no-default-browser-check --user-data-dir="$PROF" \
+                 --virtual-time-budget=8000 \
+                 --dump-dom "data:text/html,<title>ok</title>hi" \
+                 > dom.html 2>launch.log &
+          CPID=$!
+          exited=0
+          for _ in $(seq 1 45); do
+            kill -0 "$CPID" 2>/dev/null || { exited=1; break; }
+            sleep 2
+          done
+          if [ "$exited" != 1 ]; then
+            kill -9 "$CPID" 2>/dev/null || true
+            echo "--- launch.log ---"; cat launch.log || true
+            echo "::error::headless Chrome did not exit within 90s (hang)"; exit 1
+          fi
+          wait "$CPID" 2>/dev/null; rc=$?
+          echo "--- launch.log ---"; cat launch.log || true
+          if ! grep -qi "ok\|hi" dom.html; then
+            echo "--- dom.html (head) ---"; head -c 2000 dom.html || true
+            echo "::error::headless render produced no DOM (chrome rc=$rc)"; exit 1
+          fi
           echo "headless render OK"
 
       - name: functional MV2 A/B (patched build must ENABLE what stock disabled)
