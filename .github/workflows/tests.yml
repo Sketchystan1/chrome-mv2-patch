@@ -133,7 +133,7 @@ jobs:
           # per-component re-sign (codesign --deep would have stripped it).
           R=$(find "$APP" -type d -name '*Helper (Renderer).app' | head -1)
           if [ -n "$R" ]; then
-            if codesign -d --entitlements - "$R" 2>/dev/null | grep -q "allow-jit"; then
+            if codesign -d --entitlements - --xml "$R" 2>/dev/null | grep -q "allow-jit"; then
               echo "Renderer helper retained allow-jit entitlement"
             else
               echo "::error::Renderer helper lost com.apple.security.cs.allow-jit after re-sign"; exit 1

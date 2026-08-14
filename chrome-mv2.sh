@@ -1271,6 +1271,23 @@ have_codesign() { command -v codesign >/dev/null 2>&1; }
 
 resign_one() {
     local comp="$1"
+    # Explicitly carry the component's own entitlements across the re-sign. This
+    # matters most for the Renderer helper's com.apple.security.cs.allow-jit:
+    # --preserve-metadata alone has proven unreliable at carrying it on some
+    # codesign versions, and the plain ad-hoc fallback drops it outright (the
+    # renderer then dies with a JIT / library-validation kill). Dump -> re-apply
+    # is authoritative. --xml keeps the dump a clean plist the signer re-accepts;
+    # on older macOS without --xml the dump fails and we drop to the fallbacks.
+    local ent; ent="$(mktemp 2>/dev/null)" || ent=""
+    if [[ -n "$ent" ]] \
+       && codesign -d --entitlements "$ent" --xml "$comp" 2>/dev/null \
+       && [[ -s "$ent" ]]; then
+        if codesign --force --sign - --entitlements "$ent" "$comp" 2>/dev/null; then
+            rm -f "$ent"; return 0
+        fi
+    fi
+    [[ -n "$ent" ]] && rm -f "$ent"
+    # No entitlements to carry (or capture unsupported here): preserve, then plain.
     codesign --force --sign - --preserve-metadata=entitlements,flags "$comp" 2>/dev/null && return 0
     codesign --force --sign - "$comp" 2>/dev/null && return 0
     errf "Couldn't re-sign part of the app: ${comp}"; return 1
