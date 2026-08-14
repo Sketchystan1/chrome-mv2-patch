@@ -100,11 +100,20 @@ jobs:
       - name: check (read-only) recognizes the layout
         run: |
           bash chrome-mv2.sh check "$APP"
-          # Diagnostic: record the STOCK Renderer helper entitlements so the
-          # post-patch dump below can be compared against Google's original.
+          # Record whether the STOCK Renderer helper actually carries
+          # com.apple.security.cs.allow-jit. Retail Google Chrome.app is signed
+          # with the hardened runtime and does; Google Chrome for Testing (what
+          # CI downloads) is not hardened and ships NO such entitlement. The
+          # post-patch assertion below only fires when there was something to
+          # preserve in the first place.
           R=$(find "$APP" -type d -name '*Helper (Renderer).app' | head -1)
-          echo "=== stock Renderer entitlements ($R) ==="
-          codesign -d --entitlements - --xml "$R" 2>&1 || true
+          if [ -n "$R" ] && codesign -d --entitlements - --xml "$R" 2>/dev/null | grep -q "allow-jit"; then
+            echo "STOCK_ALLOW_JIT=1" >> "$GITHUB_ENV"
+            echo "stock Renderer carries com.apple.security.cs.allow-jit"
+          else
+            echo "STOCK_ALLOW_JIT=0" >> "$GITHUB_ENV"
+            echo "stock Renderer has no allow-jit entitlement (CfT build); preservation assertion will be skipped"
+          fi
 
       # Baseline BEFORE patching: at 151/152 the MV2 disable is a compiled-in
       # feature default (--enable-features no longer toggles it), so a stock CfT
@@ -134,22 +143,19 @@ jobs:
             || { echo "::error::backup not created under Application Support/chrome-mv2-patch/<uuid>"; exit 1; }
           echo "backup at: $BAK"
           echo "BAK=$BAK" >> "$GITHUB_ENV"
-          # The Renderer helper must KEEP com.apple.security.cs.allow-jit after the
-          # per-component re-sign (codesign --deep would have stripped it).
+          # If the stock Renderer carried com.apple.security.cs.allow-jit, the
+          # per-component re-sign must keep it (codesign --deep would strip it).
+          # CfT builds ship no such entitlement, so there is nothing to assert -
+          # the headless launch step below is the authoritative JIT/LV proof.
           R=$(find "$APP" -type d -name '*Helper (Renderer).app' | head -1)
-          if [ -n "$R" ]; then
-            RBIN=$(find "$R/Contents/MacOS" -maxdepth 1 -type f | head -1)
-            echo "=== patched Renderer .app entitlements ($R) ==="
-            codesign -d --entitlements - --xml "$R" 2>&1 || true
-            echo "=== patched Renderer Mach-O entitlements ($RBIN) ==="
-            codesign -d --entitlements - --xml "$RBIN" 2>&1 || true
-            echo "=== patched Renderer signing info ==="
-            codesign -dvvv "$R" 2>&1 || true
+          if [ -n "$R" ] && [ "${STOCK_ALLOW_JIT:-0}" = "1" ]; then
             if codesign -d --entitlements - --xml "$R" 2>/dev/null | grep -q "allow-jit"; then
               echo "Renderer helper retained allow-jit entitlement"
             else
               echo "::error::Renderer helper lost com.apple.security.cs.allow-jit after re-sign"; exit 1
             fi
+          else
+            echo "skipping allow-jit preservation assertion (stock build had none)"
           fi
           codesign --verify --deep --strict "$APP"
 
