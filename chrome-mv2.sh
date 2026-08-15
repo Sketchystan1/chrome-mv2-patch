@@ -1270,9 +1270,10 @@ validate_backup_snapshot() {
 have_codesign() { command -v codesign >/dev/null 2>&1; }
 
 resign_one() {
-    local comp="$1"
-    codesign --force --sign - --preserve-metadata=entitlements,flags "$comp" 2>/dev/null && return 0
-    codesign --force --sign - "$comp" 2>/dev/null && return 0
+    local comp="$1" q=/dev/null
+    [[ -n "${MV2_DEBUG_SIGN:-}" ]] && q=/dev/stderr   # surface codesign errors for debugging
+    codesign --force --sign - --preserve-metadata=entitlements,flags "$comp" 2>"$q" && return 0
+    codesign --force --sign - "$comp" 2>"$q" && return 0
     errf "Couldn't re-sign part of the app: ${comp}"; return 1
 }
 
