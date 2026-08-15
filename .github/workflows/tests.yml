@@ -5,9 +5,9 @@ name: tests
 # arm64), plus the real-hardware runtime proofs the dev box can't run:
 # on macOS, patch a scratch Google Chrome.app, ad-hoc re-sign, launch headless
 # (the Apple Silicon "Killed: 9" / library-validation / JIT gate), load an MV2
-# extension, and restore; on Windows arm64, fetch the
-# current stable arm64 chrome.dll, verify the shipped table fits, and round-trip
-# patch -> idempotent re-patch -> byte-identical restore on a native arm64 runner.
+# extension, and restore; on Windows arm64 and Linux arm64 (native aarch64), fetch
+# the current stable arm64 chrome.dll / chrome ELF, verify the shipped table fits,
+# and round-trip patch -> idempotent re-patch -> byte-identical restore.
 
 on:
   # Manual only - these tests never run automatically on push or PR. Trigger
@@ -319,3 +319,47 @@ jobs:
           pwsh -NoProfile -File chrome-mv2.ps1 restore (Resolve-Path scratch.dll).Path -Yes -Quiet -Signatures $sig
           if ((Get-FileHash scratch.dll -Algorithm SHA256).Hash -ne $stock) { throw "restore did not reproduce stock bytes" }
           Write-Host "arm64 patch -> idempotent re-patch -> restore round-trip OK (b.gt->b.al flips, byte-identical restore)"
+
+  # --- Real Linux-on-ARM runtime proof (native aarch64) -----------------------
+  # Google ships official arm64 Linux .debs (mid-2026+) on the same VersionHistory
+  # feed as amd64, but there is no Chrome for Testing arm64 Linux build, so -- like
+  # win-arm64 -- this fetches the current *stable* arm64 `chrome` ELF, verifies the
+  # shipped elf-arm64 table still fits it, then patches a scratch copy and
+  # round-trips it on a native aarch64 runner. Linux has no code-signing launch
+  # gate (the patch only flips the b.gt->b.al gate bytes), so byte-level
+  # patch/idempotent-repatch/restore is the proof. Goes red -- signalling a new
+  # -linux-arm64 milestone is due -- when stable arm64 rolls to a version the table
+  # doesn't cover (same contract as the macOS / Windows arm64 runtime jobs).
+  linux-arm64-runtime:
+    if: ${{ github.event.inputs.mac_only != 'true' }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Fetch the current stable arm64 chrome ELF and verify the shipped table
+        run: |
+          python3 scripts/fetch_chrome_binary.py --platform linux-arm64 --out _scratch
+          chrome=$(ls _scratch/chrome-*-linux-arm64)
+          echo "CHROME=$chrome" >> "$GITHUB_ENV"
+          echo "chrome=$chrome"
+          python3 scripts/derive_milestone.py "$chrome" --verify signatures.json | tee verify.log
+          grep -q "ALL SITES VERIFIED: True" verify.log \
+            || { echo "::error::shipped elf-arm64 table does not fully fit the current stable arm64 build; add a new -linux-arm64 milestone"; exit 1; }
+
+      - name: Patch a scratch copy (default-on), re-patch idempotently, restore to stock
+        env:
+          MV2_TEST_NO_ELEVATION: "1"
+        run: |
+          cp "$CHROME" scratch-chrome
+          stock=$(sha256sum scratch-chrome | awk '{print $1}')
+          bash chrome-mv2.sh patch scratch-chrome --yes --quiet --signatures signatures.json
+          patched=$(sha256sum scratch-chrome | awk '{print $1}')
+          [ "$patched" != "$stock" ] || { echo "::error::patch did not change the binary"; exit 1; }
+          bash chrome-mv2.sh patch scratch-chrome --yes --quiet --signatures signatures.json
+          [ "$(sha256sum scratch-chrome | awk '{print $1}')" = "$patched" ] || { echo "::error::re-patch was not idempotent"; exit 1; }
+          bash chrome-mv2.sh restore scratch-chrome --yes --quiet --signatures signatures.json
+          [ "$(sha256sum scratch-chrome | awk '{print $1}')" = "$stock" ] || { echo "::error::restore did not reproduce stock bytes"; exit 1; }
+          echo "linux arm64 patch -> idempotent re-patch -> restore round-trip OK (b.gt->b.al flips, byte-identical restore)"
