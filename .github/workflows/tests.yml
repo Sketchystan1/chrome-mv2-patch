@@ -13,10 +13,16 @@ on:
     branches: [ master ]
   pull_request:
   workflow_dispatch:
+    inputs:
+      mac_only:
+        description: 'Run only the macOS runtime jobs (skip engine, symbols, Windows arm64)'
+        type: boolean
+        default: false
 
 jobs:
   # --- Byte-level engine + signature-table checks (fast, no real Chrome) ------
   engine:
+    if: ${{ github.event.inputs.mac_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -219,6 +225,7 @@ jobs:
 
   # --- Symbol cross-check on real macOS: the shipped gates are the named ones --
   macos-symbols:
+    if: ${{ github.event.inputs.mac_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -269,6 +276,7 @@ jobs:
   # stable arm64 rolls to a version the table doesn't cover (same contract as the
   # macOS runtime job).
   windows-arm64-runtime:
+    if: ${{ github.event.inputs.mac_only != 'true' }}
     runs-on: windows-11-arm
     steps:
       - uses: actions/checkout@v4
