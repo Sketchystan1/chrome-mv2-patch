@@ -1,17 +1,17 @@
 name: tests
 
-# Static engine tests on every push/PR (Linux, macOS, Windows x64, and native
-# Windows arm64), plus the real-hardware runtime proofs the dev box can't run:
+# Manually-triggered test suite (workflow_dispatch only - never auto-runs on
+# push/PR). Static engine tests (Linux, macOS, Windows x64, and native Windows
+# arm64), plus the real-hardware runtime proofs the dev box can't run:
 # on macOS, patch a scratch Google Chrome.app, ad-hoc re-sign, launch headless
 # (the Apple Silicon "Killed: 9" / library-validation / JIT gate), load an MV2
-# extension, and restore to byte-identical stock; on Windows arm64, fetch the
+# extension, and restore; on Windows arm64, fetch the
 # current stable arm64 chrome.dll, verify the shipped table fits, and round-trip
 # patch -> idempotent re-patch -> byte-identical restore on a native arm64 runner.
 
 on:
-  push:
-    branches: [ master ]
-  pull_request:
+  # Manual only - these tests never run automatically on push or PR. Trigger
+  # from the Actions tab or: gh workflow run tests.yml --ref <branch> [-f mac_only=true]
   workflow_dispatch:
     inputs:
       mac_only:
