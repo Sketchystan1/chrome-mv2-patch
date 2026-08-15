@@ -149,6 +149,9 @@ jobs:
             || { echo "::error::backup not created under Application Support/chrome-mv2-patch/<uuid>"; exit 1; }
           echo "backup at: $BAK"
           echo "BAK=$BAK" >> "$GITHUB_ENV"
+          # Capture the backup's hash now: restore deletes the .bak on success,
+          # so the byte-identical check below can't read the file afterwards.
+          echo "BAK_SHA=$(shasum -a 256 "$BAK" | awk '{print $1}')" >> "$GITHUB_ENV"
           # If the stock Renderer carried com.apple.security.cs.allow-jit, the
           # per-component re-sign must keep it (codesign --deep would strip it).
           # CfT builds ship no such entitlement, so there is nothing to assert -
@@ -219,10 +222,15 @@ jobs:
       - name: restore to byte-identical stock
         run: |
           FW=$(find "$APP/Contents/Frameworks" -maxdepth 4 -name "*Framework" -type f | head -1)
-          # $BAK was captured in the patch step (Application Support/chrome-mv2-patch/<uuid>/).
           bash chrome-mv2.sh restore "$APP" --yes --quiet
-          # the .bak holds Google's original bytes; after restore the framework matches it
-          diff <(shasum -a 256 "$BAK" | awk '{print $1}') <(shasum -a 256 "$FW" | awk '{print $1}')
+          # Restore deletes the .bak on success, so compare the restored
+          # framework against the hash we captured from that backup during the
+          # patch step (which held the original pre-patch bytes).
+          got=$(shasum -a 256 "$FW" | awk '{print $1}')
+          echo "restored=$got  original=$BAK_SHA"
+          if [ "$got" != "$BAK_SHA" ]; then
+            echo "::error::restore did not reproduce the original framework bytes"; exit 1
+          fi
           echo "restore reproduced stock framework bytes"
 
   # --- Symbol cross-check on real macOS: the shipped gates are the named ones --
