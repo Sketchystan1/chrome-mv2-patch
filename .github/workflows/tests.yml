@@ -132,7 +132,7 @@ jobs:
 
       - name: patch + verify signature
         run: |
-          MV2_DEBUG_SIGN=1 bash chrome-mv2.sh patch "$APP" --yes --quiet
+          bash chrome-mv2.sh patch "$APP" --yes --quiet
           FW=$(find "$APP/Contents/Frameworks" -maxdepth 4 -name "*Framework" -type f | head -1)
           echo "flipped framework: $FW"
           # The backup must live OUTSIDE the bundle - a stray .bak inside a signed
