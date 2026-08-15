@@ -75,7 +75,7 @@ def _write_extension(dirpath, port):
         f.write(bg)
 
 
-def probe(chrome_bin, timeout):
+def probe(chrome_bin, timeout, debug=False):
     PROBE_HIT.clear()
     srv, port = _start_listener()
     tmp = tempfile.mkdtemp(prefix="mv2probe-")
@@ -96,8 +96,14 @@ def probe(chrome_bin, timeout):
         "--disable-extensions-except=" + ext,
         "data:text/html,mv2probe",
     ]
-    proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL,
-                            stderr=subprocess.PIPE)
+    errlog = os.path.join(tmp, "chrome-stderr.log")
+    errfh = open(errlog, "wb")
+    # Send Chrome's stderr to a FILE, never a PIPE. New headless on a
+    # display-less CI runner spews CVDisplayLinkCreateWithCGDisplay errors; an
+    # undrained PIPE fills its ~64 KiB buffer and blocks Chrome mid-startup, so
+    # the extension never runs its background page and every build looks
+    # "disabled". A regular file never blocks the writer.
+    proc = subprocess.Popen(argv, stdout=subprocess.DEVNULL, stderr=errfh)
     deadline = time.time() + timeout
     try:
         while time.time() < deadline:
@@ -116,11 +122,16 @@ def probe(chrome_bin, timeout):
             except subprocess.TimeoutExpired:
                 proc.kill()
         srv.shutdown()
+        errfh.close()
 
-    if not PROBE_HIT.is_set() and proc.returncode not in (0, None):
-        err = (proc.stderr.read() or b"").decode("utf-8", "replace")[-2000:]
-        sys.stderr.write("chrome exited %s before probe:\n%s\n"
-                         % (proc.returncode, err))
+    if debug or not PROBE_HIT.is_set():
+        try:
+            with open(errlog, "r", errors="replace") as fh:
+                tail = fh.read()[-3000:]
+        except OSError:
+            tail = "(no stderr captured)"
+        sys.stderr.write("chrome rc=%s; PROBE_HIT=%s; stderr tail:\n%s\n"
+                         % (proc.returncode, PROBE_HIT.is_set(), tail))
     return "enabled" if PROBE_HIT.is_set() else "disabled"
 
 
@@ -130,13 +141,15 @@ def main():
     ap.add_argument("--timeout", type=float, default=30.0,
                     help="seconds to wait for the extension ping")
     ap.add_argument("--state-out", help="write observed state to this file")
+    ap.add_argument("--debug", action="store_true",
+                    help="always dump a tail of Chrome's stderr for diagnosis")
     args = ap.parse_args()
 
     if not os.path.exists(args.chrome):
         sys.stderr.write("chrome binary not found: %s\n" % args.chrome)
         return 2
 
-    state = probe(args.chrome, args.timeout)
+    state = probe(args.chrome, args.timeout, debug=args.debug)
     print(state)
     if args.state_out:
         with open(args.state_out, "w") as f:

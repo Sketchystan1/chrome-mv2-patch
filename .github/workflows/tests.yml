@@ -127,7 +127,7 @@ jobs:
       # patched run below is asserted against it.
       - name: stock MV2 baseline (extension should be DISABLED pre-patch)
         run: |
-          python3 .github/mv2_probe.py --chrome "$BIN" --state-out stock_state.txt
+          python3 .github/mv2_probe.py --chrome "$BIN" --state-out stock_state.txt --debug
           echo "stock MV2 extension state: $(cat stock_state.txt)"
 
       - name: patch + verify signature
@@ -194,7 +194,7 @@ jobs:
 
       - name: functional MV2 A/B (patched build must ENABLE what stock disabled)
         run: |
-          python3 .github/mv2_probe.py --chrome "$BIN" --state-out patched_state.txt
+          python3 .github/mv2_probe.py --chrome "$BIN" --state-out patched_state.txt --debug
           stock=$(cat stock_state.txt); patched=$(cat patched_state.txt)
           echo "MV2 extension state -- stock=$stock  patched=$patched"
           # The patch's whole job: the MV2 extension is enabled on the patched
