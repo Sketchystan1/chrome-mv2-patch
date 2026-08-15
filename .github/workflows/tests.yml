@@ -232,6 +232,10 @@ jobs:
             echo "::error::restore did not reproduce the original framework bytes"; exit 1
           fi
           echo "restore reproduced stock framework bytes"
+          # We kept the framework's original signature and re-signed only the
+          # rest of the bundle, so the whole app must still verify strictly.
+          codesign --verify --deep --strict "$APP"
+          echo "restored bundle passes codesign --verify --deep --strict"
 
   # --- Symbol cross-check on real macOS: the shipped gates are the named ones --
   macos-symbols:
