@@ -1277,7 +1277,7 @@ resign_one() {
 }
 
 resign_inside_out() {
-    local framework_bundle="$1" app_path="$2" keep_framework="${3:-}"
+    local framework_bundle="$1" app_path="$2"   # framework_bundle kept for call-site compat
     if [[ -z "$app_path" || ! -d "$app_path" ]]; then
         errf "Couldn't find the app to re-sign: ${app_path}"; return 1
     fi
@@ -1293,16 +1293,6 @@ resign_inside_out() {
     for line in "${items[@]}"; do
         path="${line#*$'\t'}"
         [[ "$path" == "$app_path" ]] && continue                 # outer app signed last
-        # On restore the framework's Mach-O is written back from a backup that
-        # already carries its original, valid signature; re-signing the framework
-        # bundle would rewrite those bytes and defeat a byte-identical restore.
-        # Leaving it untouched keeps the executable exactly as restored - the
-        # outer app is re-signed below, so its seal still references the (now
-        # original) framework cdhash. Only the framework bundle is the concern;
-        # nested helpers under it still re-sign normally.
-        if [[ -n "$keep_framework" && "$path" == "$framework_bundle" ]]; then
-            continue
-        fi
         if [[ -f "$path" ]] && ! is_macho "$path"; then continue; fi   # skip data blobs
         resign_one "$path" || rc=1
     done
@@ -1995,9 +1985,7 @@ do_restore_macho() {
     if [[ -n "$app_path" ]]; then quit_chrome "$app_path" "$assume_yes" || return 1; fi
     write_target "$target" "$backup" "$target_hash" "$BACKUP_HASH" || return 1
     if [[ -n "$app_path" ]] && have_codesign; then
-        # keep_framework: the framework Mach-O was just written back byte-for-byte
-        # from the backup (original bytes + original signature). Don't re-sign it.
-        resign_inside_out "$FRAMEWORK_BUNDLE" "$app_path" keep || warnf "Re-signing failed. Try again: bash $0 restore \"$app_path\""
+        resign_inside_out "$FRAMEWORK_BUNDLE" "$app_path" || warnf "Re-signing failed. Try again: bash $0 restore \"$app_path\""
     fi
     successf "Done. Your original Chrome is back."
     remove_macho_backup "$backup"
