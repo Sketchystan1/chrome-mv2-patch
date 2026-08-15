@@ -1294,6 +1294,14 @@ resign_inside_out() {
     for line in "${items[@]}"; do
         path="${line#*$'\t'}"
         [[ "$path" == "$app_path" ]] && continue                 # outer app signed last
+        # The outer app's own main executable must be signed WITH the app bundle
+        # (below), not standalone: codesign signs a bundle's main executable in
+        # bundle context and validates its nested code, so signing it before the
+        # patched, not-yet-re-signed framework fails with "In subcomponent:
+        # ...Framework.framework: code object is not signed at all" (seen on
+        # x86_64, where the stale framework signature isn't tolerated). Signing
+        # $app_path below covers this executable, after the framework is valid.
+        [[ "$path" == "$app_path/Contents/MacOS/"* ]] && continue
         if [[ -f "$path" ]] && ! is_macho "$path"; then continue; fi   # skip data blobs
         resign_one "$path" || rc=1
     done
