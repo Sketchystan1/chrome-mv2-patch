@@ -34,6 +34,7 @@ def main():
     step("Linux ELF (chrome-mv2.sh)", py + [str(HERE / "test_linux.py")])
     step("macOS Mach-O (chrome-mv2.sh)", py + [str(HERE / "test_macos.py")])
     step("Windows PE (chrome-mv2.ps1)", py + [str(HERE / "test_windows.py")])
+    step("Windows PE (mv2_apply.py fallback)", py + [str(HERE / "test_apply.py")])
 
     # Syntax check for the shell patcher (one cross-platform script). Use the
     # resolved bash (T.BASH): a bare "bash" in subprocess can hit the WSL launcher

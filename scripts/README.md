@@ -19,15 +19,48 @@ Full rationale: [`../mv2-reversing.md`](../mv2-reversing.md) §"Porting to a new
 | `fetch_chrome_binary.py` | Download the stock, gate-bearing binary itself — a channel's current `chrome.dll` (PE64/PE32), Linux `chrome` (ELF), or the macOS universal framework Mach-O (`mac-x64`/`mac-arm64`, always via Chrome for Testing) — unwrap it and drop it in `_scratch/` arch-tagged. `--version` falls back to Chrome for Testing. This is step 1 (below). | stdlib + 7-Zip |
 | `fetch_symbols.py` | Download the symbols matching a binary — PDB (PE) from the Chromium symbol server, `chrome.debug` (ELF) streamed from the per-version zip, or the macOS dSYM's symtab streamed from `dl.google.com/…/dsym/` (emits `nm`-style names directly). Saves to `_scratch/` (gitignored). | stdlib only |
 | `derive_milestone.py` | Find gate sites (`cmp <mv>,2 ; jg`, short **and** near), emit a `signatures.json` entry, and `--verify` an existing table against a binary. | stdlib only |
+| `mv2_apply.py` | Windows fallback runtime: `check` / `patch` / `restore` a `chrome.dll` from Python, for machines where a WDAC policy forces PowerShell into ConstrainedLanguage and `../chrome-mv2.ps1` cannot run at all. | stdlib only |
 | `symbols_from_elf.py` | Linux: dump an ELF's `.symtab` as `nm -S`-style lines, fast and low-memory — a stand-in for `nm -SC` on the multi-GB `chrome.debug` (see note in step 2). | stdlib only |
 | `symbols_from_pdb.py` | Windows only: name gate functions from a PDB via `dbghelp`. Optional — used to filter/name candidates. | Windows + PDB |
 
 The test suite is Python too and lives flat in this folder (no subfolder):
 `run_tests.py` (entry point) drives `test_linux.py` (ELF), `test_macos.py`
-(Mach-O), `test_windows.py` (PE, Windows-only), and `test_derive.py`
+(Mach-O), `test_windows.py` (PE, Windows-only), `test_apply.py` (PE, the
+`mv2_apply.py` fallback — runs anywhere Python does), and `test_derive.py`
 (arm64 finder unit checks); `make_macho_fixture.py` builds a synthetic universal
 Mach-O and `_testutil.py` holds the shared fixture builders/helpers. Run all of
 it with `python scripts/run_tests.py`.
+
+## Patch from Python when PowerShell is locked down
+
+Where a WDAC / code-integrity policy is active, Windows PowerShell runs in
+ConstrainedLanguage and `../chrome-mv2.ps1` cannot start — it needs `Add-Type`,
+`[pscustomobject]` and `[IO.File]` method calls, so it dies with
+`MethodInvocationNotSupportedInConstrainedLanguage` or
+`ConversionSupportedOnlyToCoreTypes` no matter what the execution policy says.
+`mv2_apply.py` is the same engine in Python for that case (PE only — `pe`,
+`pe32`, `pe-arm64`):
+
+```
+python scripts/mv2_apply.py check   "C:\...\Application\<version>\chrome.dll"
+python scripts/mv2_apply.py patch   "C:\...\Application\<version>\chrome.dll"
+python scripts/mv2_apply.py restore "C:\...\Application\<version>\chrome.dll"
+```
+
+`patch` needs an elevated shell and a fully closed Chrome, and writes
+`chrome.dll.bak` + `chrome.dll.bak.json` in the format `chrome-mv2.ps1` reads, so
+the two runtimes' backups are interchangeable. `--out FILE` writes the patched
+image elsewhere and leaves the target untouched (a dry run). It reuses this
+folder's image parser and masked matcher (`derive_milestone.py`), keeps the
+runtime semantics of the PowerShell script — exact `expectedMatches` or decline,
+full-beats-partial milestone ranking, tie declines, flip-only edits, Security
+directory cleared, checksum recomputed — and refuses to write if the resulting
+image differs from the input anywhere outside the planned gates, the 8-byte
+Security directory and the 4-byte checksum.
+
+`check` also prints a stored-vs-computed checksum line: on a stock, untouched
+binary the two must match, which self-tests the checksum arithmetic against the
+value Microsoft's linker wrote.
 
 ## Verify the shipping table still fits a build
 

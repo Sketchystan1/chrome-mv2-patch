@@ -39,6 +39,18 @@ Install [uBlock Origin](https://chromewebstore.google.com/detail/ublock-origin/c
 
 Or load it unpacked: turn on Developer mode at `chrome://extensions`, click Load unpacked, and pick the `uBlock0.chromium` folder from a [uBlock Origin release](https://github.com/gorhill/uBlock/releases).
 
+## Troubleshooting
+
+**Windows: "running scripts is disabled on this system"** — the execution policy blocks `.ps1` files. Start it as `powershell -ExecutionPolicy Bypass -File .\chrome-mv2.ps1`, or use the `irm ... | iex` one-liner above.
+
+**Windows: `MethodInvocationNotSupportedInConstrainedLanguage` / `ConversionSupportedOnlyToCoreTypes`** — a WDAC code-integrity policy has locked PowerShell into ConstrainedLanguage, where no execution policy or PowerShell version can help. Use the Python fallback, which does the same patch:
+
+```powershell
+python scripts\mv2_apply.py patch "C:\Program Files\Google\Chrome\Application\<version>\chrome.dll"
+```
+
+Run it from an elevated shell with Chrome fully closed; `check` and `restore` work the same way. See [`scripts/README.md`](scripts/README.md) for details.
+
 ## Donate
 
 USDT (TRC20): TDAr6Lu2sYtArJYAgUpyfuk6rKNvvyMA87  
