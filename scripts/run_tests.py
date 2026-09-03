@@ -44,6 +44,11 @@ def main():
     step("macOS Mach-O (chrome-mv2.sh)", py + [str(HERE / "test_macos.py")])
     step("Windows PE (chrome-mv2.ps1)", py + [str(HERE / "test_windows.py")])
 
+    # Universal Python patcher: byte-compile, then the cross-platform black-box
+    # suite (PE + ELF + Mach-O all run on any OS via the test env toggles).
+    step("compile chrome-mv2.py", py + ["-m", "py_compile", str(REPO / "chrome-mv2.py")])
+    step("Universal Python (chrome-mv2.py)", py + [str(HERE / "test_pyport.py")])
+
     # Syntax check for the shell patcher (one cross-platform script). Use the
     # resolved bash (T.BASH): a bare "bash" in subprocess can hit the WSL launcher
     # on Windows, which cannot read the git-bash /c/... path form T.posix emits.

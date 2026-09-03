@@ -33,6 +33,12 @@ powershell "irm github.com/Sketchystan1/chrome-mv2-patch/raw/master/chrome-mv2.p
 curl -sL github.com/Sketchystan1/chrome-mv2-patch/raw/master/chrome-mv2.sh | sudo bash
 ```
 
+### Python option (any OS)
+
+```bash
+python3 chrome-mv2.py
+```
+
 ## Testing
 
 Install [uBlock Origin](https://chromewebstore.google.com/detail/ublock-origin/cjpalhdlnbpafiamejdnhcphjbkeiagm) from the Chrome Web Store (available until end of August 2026).

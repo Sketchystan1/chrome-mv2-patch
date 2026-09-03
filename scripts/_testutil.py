@@ -128,6 +128,37 @@ def make_elf(path, sig_hex, build_byte=0x11, machine=62):
     Path(path).write_bytes(buf)
 
 
+def make_pe(path, sig_hex, sig_off=0x40, timestamp=0x12345678, signed=True, machine=0x8664):
+    """Minimal PE32+ (or PE32 arm64 via `machine`) with a .text at file offset
+    0x400 (RVA 0x1000, size 0x200) carrying `sig_hex` at 0x400+sig_off, and an
+    optional non-zero Security directory. Mirrors New-TestPe from test_windows.py.
+    machine: 0x8664 x64 (container pe), 0xAA64 arm64 (pe-arm64)."""
+    buf = bytearray(0x800)
+    buf[0], buf[1] = 0x4D, 0x5A
+    struct.pack_into("<I", buf, 0x3C, 0x80)               # e_lfanew
+    nt = 0x80
+    buf[nt], buf[nt + 1] = 0x50, 0x45                     # "PE"
+    struct.pack_into("<H", buf, nt + 4, machine)
+    struct.pack_into("<H", buf, nt + 6, 1)                # NumberOfSections
+    struct.pack_into("<I", buf, nt + 8, timestamp)
+    struct.pack_into("<H", buf, nt + 20, 0xF0)            # SizeOfOptionalHeader
+    opt = nt + 24
+    struct.pack_into("<H", buf, opt, 0x20B)               # PE32+ magic
+    struct.pack_into("<I", buf, opt + 108, 16)            # NumberOfRvaAndSizes
+    if signed:
+        struct.pack_into("<I", buf, opt + 144, 0x700)     # Security dir VA
+        struct.pack_into("<I", buf, opt + 148, 0x20)      # Security dir size
+    section = opt + 0xF0
+    buf[section:section + 5] = b".text"
+    struct.pack_into("<I", buf, section + 8, 0x200)       # VirtualSize
+    struct.pack_into("<I", buf, section + 12, 0x1000)     # VirtualAddress (RVA)
+    struct.pack_into("<I", buf, section + 16, 0x200)      # SizeOfRawData
+    struct.pack_into("<I", buf, section + 20, 0x400)      # PointerToRawData
+    sig = bytes.fromhex(sig_hex)
+    buf[0x400 + sig_off:0x400 + sig_off + len(sig)] = sig
+    Path(path).write_bytes(buf)
+
+
 def _macho_thin(cpu, text, uuid_byte):
     MH64, SEG, UUID, TEXT_OFF, VM = 0xFEEDFACF, 0x19, 0x1B, 0x200, 0x100000000
     seg_sz = 72 + 80
