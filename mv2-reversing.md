@@ -397,3 +397,73 @@ The 151 and 152 tables are derived, shipped, and verified (§4c, §4d). The exac
 - **ELF symbol names without `nm`** (Linux): `nm -SC` on the 1.4 GB `chrome.debug` demangles and sorts the whole file and runs many minutes (impractical on a small-RAM box). `scripts/symbols_from_elf.py` streams just `.symtab` + its string table and emits `nm -S`-style lines in ~3 min; the finder's keyword filter matches the still-mangled names. Feed its output to `derive_milestone.py --symbols`.
 - **Derivation/verification**: `scripts/derive_milestone.py` is stdlib-only (no capstone/pyelftools/pefile), parses PE (PE32 `pe32`, PE32+ x64 `pe`, and PE32+ arm64 `pe-arm64` — split by the COFF machine field), ELF (x86_64 `elf` and aarch64 `elf-arm64` — split by `e_machine`), and universal Mach-O, and anchors its `.text` scans on the longest fixed byte run so a pure-Python pass over ~250 MB is fast. It mirrors the match-count, masking, and report-only scan rules in the runtime scripts, extended to the near-`jg` and arm64 `bcond` encodings.
 - The canonical derivation table is `signatures.json`. Its original 151/152 entries were derived from a Windows-only C++ reference patcher (preserved in git history at commit `e12fe16`); new milestones are authored into the JSON, verified with `scripts/derive_milestone.py --verify`, and synchronized into the appropriate embedded script table.
+
+---
+
+## 9. Beyond MV2 — permission-feature data patches (`featurebyte`)
+
+MV2 re-enable is a `.text` branch flip. A separate need — letting an **MV3** extension use the `webRequestBlocking` permission without being policy-installed — is a different gate entirely, and the patch is a **`.rdata` data-byte overwrite**, not a branch. This is the `featurebyte` kind (Chrome 155, `pe`/x64; `chrome-mv2.py` + `chrome-mv2.ps1`).
+
+### The gate
+
+`webRequestBlocking` is defined in `extensions/common/api/_permission_features.json` as two rules:
+
+```json
+"webRequestBlocking": [
+  { "channel":"stable", "extension_types":["extension","legacy_packaged_app"], "max_manifest_version": 2 },
+  { "channel":"stable", "extension_types":["extension"], "location":"policy", "min_manifest_version": 3 }
+]
+```
+
+Rule 1 grants the permission to any MV2 extension (no location restriction); rule 2 grants it to MV3 **only** when policy-installed. An MV3, non-policy extension fails rule 1 on `max_manifest_version` and rule 2 on `location`. **The chosen edit flips rule 1's `max_manifest_version` from 2 to 3** — MV3 now satisfies rule 1, and *nothing else changes* (zero blast radius). Rejected alternative: neutering the shared `SimpleFeature::GetManifestAvailability` location check would open every `location: policy`/`component` feature (incl. privileged component/private APIs) to any extension.
+
+### Why it is data, not code
+
+`tools/json_schema_compiler/feature_compiler.py` compiles the JSON into **C++20 designated-initializer POD structs** (`SimpleFeatureData`) in `.rdata` — the constraints (`location`, `min_manifest_version`, `max_manifest_version`, …) are struct fields, not `set_*()` calls. So the reachable edit is a single byte in `.rdata`. **This representation is new in Chrome 155** — 154.0.8025 has zero such structs, 155.0.8038 has 22 — so `featurebyte` is 155+ only; 151/152/154 use the older representation and the site simply does not match there.
+
+### Struct layout (64-bit) and the exact 155 win64 target
+
+`SimpleFeatureData = { FeatureData feature; SimpleFeatureConfig config; }`. `FeatureData` = `string_view name`(16) + `StaticCString alias`(8) + `StaticCString source`(8) + `bool no_parent`(8, padded) = **0x28**. `SimpleFeatureConfig` then lays out (each `StaticSpan` = `{ptr,size}` 16 B; each `std::optional<int/enum>` = `{value,has_value}` 8 B), giving these struct-relative offsets used by the locator:
+
+| Field | Offset | Rule-1 value (155) |
+| :--- | :--- | :--- |
+| `extension_types` span size | `+0x60` | `2` |
+| `location` has_value | `+0xB4` | `0` (none) |
+| `min_manifest_version` has_value | `+0xBC` | `0` (none) |
+| **`max_manifest_version` value** | **`+0xC0`** | **`2` → patch to `3`** |
+| `max_manifest_version` has_value | `+0xC4` | `1` |
+
+On stock `155.0.8038.0` `chrome.dll`: rule-1 struct at RVA `0x10228E10`; the byte to flip is at RVA `0x10228ED0` (file offset `0x10227AD0`), stock `0x02` → `0x03`.
+
+### Locating it — name-anchored, not a byte window
+
+The config-tail byte pattern recurs ~22× in the binary, so a signature window cannot pin the feature. The locator is structural (mirrored in `chrome-mv2.py` `find_feature_site`, `chrome-mv2.ps1` `Find-FeatureByteSite`, and `derive_milestone.py` `locate_featurebyte`):
+
+1. Fast path: check the recorded `structRVA`.
+2. Else scan `.rdata` for the `"<feature>\0"` literal → for each, scan `.rdata` for 8-byte little-endian pointers to it (`imagebase + literalRVA`) — each is a struct's `.name` field, i.e. the struct base.
+3. Decode the struct against the site's `verify` map (offset→byte) and require the patch byte to be `stock` or `patched`; accept only when exactly `expectedMatches` structs qualify (else decline).
+
+On **PE** the `.name` pointers sit in `.rdata` in-file. On **ELF/Mach-O** the equivalent structs live in `.data.rel.ro` with the `.name` slots emitted as relocations (zero on disk; the vaddr is a `.rela.dyn` addend), so a non-PE locator must resolve pointers through the relocations — deferred, which is why `featurebyte` ships PE-x64 only for now.
+
+### Site schema and the `optional` flag
+
+```json
+{ "name":"…", "kind":"featurebyte", "optional":true,
+  "feature":"webRequestBlocking", "structRVA":"0x10228E10",
+  "patchOff":192, "stock":2, "patched":3,
+  "verify":{ "96":2, "180":0, "188":0, "196":1 }, "expectedMatches":1 }
+```
+
+It rides **inside the `155` milestone** but is marked `optional`: optional sites are located and patched best-effort yet excluded from the milestone's satisfied/total ranking, so a miss (e.g. a future point-release struct move) can never drop `155` to partial or block the MV2 gates. `derive_milestone.py --feature webRequestBlocking <chrome.dll>` re-derives the site; `--verify` reports it as `feat opt`.
+
+### Gate B — honoring off-store `ExtensionSettings` on unmanaged Chrome (a `jg` flip)
+
+A related capability: letting the `ExtensionSettings` / `ExtensionInstallForcelist` policy force-install a **self-hosted (off-Web-Store)** extension on an *unmanaged* Chrome. On unmanaged Chrome `chrome://policy` reports such an entry "ignored — not from a trusted source": `FilterSensitivePolicies()` (`components/policy/core/common/policy_loader_common.cc`) `[BLOCKED]`-prefixes any force-install entry whose `update_url` ≠ the Web Store URL, and `PolicyLoaderWin::LoadChromePolicy` calls it via `if (ShouldFilterSensitivePolicies()) FilterSensitivePolicies(&policy);`.
+
+Unlike Gate A this is **not new** — it is stable code in 152–155 — and the flip is a **plain `jg`**, so it reuses the existing `short` kind (no new machinery). Located structurally on 155 (no usable public symbols — the policy functions are LTO-inlined; `symbols_from_pdb.py` enumerates none, so this was pinned by string anchors, the same method as the arm64 tables):
+
+- `FilterSensitivePolicies` is the `.text` function that references all three of `[BLOCKED]`, `https://clients2.google.com/service/update2/crx`, and `EnterpriseCheck.InvalidPoliciesDetected` (its unique behavior). On 155 win64 that is `0x01FF4500`.
+- It has two callers: `0x1FF3EF0` (does `ParsePolicy(…)` → guard → `FilterSensitivePolicies(&policy)` = `LoadChromePolicy`) and `0x6F4FC10` (references `local_test_id` / `%i_%i_%i` / `namespace` = the `chrome://policy/test` local-test loader, not the platform path).
+- In `LoadChromePolicy`, `ShouldFilterSensitivePolicies()` is inlined to `cmp dword [rsi+0x18], 1 ; jg <skip>` — filter runs when `[rsi+0x18] <= 1` (untrusted). The gate at **RVA `0x01FF3FFF`** (`7F`), preceded by `mov rdi,[rsp+0x120] ; cmp dword[rsi+0x18],1`, followed by `lea rcx,[rsp+0x48] ; call FilterSensitivePolicies`.
+
+**Flip `7F`→`EB`** (`jg`→`jmp`, same target `0x1FF400B`): the filter call is always skipped, so platform-source `ExtensionSettings`/`ExtensionInstallForcelist` are honored regardless of management state — direction-only, CARDINAL-RULE compliant. Shipped as an `optional short` site in the `155` milestone (`sig 488BBC2420010000837E18017F0A488D4C2448`, `jgOff 12`), so a miss never blocks MV2. **Blast radius:** all sensitive platform policies are honored on unmanaged Chrome — but setting those registry keys already requires local admin, and the alternate `chrome://policy/test` caller is left untouched. Verified byte-flip on stock 155 (`0x01FF35FF` file offset, `7F`→`EB`) in both `chrome-mv2.py` and `chrome-mv2.ps1`.

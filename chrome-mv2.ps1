@@ -124,7 +124,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$AppVersion      = '1.7.0'
+$AppVersion      = '1.8.0'
 $SignaturesFile  = 'signatures.json'
 $script:CsLoaded = $false
 
@@ -147,18 +147,18 @@ $EmbeddedSignatures = @'
 {
   "milestones": [
     {"name":"151","container":"pe","sites":[{"name":"IsExtensionAffected","kind":"short","jgRVA":"0x083012E4","jgOff":4,"expectedMatches":1,"sig":"837A50027F34488B8A280200008B413080BA08020000007508"},{"name":"ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x08301323","jgOff":3,"expectedMatches":1,"sig":"83FA027F234183F80175114183F9050F95C14183F90A"},{"name":"ShouldBlockExtensionEnable","kind":"short","jgRVA":"0x03291F6B","jgOff":7,"expectedMatches":1,"sig":"8B41684183F8027F288B493083F801751683F9050F95C2"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01618C4C","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08301436","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x08E736BA","jgOff":6,"expectedMatches":1,"sig":"8B416883FA027F3B8B493083F8010F851A01000083F905742A"},{"name":"MustRemainDisabled (inlined)","kind":"short","jgRVA":"0x016448AA","jgOff":6,"expectedMatches":1,"sig":"8B416883FA027F788B493083F801756631FF83F905740583F9"}]},
-    {"name":"152","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x082D26F5","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F805"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03348754","jgOff":4,"expectedMatches":2,"sig":"837A50027F34488B8A280200008B413080BA080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0124109C","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x082D24D6","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x08DDC241","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x015A8D31","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"}]},
+    {"name":"152","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x082D26F5","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F805"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03348754","jgOff":4,"expectedMatches":2,"sig":"837A50027F34488B8A280200008B413080BA080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0124109C","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x082D24D6","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x08DDC241","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x015A8D31","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x0205653F","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
     {"name":"151-x86","container":"pe32","sites":[{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x00B20DB9","jgOff":4,"expectedMatches":1,"sig":"837928027F2C8B91640100008B421880B95401000000750C8B"},{"name":"MustRemainDisabled (inlined)","kind":"short","jgRVA":"0x0111E3EC","jgOff":3,"expectedMatches":1,"sig":"83FA027F728B491883F801756031DB83F905740583F90A752B"},{"name":"ShouldBlockExtensionEnable","kind":"short","jgRVA":"0x029E11BE","jgOff":3,"expectedMatches":1,"sig":"83FA027F2B8B491883F801751983F9050F95C283F90A0F95C0"},{"name":"IsExtensionAffected","kind":"short","jgRVA":"0x07022F9A","jgOff":4,"expectedMatches":1,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x07022FE7","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B450C83F80175158B451083F8050F95C183F8"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x0702310D","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x079D46E7","jgOff":3,"expectedMatches":1,"sig":"83FA027F338B491883F8010F85FD00000083F905742283F90A"}]},
     {"name":"152-x86","container":"pe32","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x06FB7547","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x0299ED6A","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x00A580A6","jgOff":4,"expectedMatches":1,"sig":"837928027F2C8B91640100008B421880B95401000000750C8B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x06FB736D","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x0791012F","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B411880BF5401000000750C8B"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x010851A8","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B411880BB54010000007508"}]},
     {"name":"151-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x01058388","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x0125352C","jgOff":4,"expectedMatches":1,"sig":"5F0900716C050054293140B91F050071810400543F150071F4031F2A60000054"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable","kind":"bcond","jgRVA":"0x02C0729C","jgOff":4,"expectedMatches":1,"sig":"5F090071CC010054293140B91F050071E10000543F15007124194A7AE0079F1A"},{"name":"MV2DeprecationImpactChecker::IsExtensionAffected","kind":"bcond","jgRVA":"0x02C07334","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054291441F92A204839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"bcond","jgRVA":"0x07836B6C","jgOff":4,"expectedMatches":1,"sig":"3F0800716C0100545F040071A10000547F14007164184A7AE0079F1AC0035FD6"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x07836C94","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"bcond","jgRVA":"0x082F94F8","jgOff":4,"expectedMatches":1,"sig":"5F090071EC010054293140B91F050071610700543F150071400100543F290071"}]},
     {"name":"152-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x01014CBC","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x013591BC","jgOff":4,"expectedMatches":2,"sig":"1F090071EC050054891641F98A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)","kind":"bcond","jgRVA":"0x02C1FD9C","jgOff":4,"expectedMatches":2,"sig":"1F0900710C020054291441F92A204839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x07702AEC","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x017E3410","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"}]},
     {"name":"152-chromium","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate)","kind":"short","jgRVA":"0x04723915","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"}]},
-    {"name":"154","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08E81945","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F805"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x036B5704","jgOff":4,"expectedMatches":1,"sig":"837A50027F34488B8A280200008B413080BA080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x028891C3","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08E81726","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x0994F021","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01663F71","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body, 2nd copy, diverged reg)","kind":"short","jgRVA":"0x036B5784","jgOff":4,"expectedMatches":1,"sig":"837950027F34488B91280200008B423080B908020000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C21E3F","jgOff":4,"expectedMatches":1,"sig":"837F50027F2C80BF08020000000F857E010000488B87280200"}]},
+    {"name":"154","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08E81945","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F805"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x036B5704","jgOff":4,"expectedMatches":1,"sig":"837A50027F34488B8A280200008B413080BA080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x028891C3","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08E81726","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x0994F021","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01663F71","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body, 2nd copy, diverged reg)","kind":"short","jgRVA":"0x036B5784","jgOff":4,"expectedMatches":1,"sig":"837950027F34488B91280200008B423080B908020000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C21E3F","jgOff":4,"expectedMatches":1,"sig":"837F50027F2C80BF08020000000F857E010000488B87280200"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x01F0354F","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
     {"name":"154-x86","container":"pe32","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08BBA217","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x031C47CA","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01B51743","jgOff":4,"expectedMatches":2,"sig":"837928027F288B91640100008B421880B95401000000750C8B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08BBA108","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x093997BF","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B411880BF5401000000750C8B"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01205788","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B411880BB54010000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x014E0239","jgOff":4,"expectedMatches":1,"sig":"837928027F268B45D480B8540100000075628B45D48B806401"}]},
-    {"name":"155","container":"pe","sites":[{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0155EB53","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x016CB234","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8E000000488B8F280200008B415080BF080200000075"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C91ED1","jgOff":4,"expectedMatches":1,"sig":"837F50027F2F80BF08020000000F8501010000488B87280200"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03269A44","jgOff":4,"expectedMatches":2,"sig":"837A50027F37488B8A280200008B415080BA0802000000750B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x084DEA66","jgOff":4,"expectedMatches":1,"sig":"837E50027F30488B8E280200008B415080BE0802000000750B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x084DEC85","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x090A7931","jgOff":4,"expectedMatches":1,"sig":"837F50027F51488B8F280200008B415080BF0802000000750F"}]},
+    {"name":"155","container":"pe","sites":[{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0155EB53","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x016CB234","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8E000000488B8F280200008B415080BF080200000075"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C91ED1","jgOff":4,"expectedMatches":1,"sig":"837F50027F2F80BF08020000000F8501010000488B87280200"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03269A44","jgOff":4,"expectedMatches":2,"sig":"837A50027F37488B8A280200008B415080BA0802000000750B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x084DEA66","jgOff":4,"expectedMatches":1,"sig":"837E50027F30488B8E280200008B415080BE0802000000750B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x084DEC85","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x090A7931","jgOff":4,"expectedMatches":1,"sig":"837F50027F51488B8F280200008B415080BF0802000000750F"},{"name":"webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)","kind":"featurebyte","optional":true,"feature":"webRequestBlocking","structRVA":"0x10228E10","patchOff":192,"stock":2,"patched":3,"verify":{"96":2,"180":0,"188":0,"196":1},"expectedMatches":1},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x01FF3FFF","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
     {"name":"155-x86","container":"pe32","sites":[{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x011D9EB8","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B412880BB54010000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x014BC549","jgOff":4,"expectedMatches":1,"sig":"837928027F268B45D480B8540100000075628B45D48B806401"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01AFBEF3","jgOff":4,"expectedMatches":2,"sig":"837928027F288B91640100008B422880B95401000000750C8B"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x032F125A","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B412880BA540100000075088B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08F66848","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B412880BE540100000075088B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08F66957","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x097626DF","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B412880BF5401000000750C8B"}]},
     {"name":"154-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x010B5620","jgOff":4,"expectedMatches":1,"sig":"5F0900718C0100542A1541F92B214839495140B98B0000374A8940B95F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x01354B40","jgOff":4,"expectedMatches":2,"sig":"1F0900712C060054891641F98A224839285140B98A000037298940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x0182F8EC","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)","kind":"bcond","jgRVA":"0x02C30AD8","jgOff":4,"expectedMatches":2,"sig":"1F0900710C020054291441F92A204839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x079DBD98","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839285140B98A000037298940B93F050071"}]},
-    {"name":"154-cft","container":"pe","sites":[{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01688BA1","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01775F73","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C4A96D","jgOff":4,"expectedMatches":1,"sig":"837F50027F2C80BF08020000000F857E010000488B87280200"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x033B71F4","jgOff":4,"expectedMatches":2,"sig":"837A50027F34488B8A280200008B413080BA08020000007508"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x085A9A16","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x085A9C35","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x09119E71","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"}]}
+    {"name":"154-cft","container":"pe","sites":[{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01688BA1","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01775F73","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C4A96D","jgOff":4,"expectedMatches":1,"sig":"837F50027F2C80BF08020000000F857E010000488B87280200"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x033B71F4","jgOff":4,"expectedMatches":2,"sig":"837A50027F34488B8A280200008B413080BA08020000007508"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x085A9A16","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x085A9C35","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x09119E71","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x01FE617F","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]}
   ]
 }
 '@
@@ -398,6 +398,24 @@ public static class Mv2Native
         return found.ToArray();
     }
 
+    // Byte-substring search over [start, end). Returns the first index, or -1.
+    // Used by the featurebyte (.rdata) locator to find a feature name literal and
+    // the 8-byte pointers to it without a slow pure-PowerShell scan.
+    public static long IndexOf(byte[] buf, byte[] needle, long start, long end)
+    {
+        if (needle.Length == 0) return -1;
+        long limit = Math.Min(end, buf.LongLength) - needle.Length;
+        byte first = needle[0];
+        for (long i = (start < 0 ? 0 : start); i <= limit; i++)
+        {
+            if (buf[i] != first) continue;
+            int k = 1;
+            for (; k < needle.Length; k++) { if (buf[i + k] != needle[k]) break; }
+            if (k == needle.Length) return i;
+        }
+        return -1;
+    }
+
     // PE checksum: 16-bit ones-complement-style sum over the whole file
     // (skipping the CheckSum field) plus the file size.
     public static uint PeChecksum(byte[] data, long checksumOffset)
@@ -553,11 +571,56 @@ function Import-Milestones {
             }
             if ($siteNames.ContainsKey($siteName)) { throw "milestone $msName has duplicate site '$siteName'" }
             $siteNames[$siteName] = $true
+            $optional = $false
+            if ($rs.PSObject.Properties['optional']) { $optional = [bool]$rs.optional }
             switch ($rs.kind) {
-                'short' { $kind = 0 }      # Mv2Native.KindShort
-                'near'  { $kind = 1 }      # Mv2Native.KindNear
-                'bcond' { $kind = 2 }      # Mv2Native.KindBcond (arm64 B.cond GT->AL)
+                'short'       { $kind = 0 }      # Mv2Native.KindShort
+                'near'        { $kind = 1 }      # Mv2Native.KindNear
+                'bcond'       { $kind = 2 }      # Mv2Native.KindBcond (arm64 B.cond GT->AL)
+                'featurebyte' { $kind = 3 }      # .rdata feature-data byte overwrite
                 default { throw "milestone $($rm.name) site '$($rs.name)': unknown kind '$($rs.kind)'" }
+            }
+            if ($kind -eq 3) {
+                if ($container -ne 'pe') {
+                    throw "milestone $msName site '$siteName': featurebyte is only supported for the 'pe' container"
+                }
+                $feature = [string]$rs.feature
+                if ([string]::IsNullOrWhiteSpace($feature) -or $feature -match '[\r\n]') {
+                    throw "milestone $msName site '$siteName': featurebyte needs a non-empty 'feature' name"
+                }
+                $patchOff = [int]$rs.patchOff
+                if ($patchOff -lt 0) { throw "milestone $msName site '$siteName': featurebyte patchOff must be >= 0" }
+                $stockB = [int]$rs.stock; $patchedB = [int]$rs.patched
+                if ($stockB -lt 0 -or $stockB -gt 255 -or $patchedB -lt 0 -or $patchedB -gt 255) {
+                    throw "milestone $msName site '$siteName': featurebyte stock/patched must be bytes 0..255"
+                }
+                if ($stockB -eq $patchedB) {
+                    throw "milestone $msName site '$siteName': featurebyte stock and patched are identical"
+                }
+                $verify = @{}
+                if ($rs.PSObject.Properties['verify'] -and $null -ne $rs.verify) {
+                    foreach ($vp in $rs.verify.PSObject.Properties) {
+                        $ko = [int]$vp.Name; $vv = [int]$vp.Value
+                        if ($ko -lt 0 -or $vv -lt 0 -or $vv -gt 255) {
+                            throw "milestone $msName site '$siteName': bad featurebyte verify entry"
+                        }
+                        $verify[$ko] = [byte]$vv
+                    }
+                }
+                $structRVA = [uint32]0
+                if ($rs.PSObject.Properties['structRVA'] -and -not [string]::IsNullOrWhiteSpace([string]$rs.structRVA)) {
+                    $structRVA = [uint32]([Convert]::ToUInt32([string]$rs.structRVA, 16))
+                }
+                $expected = [int]$rs.expectedMatches
+                if ($expected -lt 1) { throw "milestone $msName site '$siteName': expectedMatches must be >= 1" }
+                $sites += [pscustomobject]@{
+                    Name = $siteName; Kind = 3; Optional = $optional
+                    Feature = $feature; StructRVA = $structRVA; PatchOff = $patchOff
+                    Stock = [byte]$stockB; Patched = [byte]$patchedB; Verify = $verify
+                    ExpectedMatches = $expected
+                    JgRVA = [uint32]0; Sig = ([byte[]]@()); JgOff = 0
+                }
+                continue
             }
             # A bcond site must sit in an arm64 PE; short/near are x86/x64 only.
             if ($kind -eq 2 -and $container -ne 'pe-arm64') {
@@ -608,6 +671,7 @@ function Import-Milestones {
             $sites += [pscustomobject]@{
                 Name            = $siteName
                 Kind            = $kind
+                Optional        = $optional
                 JgRVA           = [uint32]([Convert]::ToUInt32($rs.jgRVA, 16))
                 Sig             = $sig
                 JgOff           = $jgOff
@@ -664,6 +728,7 @@ function Open-PeImage {
     if (($secOff + [int64]$numSections * 40) -gt $Buf.Length) { throw "not a valid Chrome file: section table out of bounds" }
 
     $textRVA = 0; $textRaw = 0; $textSize = 0
+    $rdataRVA = 0; $rdataRaw = 0; $rdataSize = 0
     for ($i = 0; $i -lt $numSections; $i++) {
         $sh = $secOff + $i * 40
         $name = [Text.Encoding]::ASCII.GetString($Buf, $sh, 8).TrimEnd([char]0)
@@ -671,13 +736,22 @@ function Open-PeImage {
             $textRVA  = [BitConverter]::ToUInt32($Buf, $sh + 12)
             $textSize = [BitConverter]::ToUInt32($Buf, $sh + 16)   # SizeOfRawData
             $textRaw  = [BitConverter]::ToUInt32($Buf, $sh + 20)
-            break
+        } elseif ($name -eq '.rdata') {
+            $rdataRVA  = [BitConverter]::ToUInt32($Buf, $sh + 12)
+            $rdataSize = [BitConverter]::ToUInt32($Buf, $sh + 16)  # SizeOfRawData
+            $rdataRaw  = [BitConverter]::ToUInt32($Buf, $sh + 20)
         }
     }
     if ($textSize -eq 0) { throw "not a valid Chrome file: missing code section" }
     if ([int64]$textRaw -lt 0 -or [int64]$textRaw + [int64]$textSize -gt $Buf.LongLength) {
         throw "not a valid Chrome file: .text raw data is out of bounds"
     }
+    # Clamp the featurebyte .rdata scan window to what's actually in the file.
+    if (([int64]$rdataRaw + [int64]$rdataSize) -gt $Buf.LongLength) {
+        $rdataSize = [math]::Max(0, $Buf.LongLength - [int64]$rdataRaw)
+    }
+    $imageBase = if ($is32) { [uint64][BitConverter]::ToUInt32($Buf, $optOff + 28) } `
+                 else       { [BitConverter]::ToUInt64($Buf, $optOff + 24) }
 
     # PE32+ carries both x64 (machine 0x8664) and Windows-on-ARM arm64 (0xAA64);
     # the machine field splits them so an arm64 dll matches only pe-arm64
@@ -690,6 +764,10 @@ function Open-PeImage {
         TextRVA    = $textRVA
         TextRaw    = $textRaw
         TextSize   = $textSize
+        RdataRVA   = $rdataRVA                              # featurebyte (.rdata) locator inputs
+        RdataRaw   = $rdataRaw
+        RdataSize  = $rdataSize
+        ImageBase  = $imageBase
         ChecksumAt = $optOff + 64                          # same offset in PE32 and PE32+
         SecDirAt   = $optOff + $fixedLen + 4 * 8           # data directory [4] = Security
         NtHeaderAt = [int64]$eLfanew
@@ -904,6 +982,67 @@ function Test-SigAt {
     return $true
 }
 
+# Returns the patch-byte file offset if the SimpleFeatureData at $Base satisfies
+# the featurebyte site's verify criteria and its patch byte is stock or patched;
+# else -1. $Base is the struct's .name field (i.e. the struct start).
+function Test-FeatureStruct {
+    param([byte[]]$Buf, [int64]$Base, $Site, [int64]$Lo, [int64]$Hi)
+    $poff = $Base + $Site.PatchOff
+    if ($poff -lt $Lo -or $poff -ge $Hi) { return [int64](-1) }
+    $b = $Buf[$poff]
+    if ($b -ne $Site.Stock -and $b -ne $Site.Patched) { return [int64](-1) }
+    foreach ($k in $Site.Verify.Keys) {
+        $vo = $Base + [int]$k
+        if ($vo -lt $Lo -or $vo -ge $Hi -or $Buf[$vo] -ne $Site.Verify[$k]) { return [int64](-1) }
+    }
+    return [int64]$poff
+}
+
+# featurebyte (.rdata data-byte) locator. Fast path: the recorded StructRVA. Else
+# name-anchored: find the feature name literal, find 8-byte pointers to it (a
+# struct's .name field), decode + verify each struct. Returns Found (patch-byte
+# file offsets) and Relocated. The .rdata scan is a handful of compiled IndexOf
+# calls, so it is cheap enough to run on every pass.
+function Find-FeatureByteSite {
+    param([byte[]]$Buf, $Img, $Site)
+    $lo = [int64]$Img.RdataRaw; $hi = $lo + [int64]$Img.RdataSize
+    if ([int64]$Img.RdataSize -le 0 -or [uint64]$Img.ImageBase -eq 0) {
+        return [pscustomobject]@{ Found = @(); Relocated = $false }
+    }
+    if ($Site.StructRVA -ne 0 -and $Site.StructRVA -ge $Img.RdataRVA -and
+        $Site.StructRVA -lt ($Img.RdataRVA + $Img.RdataSize)) {
+        $base = $lo + ([int64]$Site.StructRVA - [int64]$Img.RdataRVA)
+        $poff = Test-FeatureStruct -Buf $Buf -Base $base -Site $Site -Lo $lo -Hi $hi
+        if ($poff -ge 0) { return [pscustomobject]@{ Found = @([int64]$poff); Relocated = $false } }
+    }
+    Initialize-NativeHelpers
+    $needle = [byte[]](@([Text.Encoding]::ASCII.GetBytes($Site.Feature)) + [byte]0)
+    $found = New-Object System.Collections.Generic.List[int64]
+    $litPos = $lo
+    while ($true) {
+        $i = [Mv2Native]::IndexOf($Buf, $needle, $litPos, $hi)
+        if ($i -lt 0) { break }
+        $litPos = $i + 1
+        $litRva = [uint64]$Img.RdataRVA + [uint64]($i - $lo)
+        $va = [uint64]$Img.ImageBase + $litRva
+        $ptr = [BitConverter]::GetBytes([uint64]$va)
+        $p = $lo
+        while ($true) {
+            $j = [Mv2Native]::IndexOf($Buf, $ptr, $p, $hi)
+            if ($j -lt 0) { break }
+            $p = $j + 1
+            $poff = Test-FeatureStruct -Buf $Buf -Base $j -Site $Site -Lo $lo -Hi $hi
+            if ($poff -ge 0 -and -not $found.Contains([int64]$poff)) {
+                $found.Add([int64]$poff)
+                if ($found.Count -gt $Site.ExpectedMatches) {
+                    return [pscustomobject]@{ Found = $found.ToArray(); Relocated = $true }
+                }
+            }
+        }
+    }
+    return [pscustomobject]@{ Found = $found.ToArray(); Relocated = $true }
+}
+
 # Locates the jg gate for one site. First it checks the recorded RVA in pure
 # PowerShell; only a miss falls through to the compiled full-section scan.
 # Returns Found (file offsets of each jg opcode byte) and Relocated ($true when
@@ -911,6 +1050,8 @@ function Test-SigAt {
 # user and a hint that the table's jgRVA is worth refreshing).
 function Find-AffectedJgSites {
     param([byte[]]$Buf, $Img, $Site)
+
+    if ($Site.Kind -eq 3) { return Find-FeatureByteSite -Buf $Buf -Img $Img -Site $Site }
 
     $textRVA = [int64]$Img.TextRVA; $textRaw = [int64]$Img.TextRaw; $textSize = [int64]$Img.TextSize
 
@@ -971,9 +1112,21 @@ function Invoke-PatchMilestones {
     $best = $null
     $bestCount = 0
     foreach ($ms in $Milestones) {
-        $flips = @(); $satisfied = 0
+        $flips = @(); $satisfied = 0; $required = 0
         foreach ($s in $ms.Sites) {
             $r = Find-AffectedJgSites -Buf $Buf -Img $Img -Site $s
+            $isOptional = ($s.PSObject.Properties['Optional'] -and $s.Optional)
+            if ($isOptional) {
+                # Best-effort: apply if located, but never count toward ranking, so
+                # a miss can't drop the milestone to partial or block the MV2 gates.
+                if ($r.Found.Count -eq $s.ExpectedMatches) {
+                    foreach ($off in $r.Found) {
+                        $flips += [pscustomobject]@{ Site = $s; JgRaw = $off; Relocated = $r.Relocated }
+                    }
+                }
+                continue
+            }
+            $required++
             if ($r.Found.Count -eq $s.ExpectedMatches) {
                 $satisfied++
                 foreach ($jgRaw in $r.Found) {
@@ -982,26 +1135,26 @@ function Invoke-PatchMilestones {
             }
         }
         if ($satisfied -eq 0) { continue }
-        $total    = $ms.Sites.Count
+        $total    = $required
         $candFull = ($satisfied -eq $total)
-        $bestFull = ($null -ne $best -and $best.Satisfied -eq $best.Ms.Sites.Count)
+        $bestFull = ($null -ne $best -and $best.Satisfied -eq $best.Required)
 
         $take = $false; $tie = $false
         if ($null -eq $best) {
             $take = $true                                  # first candidate
         } elseif ($candFull -and -not $bestFull) {
             $take = $true                                  # full beats partial
-        } elseif ($candFull -and $bestFull -and $total -gt $best.Ms.Sites.Count) {
+        } elseif ($candFull -and $bestFull -and $total -gt $best.Required) {
             $take = $true                                  # more specific full
         } elseif (-not $candFull -and -not $bestFull -and $satisfied -gt $best.Satisfied) {
             $take = $true                                  # more of a partial matched
-        } elseif (($candFull -and $bestFull -and $total -eq $best.Ms.Sites.Count) -or
+        } elseif (($candFull -and $bestFull -and $total -eq $best.Required) -or
                   (-not $candFull -and -not $bestFull -and $satisfied -eq $best.Satisfied)) {
             $tie = $true                                   # genuine equal-rank collision
         }
 
         if ($take) {
-            $best = [pscustomobject]@{ Ms = $ms; Flips = $flips; Satisfied = $satisfied }
+            $best = [pscustomobject]@{ Ms = $ms; Flips = $flips; Satisfied = $satisfied; Required = $required }
             $bestCount = 1
         } elseif ($tie) {
             $bestCount++
@@ -1017,8 +1170,8 @@ function Invoke-PatchMilestones {
 
     $res.Milestone = $best.Ms.Name
     $res.Located   = $best.Satisfied
-    $res.Total     = $best.Ms.Sites.Count
-    $res.Full      = ($best.Satisfied -eq $best.Ms.Sites.Count)
+    $res.Total     = $best.Required
+    $res.Full      = ($best.Satisfied -eq $best.Required)
 
     if ($bestCount -gt 1) {
         $res.Reason = "$bestCount possible Chrome versions tied - can't tell which one this is"
@@ -1038,7 +1191,11 @@ function Invoke-PatchMilestones {
     # (flip it), anything else (left alone with a warning - never guess).
     $applied = 0; $already = 0
     foreach ($f in $best.Flips) {
-        $jgRVA = [uint32]($Img.TextRVA + ($f.JgRaw - $Img.TextRaw))
+        if ($f.Site.Kind -eq 3) {
+            $jgRVA = [uint32]($Img.RdataRVA + ($f.JgRaw - $Img.RdataRaw))
+        } else {
+            $jgRVA = [uint32]($Img.TextRVA + ($f.JgRaw - $Img.TextRaw))
+        }
         $ms    = $best.Ms.Name
         if ($f.Relocated) { $res.Relocated = $true }
 
@@ -1046,7 +1203,7 @@ function Invoke-PatchMilestones {
             $cur = $Buf[$f.JgRaw]
             if ($cur -eq 0xEB) {
                 $already++; $res.Already++
-                $res.Written += [pscustomobject]@{ RVA = $jgRVA; Bytes = [byte[]]@(0xEB) }
+                $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@(0xEB) }
                 continue
             }
             if ($cur -ne 0x7F) {
@@ -1056,12 +1213,12 @@ function Invoke-PatchMilestones {
             $res.Stock++
             if ($Apply) { $Buf[$f.JgRaw] = 0xEB }          # jg -> jmp short
             $applied++; $res.Flips++
-            $res.Written += [pscustomobject]@{ RVA = $jgRVA; Bytes = [byte[]]@(0xEB) }
+            $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@(0xEB) }
         } elseif ($f.Site.Kind -eq 1) {
             $o0 = $Buf[$f.JgRaw]; $o1 = $Buf[$f.JgRaw + 1]
             if ($o0 -eq 0x90 -and $o1 -eq 0xE9) {
                 $already++; $res.Already++
-                $res.Written += [pscustomobject]@{ RVA = $jgRVA; Bytes = [byte[]]@(0x90, 0xE9) }
+                $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@(0x90, 0xE9) }
                 continue
             }
             if (-not ($o0 -eq 0x0F -and $o1 -eq 0x8F)) {
@@ -1074,7 +1231,24 @@ function Invoke-PatchMilestones {
                 $Buf[$f.JgRaw + 1] = 0xE9      # jmp near (keeps the disp32)
             }
             $applied++; $res.Flips++
-            $res.Written += [pscustomobject]@{ RVA = $jgRVA; Bytes = [byte[]]@(0x90, 0xE9) }
+            $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@(0x90, 0xE9) }
+        } elseif ($f.Site.Kind -eq 3) {
+            # featurebyte: overwrite one .rdata data byte (stock -> patched). Same
+            # three cases: already patched, stock (write it), anything else (skip).
+            $cur = $Buf[$f.JgRaw]
+            if ($cur -eq $f.Site.Patched) {
+                $already++; $res.Already++
+                $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@($f.Site.Patched) }
+                continue
+            }
+            if ($cur -ne $f.Site.Stock) {
+                Write-Host ("    {0} Skipped one change - it didn't look the way we expected." -f $script:TagWarn)
+                continue
+            }
+            $res.Stock++
+            if ($Apply) { $Buf[$f.JgRaw] = $f.Site.Patched }
+            $applied++; $res.Flips++
+            $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@($f.Site.Patched) }
         } else {
             # bcond (arm64): the branch's cond nibble is the low nibble of byte0.
             # Flip GT (0xC) -> AL (0xE); imm19 and everything else are preserved,
@@ -1084,7 +1258,7 @@ function Invoke-PatchMilestones {
             $patched = [byte](($cur -band 0xF0) -bor 0x0E)
             if ($cond -eq 0x0E) {
                 $already++; $res.Already++
-                $res.Written += [pscustomobject]@{ RVA = $jgRVA; Bytes = [byte[]]@($patched) }
+                $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@($patched) }
                 continue
             }
             if ($cond -ne 0x0C) {
@@ -1094,7 +1268,7 @@ function Invoke-PatchMilestones {
             $res.Stock++
             if ($Apply) { $Buf[$f.JgRaw] = $patched }      # b.gt -> b.al (cond GT->AL)
             $applied++; $res.Flips++
-            $res.Written += [pscustomobject]@{ RVA = $jgRVA; Bytes = [byte[]]@($patched) }
+            $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@($patched) }
         }
     }
     $res.Flips += $already   # count already-applied sites toward the flip total
@@ -1111,7 +1285,7 @@ function Invoke-PatchMilestones {
 function Test-PatchOutput {
     param([byte[]]$Buf, $Img, $Patch)
     foreach ($w in $Patch.Written) {
-        $off = [int64]$Img.TextRaw + ([int64]$w.RVA - [int64]$Img.TextRVA)
+        $off = [int64]$w.Off      # absolute file offset (correct for .text and .rdata)
         if ($off -lt 0 -or $off + $w.Bytes.Length -gt $Buf.LongLength) { return $false }
         for ($i = 0; $i -lt $w.Bytes.Length; $i++) {
             if ($Buf[$off + $i] -ne $w.Bytes[$i]) { return $false }

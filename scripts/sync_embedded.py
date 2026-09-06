@@ -30,17 +30,30 @@ import sys
 
 PE_CONTAINERS = {"pe", "pe32", "pe-arm64"}
 SITE_FIELDS = ("name", "kind", "jgRVA", "jgOff", "expectedMatches", "sig")
+# Canonical field order for the embedded tables. Only keys actually present on a
+# site are emitted, so a plain branch site serializes exactly as before (no drift)
+# while a featurebyte / stockOpcode site carries its extra fields.
+SITE_FIELD_ORDER = ("name", "kind", "optional", "jgRVA", "jgOff", "stockOpcode",
+                    "feature", "structRVA", "patchOff", "stock", "patched",
+                    "verify", "expectedMatches", "sig")
+
+
+def _site_obj(s):
+    return {k: s[k] for k in SITE_FIELD_ORDER if k in s}
 
 
 def ps1_line(entry):
     body = {"name": entry["name"], "container": entry["container"],
-            "sites": [{k: s[k] for k in SITE_FIELDS} for s in entry["sites"]]}
+            "sites": [_site_obj(s) for s in entry["sites"]]}
     return "    " + json.dumps(body, separators=(",", ":"))
 
 
 def sh_block(entry):
     out = ["M|%s|%s" % (entry["name"], entry["container"])]
     for site in entry["sites"]:
+        if site.get("kind") == "featurebyte":
+            # featurebyte is 'pe' only; it never reaches the (ELF/Mach-O) sh table.
+            raise SystemExit("sync_embedded: featurebyte site in non-PE milestone %r" % entry["name"])
         # The whole table is one single-quoted shell string, so an apostrophe in a
         # site name would terminate it. Names are documentation only; strip it.
         out.append("S|%s|%s|%s|%d|%d|%s"

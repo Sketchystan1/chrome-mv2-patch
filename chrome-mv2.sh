@@ -45,7 +45,7 @@
 
 set -euo pipefail
 
-readonly APP_VERSION="1.7.0"
+readonly APP_VERSION="1.8.0"
 
 # ============================================================================
 # Embedded signature tables (pre-tokenized so the default path needs no python3

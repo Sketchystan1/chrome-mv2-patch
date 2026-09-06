@@ -159,6 +159,61 @@ def make_pe(path, sig_hex, sig_off=0x40, timestamp=0x12345678, signed=True, mach
     Path(path).write_bytes(buf)
 
 
+def make_pe_feature(path, gate_sig_hex, feature="webRequestBlocking",
+                    gate_off=0x40, max_val=2, timestamp=0x12345678, gate2_hex=None, gate2_off=0x80):
+    """PE32+ x64 with TWO sections: a .text carrying `gate_sig_hex` (a short-jg MV2
+    gate, for a required site) and a .rdata carrying a synthetic SimpleFeatureData
+    for `feature` - a name literal, an 8-byte .name pointer to it, and the rule-1
+    config fields the featurebyte locator checks. The max_manifest_version value
+    byte sits at struct+0xC0 (file offset 0x700). ImageBase 0x180000000. If
+    `gate2_hex` is given it is written at .text+gate2_off (a second branch gate,
+    e.g. for an optional short site test).
+
+    Layout: headers 0..0x400; .text RVA 0x1000 raw 0x400 size 0x200; .rdata RVA
+    0x2000 raw 0x600 size 0x200. Feature name literal @ RVA 0x2010 (raw 0x610);
+    struct base @ RVA 0x2040 (raw 0x640)."""
+    IMAGE_BASE = 0x180000000
+    buf = bytearray(0x800)
+    buf[0], buf[1] = 0x4D, 0x5A
+    struct.pack_into("<I", buf, 0x3C, 0x80)               # e_lfanew
+    nt = 0x80
+    buf[nt], buf[nt + 1] = 0x50, 0x45                     # "PE"
+    struct.pack_into("<H", buf, nt + 4, 0x8664)           # machine x64
+    struct.pack_into("<H", buf, nt + 6, 2)                # NumberOfSections
+    struct.pack_into("<I", buf, nt + 8, timestamp)
+    struct.pack_into("<H", buf, nt + 20, 0xF0)            # SizeOfOptionalHeader
+    opt = nt + 24
+    struct.pack_into("<H", buf, opt, 0x20B)               # PE32+ magic
+    struct.pack_into("<Q", buf, opt + 24, IMAGE_BASE)     # ImageBase
+    struct.pack_into("<I", buf, opt + 108, 16)            # NumberOfRvaAndSizes
+    struct.pack_into("<I", buf, opt + 144, 0x780)         # Security dir VA (stock discriminator)
+    struct.pack_into("<I", buf, opt + 148, 0x20)          # Security dir size
+    sec = opt + 0xF0
+    buf[sec:sec + 5] = b".text"
+    struct.pack_into("<IIII", buf, sec + 8, 0x200, 0x1000, 0x200, 0x400)   # VSize, VA, RawSize, RawPtr
+    sec2 = sec + 40
+    buf[sec2:sec2 + 6] = b".rdata"
+    struct.pack_into("<IIII", buf, sec2 + 8, 0x200, 0x2000, 0x200, 0x600)
+    # .text gate
+    gate = bytes.fromhex(gate_sig_hex)
+    buf[0x400 + gate_off:0x400 + gate_off + len(gate)] = gate
+    if gate2_hex:
+        g2 = bytes.fromhex(gate2_hex)
+        buf[0x400 + gate2_off:0x400 + gate2_off + len(g2)] = g2
+    # .rdata feature struct
+    name = feature.encode("latin1") + b"\x00"
+    buf[0x610:0x610 + len(name)] = name                   # name literal @ RVA 0x2010
+    base = 0x640                                          # struct base @ RVA 0x2040
+    struct.pack_into("<Q", buf, base + 0x00, IMAGE_BASE + 0x2010)  # .name ptr
+    struct.pack_into("<Q", buf, base + 0x08, len(feature))         # .name len
+    struct.pack_into("<Q", buf, base + 0x60, 2)           # extension_types.size = 2
+    buf[base + 0xB4] = 0                                  # location.has_value = 0
+    buf[base + 0xBC] = 0                                  # min_manifest_version.has_value = 0
+    struct.pack_into("<i", buf, base + 0xC0, max_val)     # max_manifest_version value  (file 0x700)
+    buf[base + 0xC4] = 1                                  # max_manifest_version.has_value = 1
+    Path(path).write_bytes(buf)
+
+
 def _macho_thin(cpu, text, uuid_byte):
     MH64, SEG, UUID, TEXT_OFF, VM = 0xFEEDFACF, 0x19, 0x1B, 0x200, 0x100000000
     seg_sz = 72 + 80

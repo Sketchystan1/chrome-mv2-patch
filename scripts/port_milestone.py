@@ -289,6 +289,8 @@ def carry_names(sites, img, table_path, prev_name, arm, moves):
         by_rva.setdefault(int(site["jgRVA"], 16), site)
     named = 0
     for old in prev[0]["sites"]:
+        if old.get("kind") == "featurebyte":
+            continue        # not a jg gate; carried through by the merge, not by name
         # Try the full signature first, then progressively shorter prefixes. A gate
         # usually survives a version with its head intact (`cmp mv,2 ; jg ; load the
         # manifest`) while trailing bytes shift by a byte or two, so the full window
@@ -415,6 +417,15 @@ def main():
         by_name = {m["name"]: i for i, m in enumerate(table["milestones"])}
         for entry in derived:
             if entry["name"] in by_name:
+                old = table["milestones"][by_name[entry["name"]]]
+                # The jg-gate deriver does not produce featurebyte / optional sites
+                # (e.g. webRequestBlocking), so carry them over from the old entry.
+                carried = [s for s in old.get("sites", [])
+                           if s.get("kind") == "featurebyte" or s.get("optional")]
+                if carried:
+                    have = {s.get("name") for s in entry["sites"]}
+                    entry["sites"].extend(s for s in carried if s.get("name") not in have)
+                    print("  carried %d featurebyte/optional site(s) into %s" % (len(carried), entry["name"]))
                 table["milestones"][by_name[entry["name"]]] = entry
                 print("replaced %s in %s" % (entry["name"], args.signatures))
             else:

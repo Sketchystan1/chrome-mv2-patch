@@ -79,6 +79,10 @@ class Report:
 
 
 def site_key(site):
+    if site.get("kind") == "featurebyte":
+        return ("featurebyte", site.get("feature", ""), str(site.get("structRVA", "")),
+                site.get("patchOff"), site.get("stock"), site.get("patched"),
+                site.get("expectedMatches"))
     return (site["kind"], site["jgOff"], site["sig"].upper(), site["expectedMatches"])
 
 
@@ -155,6 +159,26 @@ def audit_table(table, rep):
             rep.fail("%s: unknown container %r" % (m["name"], container))
             continue
         for s in m["sites"]:
+            if s.get("kind") == "featurebyte":
+                tag = "%s feature:%s" % (m["name"], s.get("feature", "?"))
+                if not s.get("feature"):
+                    rep.fail("%s: featurebyte site needs a 'feature' name" % tag)
+                    bad += 1
+                for f in ("patchOff", "stock", "patched"):
+                    v = s.get(f)
+                    if not isinstance(v, int) or isinstance(v, bool):
+                        rep.fail("%s: featurebyte %s must be an integer" % (tag, f))
+                        bad += 1
+                if s.get("stock") == s.get("patched"):
+                    rep.fail("%s: featurebyte stock and patched bytes are identical" % tag)
+                    bad += 1
+                if not isinstance(s.get("verify"), dict) or not s.get("verify"):
+                    rep.warn("%s: featurebyte has no verify criteria; the struct match may be ambiguous" % tag)
+                    weak += 1
+                if s.get("expectedMatches", 0) < 1:
+                    rep.fail("%s: expectedMatches must be >= 1" % tag)
+                    bad += 1
+                continue
             tag = "%s %s" % (m["name"], s["jgRVA"])
             try:
                 raw = bytes.fromhex(s["sig"])
@@ -201,12 +225,15 @@ def would_select(table, img):
     for m in table["milestones"]:
         if m["container"] != img.container:
             continue
-        satisfied = sum(1 for s in m["sites"]
+        # Rank on required branch sites only; optional / featurebyte sites are
+        # best-effort and never decide milestone selection.
+        req = [s for s in m["sites"] if s.get("kind") != "featurebyte" and not s.get("optional")]
+        satisfied = sum(1 for s in req
                         if len(masked_match_count(img.text, bytes.fromhex(s["sig"]),
                                                   s["jgOff"], s["kind"],
                                                   cap=s["expectedMatches"] + 1)) == s["expectedMatches"])
         if satisfied:
-            ranked.append((satisfied == len(m["sites"]), len(m["sites"]), satisfied, m["name"]))
+            ranked.append((satisfied == len(req), len(req), satisfied, m["name"]))
     if not ranked:
         return None, [], []
     fulls = [r for r in ranked if r[0]]
@@ -229,6 +256,8 @@ def flip_addresses(table, img):
         if m["container"] != img.container:
             continue
         for s in m["sites"]:
+            if s.get("kind") == "featurebyte":
+                continue          # a .rdata data byte, not a .text manifest gate
             found = masked_match_count(img.text, bytes.fromhex(s["sig"]), s["jgOff"], s["kind"],
                                        cap=s["expectedMatches"] + 1)
             if len(found) != s["expectedMatches"]:

@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.8.0] - 2026-09-05
+
+- Enable webRequestBlocking MV3.
+- Enable ExtensionSettings policy.
+
 ## [1.7.0] - 2026-09-02
 
 - Chrome 155 support.

@@ -61,6 +61,11 @@ class Image:
         self.data = data
         self._text = None
         self.uuid = None                # Mach-O LC_UUID (hex), else None
+        # PE-only, for the featurebyte (.rdata) locator (None elsewhere):
+        self.imagebase = None
+        self.rdata_virt = None
+        self.rdata_raw = None
+        self.rdata_size = None
 
     @property
     def text(self):
@@ -99,13 +104,27 @@ def parse_pe(data):
     else:
         container = "pe"            # PE32+, x64 cmp/jg
     sec_off = opt + size_opt
+    imagebase = (struct.unpack_from("<I", data, opt + 28)[0] if magic == 0x10B
+                 else struct.unpack_from("<Q", data, opt + 24)[0])
+    text = None
+    rdata = None
     for i in range(num_sections):
         b = sec_off + i * 40
         name = data[b:b + 8].split(b"\x00")[0].decode("latin1")
         v_size, v_addr, raw_size, raw_ptr = struct.unpack_from("<IIII", data, b + 8)
         if name == ".text":
-            return Image(container, v_addr, raw_ptr, raw_size, data)
-    raise ValueError("no .text section")
+            text = (v_addr, raw_ptr, raw_size)
+        elif name == ".rdata":
+            rdata = (v_addr, raw_ptr, raw_size)
+    if text is None:
+        raise ValueError("no .text section")
+    img = Image(container, text[0], text[1], text[2], data)
+    img.imagebase = imagebase
+    if rdata is not None:
+        img.rdata_virt, img.rdata_raw, img.rdata_size = rdata
+        if img.rdata_raw + img.rdata_size > len(data):
+            img.rdata_size = max(0, len(data) - img.rdata_raw)
+    return img
 
 
 def parse_elf(data):
@@ -676,6 +695,111 @@ def cmd_derive(img, milestone_name, as_json, ranges):
     return 0
 
 
+def locate_featurebyte(img, site):
+    """Mirror the runtime featurebyte locator: name-anchored .rdata struct find.
+    `site` is a signatures.json site dict. Returns patch-byte file offsets."""
+    if not img.rdata_size or not img.imagebase:
+        return []
+    data = img.data
+    lo, hi = img.rdata_raw, img.rdata_raw + img.rdata_size
+    patch_off = int(site["patchOff"])
+    stock, patched = int(site["stock"]), int(site["patched"])
+    verify = {int(str(k), 0): int(v) for k, v in (site.get("verify") or {}).items()}
+    expected = int(site["expectedMatches"])
+
+    def decode(base):
+        poff = base + patch_off
+        if poff < lo or poff >= hi or data[poff] not in (stock, patched):
+            return None
+        for off, exp in verify.items():
+            vo = base + off
+            if vo < lo or vo >= hi or data[vo] != exp:
+                return None
+        return poff
+
+    sr = site.get("structRVA")
+    if sr:
+        srva = int(str(sr), 16)
+        if img.rdata_virt <= srva < img.rdata_virt + img.rdata_size:
+            p = decode(img.rdata_raw + (srva - img.rdata_virt))
+            if p is not None:
+                return [p]
+    needle = site["feature"].encode("latin1") + b"\x00"
+    found, li = [], lo
+    while True:
+        i = data.find(needle, li, hi)
+        if i < 0:
+            break
+        li = i + 1
+        lit_rva = img.rdata_virt + (i - img.rdata_raw)
+        ptr = (img.imagebase + lit_rva).to_bytes(8, "little")
+        p = lo
+        while True:
+            j = data.find(ptr, p, hi)
+            if j < 0:
+                break
+            p = j + 1
+            po = decode(j)
+            if po is not None and po not in found:
+                found.append(po)
+                if len(found) > expected:
+                    return found
+    return found
+
+
+# 64-bit SimpleFeatureData field offsets (FeatureData 0x28 + SimpleFeatureConfig).
+# See mv2-reversing.md; used only by the --feature emitter.
+_FB = {"ext_types_size": 0x60, "location_has": 0xB4, "min_has": 0xBC,
+       "max_val": 0xC0, "max_has": 0xC4, "channel_val": 0xD8, "channel_has": 0xDC}
+
+
+def emit_featurebyte(img, feature):
+    """Find `feature`'s rule-1 SimpleFeatureData (extension_types size 2, a set
+    max_manifest_version, no location/min) and emit its featurebyte site dict
+    (max_manifest_version value -> value+1). PE x64 ('pe') only."""
+    if img.container != "pe":
+        raise ValueError("--feature derivation is supported only for the 'pe' (x64) container")
+    if not img.rdata_size or not img.imagebase:
+        raise ValueError("no .rdata section found")
+    data = img.data
+    lo, hi = img.rdata_raw, img.rdata_raw + img.rdata_size
+    needle = feature.encode("latin1") + b"\x00"
+    hits, li = [], lo
+    while True:
+        i = data.find(needle, li, hi)
+        if i < 0:
+            break
+        li = i + 1
+        lit_rva = img.rdata_virt + (i - img.rdata_raw)
+        ptr = (img.imagebase + lit_rva).to_bytes(8, "little")
+        p = lo
+        while True:
+            j = data.find(ptr, p, hi)
+            if j < 0:
+                break
+            p = j + 1
+            et_size = struct.unpack_from("<Q", data, j + _FB["ext_types_size"])[0]
+            loc_has = data[j + _FB["location_has"]]
+            min_has = data[j + _FB["min_has"]]
+            max_val = struct.unpack_from("<i", data, j + _FB["max_val"])[0]
+            max_has = data[j + _FB["max_has"]]
+            if et_size == 2 and max_has == 1 and loc_has == 0 and min_has == 0:
+                struct_rva = img.rdata_virt + (j - img.rdata_raw)
+                hits.append((struct_rva, max_val))
+    if len(hits) != 1:
+        raise ValueError(f"expected exactly 1 rule-1 struct for {feature!r}, found {len(hits)}")
+    struct_rva, max_val = hits[0]
+    return {
+        "name": f"{feature} permission feature rule 1 (max_manifest_version {max_val}->{max_val + 1}; grants MV3)",
+        "kind": "featurebyte", "optional": True, "feature": feature,
+        "structRVA": "0x%08X" % struct_rva, "patchOff": _FB["max_val"],
+        "stock": max_val, "patched": max_val + 1,
+        "verify": {str(_FB["ext_types_size"]): 2, str(_FB["location_has"]): 0,
+                   str(_FB["min_has"]): 0, str(_FB["max_has"]): 1},
+        "expectedMatches": 1,
+    }
+
+
 def cmd_verify(img, json_path):
     """Report each milestone's fit against this one binary. A binary is a single
     Chrome version, so only its matching milestone verifies fully - success is
@@ -691,19 +815,30 @@ def cmd_verify(img, json_path):
     any_full = False
     for ms in candidates:
         ok_count = 0
+        req_total = 0
         rows = []
         for s in ms["sites"]:
             expected = s["expectedMatches"]
-            hits = masked_match_count(text, bytes.fromhex(s["sig"]), s["jgOff"], s["kind"],
-                                      cap=expected + 2)
+            optional = bool(s.get("optional"))
+            if s.get("kind") == "featurebyte":
+                hits = locate_featurebyte(img, s)
+                label = "feat"
+            else:
+                hits = masked_match_count(text, bytes.fromhex(s["sig"]), s["jgOff"], s["kind"],
+                                          cap=expected + 2)
+                label = s["kind"]
             ok = len(hits) == expected
+            mark = "OK " if ok else f"x got {len(hits)}"
+            tag = f"{label:5}{' opt' if optional else ''}"
+            rows.append(f"    [{mark}] {tag} exp={expected} {s['name'][:52]}")
+            if optional:
+                continue          # best-effort; never affects the milestone verdict
+            req_total += 1
             ok_count += ok
-            rows.append(f"    [{'OK ' if ok else f'x got {len(hits)}'}] "
-                        f"{s['kind']:5} exp={expected} {s['name'][:52]}")
-        full = ok_count == len(ms["sites"])
+        full = ok_count == req_total
         any_full |= full
         verdict = "VERIFIED" if full else "partial"
-        print(f"milestone {ms['name']}: {verdict} ({ok_count}/{len(ms['sites'])})")
+        print(f"milestone {ms['name']}: {verdict} ({ok_count}/{req_total})")
         print("\n".join(rows))
     print("\nALL SITES VERIFIED:", any_full,
           "(binary is fully covered by a milestone)" if any_full else "(no milestone fully matches)")
@@ -720,6 +855,9 @@ def main():
                          "name and filter candidates to real gate functions")
     ap.add_argument("--verify", metavar="signatures.json", nargs="?", const=str(DEFAULT_JSON),
                     help="verify an existing table against the binary (default: signatures.json)")
+    ap.add_argument("--feature", metavar="NAME",
+                    help="emit a featurebyte site for permission feature NAME (e.g. webRequestBlocking): "
+                         "flips its rule-1 max_manifest_version to grant the permission to MV3 (pe x64 only)")
     args = ap.parse_args()
 
     try:
@@ -729,6 +867,18 @@ def main():
         return 2
 
     multi = len(imgs) > 1  # a universal Mach-O has one Image per CPU slice
+
+    if args.feature:
+        for img in imgs:
+            if multi:
+                print(f"\n=== slice: {img.container} ===")
+            try:
+                site = emit_featurebyte(img, args.feature)
+            except ValueError as e:
+                print(f"error: {e}", file=sys.stderr)
+                return 2
+            print(json.dumps(site, indent=2))
+        return 0
 
     if args.verify is not None:
         rc = 0

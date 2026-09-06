@@ -235,6 +235,29 @@ package updates.
 A Chromium table still needs the runtime Load-Unpacked MV2 A/B (a disk verify does
 not prove the single predicate covers every path — see mv2-reversing.md §5).
 
+## Permission-feature data patches (`featurebyte`, Chrome 155+ pe/x64)
+
+Beyond the MV2 branch flip, the tables can carry a **`featurebyte`** site: a
+name-anchored `.rdata` data-byte overwrite that changes one field of a compiled
+permission-feature `SimpleFeatureData` struct. The shipped use is granting
+`webRequestBlocking` to MV3 extensions by flipping that feature's rule-1
+`max_manifest_version` from 2 to 3 (see mv2-reversing.md §9).
+
+Derive/emit the site for a feature (PE x64 only):
+
+```
+python scripts/derive_milestone.py <chrome.dll> --feature webRequestBlocking
+```
+
+It finds the feature's rule-1 struct (extension_types size 2, a set
+`max_manifest_version`, no location/min), and prints the site dict
+(`structRVA`, `patchOff`, `stock`/`patched`, `verify`). Add it to the target
+milestone as an **`optional`** site so a miss never blocks MV2, then
+`--verify` (reports it as `feat opt`) and `audit_signatures.py --binary`.
+`sync_embedded.py` carries the extra fields into the ps1 embedded table (it is
+`pe`, so it never reaches the ELF/Mach-O `sh` table). The representation is new
+in Chrome 155; 154 and earlier do not carry these structs.
+
 The masking and match-count rules mirror both runtime scripts:
 `Find-AffectedJgSites` / `Invoke-PatchMilestones` in `chrome-mv2.ps1` and
 `find_site_matches` / `probe_slice` in `chrome-mv2.sh`. A table that

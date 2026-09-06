@@ -245,11 +245,50 @@ def test_race(tmp):
     A.eq(rt.read_bytes(), b"old", "race rejection must preserve target bytes")
 
 
+def test_featurebyte(tmp):
+    # A milestone with a required MV2 gate (short jg) plus an OPTIONAL featurebyte
+    # site (webRequestBlocking rule-1 max_manifest_version 2 -> 3 in .rdata).
+    gate = "837E50027F2F554889E5"
+    fb = {"name": "wrb", "kind": "featurebyte", "optional": True, "feature": "webRequestBlocking",
+          "structRVA": "0x00002040", "patchOff": 192, "stock": 2, "patched": 3,
+          "verify": {"96": 2, "180": 0, "188": 0, "196": 1}, "expectedMatches": 1}
+    # An optional SHORT branch site too (Gate B's shape: a jg guard flipped to skip).
+    gate2 = "83FE027F0590"
+    gb = {"name": "gateB", "kind": "short", "optional": True, "jgRVA": "0x00001083",
+          "jgOff": 3, "expectedMatches": 1, "sig": gate2}
+    sigs = tmp / "fb.json"
+    sigs.write_text(sig_doc("test-fb", "pe", [site("gate", "short", "0x00001044", gate), fb, gb]))
+
+    t = tmp / "feature fixture.dll"
+    T.make_pe_feature(t, gate, gate2_hex=gate2, gate2_off=0x80)
+    A.true(pyrun("patch", t, sigs).returncode == 0, "featurebyte patch should succeed")
+    A.eq(T.byte_at(t, 0x444), 0xEB, "the required MV2 gate should flip")
+    A.eq(T.byte_at(t, 0x700), 0x03, "featurebyte should flip max_manifest_version 2 -> 3")
+    A.eq(T.byte_at(t, 0x483), 0xEB, "optional short site should flip its jg -> jmp")
+
+    h1 = T.sha256(t)
+    pyrun("patch", t, sigs)
+    A.eq(T.sha256(t), h1, "idempotent featurebyte patch should preserve bytes")
+
+    pyrun("restore", t, sigs)
+    A.eq(T.byte_at(t, 0x444), 0x7F, "restore should recover the gate byte")
+    A.eq(T.byte_at(t, 0x700), 0x02, "restore should recover the stock max_manifest_version")
+    A.eq(T.byte_at(t, 0x483), 0x7F, "restore should recover the optional short jg")
+
+    # Feature struct ABSENT (single-section PE, no .rdata): the optional site is
+    # skipped and the required MV2 gate still patches - featurebyte never blocks MV2.
+    plain = tmp / "no feature.dll"
+    T.make_pe(plain, gate)
+    A.true(pyrun("patch", plain, sigs).returncode == 0, "patch should succeed with the optional site absent")
+    A.eq(T.byte_at(plain, 0x444), 0xEB, "MV2 gate should still flip when featurebyte is absent")
+
+
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="chrome-mv2-py-tests-"))
     test_pe(tmp)
     test_elf(tmp)
     test_macho(tmp)
+    test_featurebyte(tmp)
     test_race(tmp)
     print(f"Python tests passed: {A.passed} assertions")
 
