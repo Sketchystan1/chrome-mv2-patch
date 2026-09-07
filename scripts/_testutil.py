@@ -88,6 +88,26 @@ def byte_at(path, off):
         return f.read(1)[0]
 
 
+def read_word(path, off):
+    """Little-endian 32-bit word at `off` (arm64 CBZ/B sites)."""
+    with open(path, "rb") as f:
+        f.seek(off)
+        return struct.unpack("<I", f.read(4))[0]
+
+
+def read_dword(path, off):
+    """Little-endian 32-bit value at `off` (e.g. a near-jump disp32)."""
+    with open(path, "rb") as f:
+        f.seek(off)
+        return struct.unpack("<i", f.read(4))[0]
+
+
+def write_word(path, off, value):
+    with open(path, "r+b") as f:
+        f.seek(off)
+        f.write(struct.pack("<I", value))
+
+
 def poke(path, off, value):
     with open(path, "r+b") as f:
         f.seek(off)

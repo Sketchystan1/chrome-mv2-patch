@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.10.0] - 2026-09-07
+
+- Drop 151 support, macos-x64.
+- New ARM cbz based patch.
+
 ## [1.8.0] - 2026-09-05
 
 - Enable webRequestBlocking MV3.

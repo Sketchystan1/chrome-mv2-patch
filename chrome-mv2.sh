@@ -45,7 +45,7 @@
 
 set -euo pipefail
 
-readonly APP_VERSION="1.8.0"
+readonly APP_VERSION="1.10.0"
 
 # ============================================================================
 # Embedded signature tables (pre-tokenized so the default path needs no python3
@@ -63,13 +63,6 @@ readonly APP_VERSION="1.8.0"
 # Keep in sync with signatures.json (the canonical table). See mv2-reversing.md.
 # ============================================================================
 readonly EMBEDDED_SIGNATURES='
-M|151-linux|elf
-S|MV2DeprecationImpactChecker::IsExtensionAffected (shared predicate; covers the ManifestV2Handler thunk, OnExtensionSystemReady and MaybeReEnableExtension, which call it out-of-line)|short|0x041900D4|4|1|837E50027F2F554889E5488B8E280200008B413080BE080200
-S|ManifestV2Handler::ShouldBlockExtensionInstallation|short|0x09972677|3|1|83FE027F1F83FA01751083F9050F95C283F90A0F95C020D05D
-S|ManifestV2Handler::ShouldBlockExtensionEnable|short|0x099726BD|3|1|83FA027F298B493083F801751783F9050F95C283F90A0F95C0
-S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A3B7893|3|1|83FA020F8FBE0000008B493083F8010F856402000083F9050F84A900
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined)|short|0x05572994|3|1|83FA027F7A8B493083F80175684531F683F905740583F90A75
-E
 M|152-linux|elf
 S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0985B449|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
 S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x0985B0F4|4|1|837E50027F2F554889E5488B8E280200008B413080BE080200
@@ -80,45 +73,11 @@ E
 M|152-chromium-linux|elf
 S|manifest_v2_util::IsExtensionAffected (free predicate)|short|0x0923C9D9|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
 E
-M|151-chromium-linux|elf
-S|manifest_v2_util::IsExtensionAffected (free predicate)|short|0x09350E79|3|1|83FE027F1D83FA087718BE0A0100000FA3D6730E83F9050F95
-E
-M|151-chromium-linux-xtradeb|elf
-S|ManifestV2Handler::OnExtensionSystemReady|near|0x07A64A55|4|1|837850020F8FD5000000488B90280200008B4A3080B8080200000075
-S|ManifestV2Handler::MaybeReEnableExtension|short|0x07A65559|4|1|837B50027F2F488B8B280200008B413080BB08020000007512
-S|ManagementSetEnabledFunction::CheckManifestV2Deprecation (inlined predicate)|short|0x07DAC2A3|3|1|83FA027F2083F908771BBA0A0100000FA3CA73118B403083F8
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined predicate)|short|0x08C5DADA|3|1|83FA027F4683F9087741BA0A0100000FA3CA73378B40304531
-E
-M|151-linux-arm64|elf-arm64
-S|ManifestV2Handler::ShouldBlockExtensionInstallation|bcond|0x05E6C0CC|4|1|3F0800716C0100545F040071A10000547F14007164184A7AE0079F1AC0035FD6
-S|StandardManagementPolicyProvider::UserMayInstall (inlined)|bcond|0x06086804|4|1|5F0900710C010054293140B91F050071611300543F150071600000543F290071
-S|StandardManagementPolicyProvider::UserMayInstall (inlined, 2nd call site)|bcond|0x06A71584|4|1|5F0900710C010054293140B91F050071A11300543F150071600000543F290071
-S|MV2DeprecationImpactChecker::IsExtensionAffected (shared predicate; OnExtensionSystemReady / MaybeReEnableExtension / ShouldBlockExtensionEnable call it out-of-line)|bcond|0x0A525764|4|1|1F0900710C020054291441F92A204839283140B98A000037296940B93F050071
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined)|bcond|0x0A69570C|4|1|5F090071EC030054293140B91F050071010300543F150071F4031F2A60000054
-E
 M|152-linux-arm64|elf-arm64
 S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05D64DD8|4|2|1F0900712C020054691641F96A224839283140B98A000037296940B93F050071
 S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05D64F9C|4|1|1F0900710C020054091441F90A204839283140B98A000037296940B93F050071
 S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x05F78874|4|2|1F0900718C010054891641F98A224839283140B98A000037296940B93F050071
 S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x0696E3C8|4|2|3F090071EC4A0054091541F90A214839283140B98A000037296940B93F050071
-E
-M|151-macos-x64|macho-x64
-S|StandardManagementPolicyProvider::MustRemainDisabled|short|0x01B652F7|3|1|83FA027F5B8B493083F80175494531F683F905740583F90A75
-S|ManifestV2Handler::OnExtensionSystemReady|short|0x030822AA|4|1|837950027F2D488B91280200008B423080B90802000000750C
-S|ManifestV2Handler::ShouldBlockExtensionEnable|short|0x04727A9D|3|1|83FA027F298B493083F801751783F9050F95C283F90A0F95C0
-S|ManifestV2Handler::IsExtensionAffected|short|0x071364A4|4|1|837E50027F2F554889E5488B8E280200008B413080BE080200
-S|ManifestV2Handler::ShouldBlockExtensionInstallation|short|0x071364F7|3|1|83FE027F1F83FA01751083F9050F95C283F90A0F95C020D05D
-S|ManifestV2Handler::MaybeReEnableExtension|short|0x07136608|4|1|837B50027F30488B8B280200008B413080BB08020000007508
-S|StandardManagementPolicyProvider::UserMayInstall|near|0x07B4CFF9|3|1|83FA020F8FA40000008B493083F8010F850F02000083F9050F848F00
-E
-M|151-macos-arm64|macho-arm64
-S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x0178A5E8|4|1|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
-S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x021EFD80|4|1|5F0900716C040054293140B91F05007181030054140080523F15007160000054
-S|ManifestV2Handler::ShouldBlockExtensionEnable|bcond|0x03ED7910|4|1|5F090071CC010054293140B91F050071E10000543F15007124194A7AE0079F1A
-S|ManifestV2Handler::IsExtensionAffected|bcond|0x0642852C|4|1|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
-S|ManifestV2Handler::ShouldBlockExtensionInstallation|bcond|0x06428570|4|1|3F0800716C0100545F040071A10000547F14007164184A7AE0079F1AC0035FD6
-S|ManifestV2Handler::MaybeReEnableExtension|bcond|0x064286A8|4|1|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
-S|StandardManagementPolicyProvider::UserMayInstall|bcond|0x06DB8584|4|1|5F090071EC000054293140B91F050071210F00543F15007124194A7AC1060054
 E
 M|152-macos-x64|macho-x64
 S|StandardManagementPolicyProvider::MustRemainDisabled|short|0x01BA0A91|4|1|837E50027F6F498B8E280200008B41304180BE080200000075
@@ -127,6 +86,7 @@ S|ManifestV2Handler::IsExtensionAffected|short|0x048BB6E4|4|1|837E50027F2F554889
 S|ManifestV2Handler::ShouldBlockExtensionInstallation|short|0x075489B8|4|1|837B50027F30488B8B280200008B413080BB08020000007508
 S|ManifestV2Handler::ShouldBlockExtensionInstallation (2)|short|0x07548BB9|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
 S|StandardManagementPolicyProvider::UserMayInstall|near|0x07F56A10|4|1|837B50020F8FB7000000488B8B280200008B413080BB080200000075
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|near|0x016970B1|10|1|4C89F7E8D150C20484C00F8400FDFFFFEB10
 E
 M|152-chromium-macos-x64|macho-x64
 S|manifest_v2_util::IsExtensionAffected (free predicate)|short|0x04814269|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
@@ -137,6 +97,7 @@ S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x0320635C|4|1|1F090071AC01005
 S|ManifestV2Handler::IsExtensionAffected|bcond|0x03FFBD84|4|1|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
 S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x066F0E38|4|2|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
 S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x026AC410|8|1|C85240B91F0900718C010054C8224839
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01D16FB4|8|1|E00314AA9C28DE94A0EAFF340B000014
 E
 M|154-linux|elf
 S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0991AA29|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
@@ -152,15 +113,6 @@ S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared bo
 S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x0609B370|4|2|1F0900718C010054891641F98A224839283140B98A000037296940B93F050071
 S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06AB7470|4|1|3F0900718C010054091541F90A214839283140B98A000037296940B93F050071
 S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x09B77244|4|1|7F0900718C0100544B1541F94C2148396A3140B98C0000376B6940B97F050071
-E
-M|154-macos-x64|macho-x64
-S|StandardManagementPolicyProvider::MustRemainDisabled|short|0x01CD2151|4|1|837E50027F6F498B8E280200008B41304180BE080200000075
-S|ManifestV2Handler::OnExtensionSystemReady|short|0x0322BD39|4|1|837950027F2D488B91280200008B423080B90802000000750C
-S|ManifestV2Handler::IsExtensionAffected|short|0x0497FD04|4|1|837E50027F2F554889E5488B8E280200008B413080BE080200
-S|ManifestV2Handler::ShouldBlockExtensionInstallation|short|0x07789FB8|4|1|837B50027F30488B8B280200008B413080BB08020000007508
-S|ManifestV2Handler::ShouldBlockExtensionInstallation (2)|short|0x0778A1B9|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|StandardManagementPolicyProvider::UserMayInstall|near|0x081B49B0|4|1|837B50020F8FB7000000488B8B280200008B413080BB080200000075
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|short|0x028F0E51|4|1|837F50027F34488B45A880B808020000000F852D010000488B
 E
 M|155-linux|elf
 S|IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)|short|0x041AAAE0|4|1|837950027F30488B91280200008B425080B90802000000750F
@@ -179,6 +131,7 @@ S|ManifestV2Handler::IsExtensionAffected|short|0x0496FB64|4|1|837E50027F32554889
 S|ManifestV2Handler::ShouldBlockExtensionInstallation|short|0x07806AE8|4|1|837B50027F33488B8B280200008B415080BB0802000000750B
 S|ManifestV2Handler::ShouldBlockExtensionInstallation (2)|short|0x07806CE9|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
 S|StandardManagementPolicyProvider::UserMayInstall|near|0x0827BE80|4|1|837B50020F8FBA000000488B8B280200008B415080BB080200000075
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|near|0x01697E25|10|1|4C89F7E87DEBD80484C00F84FCFCFFFFEB10
 E
 M|155-macos-arm64|macho-arm64
 S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x022BD404|4|1|1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071
@@ -186,6 +139,7 @@ S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x026FFEFC|8|1|C85240B9
 S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031F4CA4|4|1|1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071
 S|ManifestV2Handler::IsExtensionAffected|bcond|0x0403B248|4|1|1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071
 S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x068F3880|4|2|1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B613F4|8|1|E00314AA642EEA9460DFFF340B000014
 E
 M|155-linux-arm64|elf-arm64
 S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05E7E1E4|4|2|1F0900712C020054691641F96A224839285140B98A000037298940B93F050071
@@ -411,15 +365,24 @@ for m in ms:
         if snm in sn: raise ValueError("dup site %s in %s" % (snm, name))
         sn.add(snm)
         kind = s.get("kind")
-        if kind not in ("short", "near", "bcond"):
+        if kind not in ("short", "near", "bcond", "cbz"):
             raise ValueError("bad kind in %s/%s" % (name, snm))
         # x86_64 gates (elf, macho-x64) are cmp/jg (short/near); the arm64 gates
-        # (elf-arm64, macho-arm64) are the cmp w,#2 ; b.gt bcond flip. Reject a
-        # kind that does not match the container architecture.
-        if kind == "bcond" and container in ("elf", "macho-x64"):
-            raise ValueError("x86_64 milestone %s has an arm64 bcond site %s" % (name, snm))
-        if kind != "bcond" and container in ("elf-arm64", "macho-arm64"):
-            raise ValueError("arm64 milestone %s has a non-bcond site %s" % (name, snm))
+        # (elf-arm64, macho-arm64) are the bcond flip or the cbz rewrite. Reject
+        # a kind that does not match the container architecture.
+        if kind in ("bcond", "cbz") and container in ("elf", "macho-x64"):
+            raise ValueError("x86_64 milestone %s has an arm64 site %s" % (name, snm))
+        if kind not in ("bcond", "cbz") and container in ("elf-arm64", "macho-arm64"):
+            raise ValueError("arm64 milestone %s has a non-bcond/cbz site %s" % (name, snm))
+        # Optional stockOpcode field pins the sig stock encoding at load time
+        # (e.g. a near JE site carries 0x0F84). The sig bytes at jgOff remain
+        # the runtime source of truth.
+        so = s.get("stockOpcode")
+        if so is not None:
+            if kind not in ("short", "near"):
+                raise ValueError("stockOpcode only valid for short/near in %s/%s" % (name, snm))
+            if not re.fullmatch(r"0[xX][0-9A-Fa-f]+", str(so)):
+                raise ValueError("bad stockOpcode in %s/%s" % (name, snm))
         rva = s.get("jgRVA")
         if not isinstance(rva, str) or not re.fullmatch(r"0[xX][0-9A-Fa-f]+", rva):
             raise ValueError("bad jgRVA in %s/%s" % (name, snm))
@@ -431,17 +394,30 @@ for m in ms:
         if not isinstance(sig, str) or not sig or len(sig) % 2 or not re.fullmatch(r"[0-9A-Fa-f]+", sig):
             raise ValueError("bad sig in %s/%s" % (name, snm))
         raw = bytes.fromhex(sig)
-        need = {"short": 2, "near": 6, "bcond": 4}[kind]
+        need = {"short": 2, "near": 6, "bcond": 4, "cbz": 4}[kind]
         if off + need > len(raw):
             raise ValueError("jump past sig in %s/%s" % (name, snm))
-        if kind == "short" and raw[off] != 0x7F:
-            raise ValueError("jgOff not 7F in %s/%s" % (name, snm))
-        if kind == "near" and raw[off:off+2] != b"\x0f\x8f":
-            raise ValueError("jgOff not 0F8F in %s/%s" % (name, snm))
+        if so is not None:
+            sb = bytes.fromhex(str(so)[2:].zfill(2))
+            want = 1 if kind == "short" else 2
+            if len(sb) != want:
+                raise ValueError("stockOpcode must be %d byte(s) in %s/%s" % (want, name, snm))
+            if raw[off:off+want] != sb:
+                raise ValueError("sig[jgOff] does not match stockOpcode in %s/%s" % (name, snm))
+        if kind == "short" and raw[off] == 0xEB:
+            raise ValueError("jgOff is the patched 0xEB in %s/%s" % (name, snm))
+        if kind == "near" and raw[off+1] == 0xE9:
+            raise ValueError("near stock second opcode is the patched 0xE9 in %s/%s" % (name, snm))
         if kind == "bcond":
             w = int.from_bytes(raw[off:off+4], "little")
             if (w & 0xFF000010) != 0x54000000 or (w & 0xF) != 0x0C:
                 raise ValueError("jgOff not a stock b.gt (GT) in %s/%s" % (name, snm))
+        if kind == "cbz":
+            if off % 4 != 0:
+                raise ValueError("cbz jgOff must be word-aligned in %s/%s" % (name, snm))
+            w = int.from_bytes(raw[off:off+4], "little")
+            if (w & 0xFF000000) != 0x34000000:
+                raise ValueError("jgOff not a stock 32-bit CBZ in %s/%s" % (name, snm))
         print("S|%s|%s|%s|%d|%d|%s" % (snm, kind, rva, off, exp, sig.upper()))
     print("E")
 ' 2>&1
@@ -798,6 +774,32 @@ sig_matches_at() {
         cond=$(( word & 0xF ))
         if (( cond != 0x0C && cond != 0x0E )); then return 1; fi
     fi
+    if [[ "$kind" == "cbz" ]]; then
+        # stock CBZ (0x34, Rt = the sig's, imm19 wild) or patched
+        # unconditional B (0x14) with the same resolved target
+        local b0 b1 b2 b3 word sw sdisp cdisp
+        b0=$(( 16#${actual:$(( jg_off*2 )):2} ))
+        b1=$(( 16#${actual:$(( (jg_off+1)*2 )):2} ))
+        b2=$(( 16#${actual:$(( (jg_off+2)*2 )):2} ))
+        b3=$(( 16#${actual:$(( (jg_off+3)*2 )):2} ))
+        word=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
+        b0=$(( 16#${sig_upper:$(( jg_off*2 )):2} ))
+        b1=$(( 16#${sig_upper:$(( (jg_off+1)*2 )):2} ))
+        b2=$(( 16#${sig_upper:$(( (jg_off+2)*2 )):2} ))
+        b3=$(( 16#${sig_upper:$(( (jg_off+3)*2 )):2} ))
+        sw=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
+        if (( (word & 0xFF000000) == 0x34000000 )); then
+            if (( (word & 0x1F) != (sw & 0x1F) )); then return 1; fi
+        elif (( (word & 0xFC000000) == 0x14000000 )); then
+            cdisp=$(( word & 0x03FFFFFF ))
+            if (( (cdisp & 0x2000000) != 0 )); then cdisp=$(( cdisp - 0x4000000 )); fi
+            sdisp=$(( (sw >> 5) & 0x7FFFF ))
+            if (( (sdisp & 0x40000) != 0 )); then sdisp=$(( sdisp - 0x80000 )); fi
+            if (( cdisp != sdisp )); then return 1; fi
+        else
+            return 1
+        fi
+    fi
 
     local i byte_idx sig_byte act_byte act_pair
     for (( i = 0; i < ${#sig_upper}; i += 2 )); do
@@ -806,16 +808,16 @@ sig_matches_at() {
         act_byte="${actual:$i:2}"
         if [[ "$kind" == "short" ]]; then
             if (( byte_idx == jg_off )); then
-                if [[ "$act_byte" != "7F" && "$act_byte" != "EB" ]]; then return 1; fi
+                if [[ "$act_byte" != "EB" && "$act_byte" != "$sig_byte" ]]; then return 1; fi
                 continue
             elif (( byte_idx == jg_off + 1 )); then continue; fi
         elif [[ "$kind" == "near" ]]; then
             if (( byte_idx == jg_off )); then
                 act_pair="${actual:$i:4}"
-                if [[ "$act_pair" != "0F8F" && "$act_pair" != "90E9" ]]; then return 1; fi
+                if [[ "$act_pair" != "90E9" && "$act_pair" != "${sig_upper:$i:4}" ]]; then return 1; fi
                 continue
             elif (( byte_idx >= jg_off + 1 && byte_idx <= jg_off + 5 )); then continue; fi
-        else  # bcond: the 4 word bytes are handled above
+        else  # bcond / cbz: the 4 word bytes are handled above
             if (( byte_idx >= jg_off && byte_idx <= jg_off + 3 )); then continue; fi
         fi
         if [[ "$sig_byte" != "$act_byte" ]]; then return 1; fi
@@ -829,7 +831,7 @@ build_binary_anchor() {
     local sig; sig=$(echo "$1" | tr 'A-F' 'a-f')
     local kind="$2" jg_off="$3"
     local sig_bytes=$(( ${#sig} / 2 )) mask_len
-    case "$kind" in short) mask_len=2 ;; near) mask_len=6 ;; bcond) mask_len=4 ;; esac
+    case "$kind" in short) mask_len=2 ;; near) mask_len=6 ;; bcond|cbz) mask_len=4 ;; esac
     local mask_end=$(( jg_off + mask_len ))
     BINARY_ANCHOR_HEX=""; BINARY_ANCHOR_OFF=0
     local best_len=0 best_start=0 start end byte run_len
@@ -906,11 +908,24 @@ try:
             c = w & 0xF
             if c != 0x0C and c != 0x0E:
                 return False
+        def _sx(v, bits):
+            return v - (1 << bits) if v & (1 << (bits - 1)) else v
+        if kind == "cbz":
+            w = data[s+jg] | (data[s+jg+1] << 8) | (data[s+jg+2] << 16) | (data[s+jg+3] << 24)
+            sw = sig[jg] | (sig[jg+1] << 8) | (sig[jg+2] << 16) | (sig[jg+3] << 24)
+            if (w & 0xFF000000) == 0x34000000:
+                if (w & 0x1F) != (sw & 0x1F):
+                    return False
+            elif (w & 0xFC000000) == 0x14000000:
+                if _sx(w & 0x03FFFFFF, 26) != _sx((sw >> 5) & 0x7FFFF, 19):
+                    return False
+            else:
+                return False
         for k in range(L):
             p = data[s+k]
             if kind == "short":
                 if k == jg:
-                    if p != 0x7F and p != 0xEB:
+                    if p != sig[k] and p != 0xEB:
                         return False
                 elif k == jg + 1:
                     pass
@@ -918,7 +933,7 @@ try:
                     return False
             elif kind == "near":
                 if k == jg:
-                    if not ((p == 0x0F and data[s+jg+1] == 0x8F) or (p == 0x90 and data[s+jg+1] == 0xE9)):
+                    if not ((p == sig[k] and data[s+jg+1] == sig[k+1]) or (p == 0x90 and data[s+jg+1] == 0xE9)):
                         return False
                 elif k == jg + 1:
                     pass
@@ -926,7 +941,7 @@ try:
                     pass
                 elif p != sig[k]:
                     return False
-            else:  # bcond: the 4-byte branch word was validated above
+            else:  # bcond / cbz: the 4-byte branch word was validated above
                 if jg <= k <= jg + 3:
                     pass
                 elif p != sig[k]:
@@ -1043,11 +1058,11 @@ find_site_matches() {
 # slice with container "elf"; a fat Mach-O has one slice per CPU.
 # ============================================================================
 BEST_MS_NAME=""; BEST_SATISFIED=0; BEST_TOTAL=0; BEST_FULL=false; BEST_TIES=0
-FLIP_NAMES=(); FLIP_KINDS=(); FLIP_OFFSETS=(); FLIP_RELOCATED=()
+FLIP_NAMES=(); FLIP_KINDS=(); FLIP_OFFSETS=(); FLIP_RELOCATED=(); FLIP_STOCK=()
 
 reset_probe_results() {
     BEST_MS_NAME=""; BEST_SATISFIED=0; BEST_TOTAL=0; BEST_FULL=false; BEST_TIES=0
-    FLIP_NAMES=(); FLIP_KINDS=(); FLIP_OFFSETS=(); FLIP_RELOCATED=()
+    FLIP_NAMES=(); FLIP_KINDS=(); FLIP_OFFSETS=(); FLIP_RELOCATED=(); FLIP_STOCK=()
 }
 
 # Ranking: a milestone whose EVERY site matched (full) always beats a partial
@@ -1064,8 +1079,8 @@ probe_slice_pass() {
         [[ "${MILESTONE_CONTAINERS[$mi]}" == "$container" ]] || continue
         local ms_name="${MILESTONE_NAMES[$mi]}"
         local satisfied=0 total=0
-        local fn=() fk=() fo=() fr=()
-        local spec s_name s_kind s_jgrva s_jgoff s_expected s_sig off
+        local fn=() fk=() fo=() fr=() fs=()
+        local spec s_name s_kind s_jgrva s_jgoff s_expected s_sig off stock_hex
         while IFS= read -r spec; do
             [[ -n "$spec" ]] || continue
             total=$(( total + 1 ))
@@ -1073,8 +1088,18 @@ probe_slice_pass() {
             find_site_matches "$file" "$base" "$traw" "$tvaddr" "$tsize" "$spec"
             if (( ${#FOUND_OFFSETS[@]} == s_expected )); then
                 satisfied=$(( satisfied + 1 ))
+                # The sig bytes at jgOff are the stock encoding (7F short,
+                # 0F8F near, or the 4-byte CBZ word for cbz); the flip engine
+                # works off arrays without the sig, so carry them along.
+                if [[ "$s_kind" == "cbz" ]]; then
+                    stock_hex="${s_sig:$(( s_jgoff*2 )):8}"
+                elif [[ "$s_kind" == "near" ]]; then
+                    stock_hex="${s_sig:$(( s_jgoff*2 )):4}"
+                else
+                    stock_hex="${s_sig:$(( s_jgoff*2 )):2}"
+                fi
                 for off in "${FOUND_OFFSETS[@]}"; do
-                    fn+=("$s_name"); fk+=("$s_kind"); fo+=("$off"); fr+=("$RELOCATED")
+                    fn+=("$s_name"); fk+=("$s_kind"); fo+=("$off"); fr+=("$RELOCATED"); fs+=("$stock_hex")
                 done
             fi
         done < <(sites_of "$mi")
@@ -1102,6 +1127,7 @@ probe_slice_pass() {
             BEST_MS_NAME="$ms_name"; BEST_SATISFIED=$satisfied; BEST_TOTAL=$total
             FLIP_NAMES=("${fn[@]:-}"); FLIP_KINDS=("${fk[@]:-}")
             FLIP_OFFSETS=("${fo[@]:-}"); FLIP_RELOCATED=("${fr[@]:-}")
+            FLIP_STOCK=("${fs[@]:-}")
             BEST_TIES=1
         elif $tie; then
             BEST_TIES=$(( BEST_TIES + 1 ))
@@ -1128,22 +1154,28 @@ probe_slice() {
 
 # ============================================================================
 # Flip engine (operates on the FLIP_* set filled by probe_slice, in a work file).
-#   short : 0x7F      -> 0xEB
-#   near  : 0F 8F     -> 90 E9
+#   short : stock byte (sig[jgOff], 7F jg default)      -> 0xEB
+#   near  : stock pair (sig[jgOff], 0F 8F jg default)   -> 90 E9 (disp32 kept)
 #   bcond : B.cond word byte0 low nibble GT(0xC) -> AL(0xE); ONLY that nibble
 #           changes (b0 = (b0 & 0xF0) | 0x0E), preserving opcode and imm19.
+#   cbz   : 32-bit CBZ word 0x34xxxxxx -> unconditional B 0x14yyyyyy with the
+#           SAME resolved target: imm26 is recomputed from the sign-extended
+#           imm19 (layouts differ; the raw bits never carry over).
 # ============================================================================
 SLICE_FLIPS=0; SLICE_ALREADY=0
 apply_flips_slice() {
     local file="$1" applied=0 already=0 i name kind offset cur o0 o1 nib newb
+    local stock_hex sb0 sb1 b0 b1 b2 b3 word sw imm19 neww nb0 nb1 nb2 nb3 cdisp sdisp
     _hexcache_load "$file"   # prime for the per-site reads; flushed after writing
     SLICE_FLIPS=0; SLICE_ALREADY=0
     for (( i = 0; i < ${#FLIP_OFFSETS[@]}; i++ )); do
         name="${FLIP_NAMES[$i]}"; kind="${FLIP_KINDS[$i]}"; offset="${FLIP_OFFSETS[$i]}"
+        stock_hex="${FLIP_STOCK[$i]:-}"
         if [[ "$kind" == "short" ]]; then
             cur=$(read_byte "$file" "$offset")
             if (( cur == 0xEB )); then already=$(( already + 1 )); continue; fi
-            if (( cur != 0x7F )); then
+            sb0=$(( 16#${stock_hex:0:2} ))
+            if (( cur != sb0 )); then
                 warnf "    Skipped one change - it didn't look the way we expected."
                 continue
             fi
@@ -1152,11 +1184,39 @@ apply_flips_slice() {
         elif [[ "$kind" == "near" ]]; then
             o0=$(read_byte "$file" "$offset"); o1=$(read_byte "$file" $(( offset + 1 )))
             if (( o0 == 0x90 && o1 == 0xE9 )); then already=$(( already + 1 )); continue; fi
-            if ! (( o0 == 0x0F && o1 == 0x8F )); then
+            sb0=$(( 16#${stock_hex:0:2} )); sb1=$(( 16#${stock_hex:2:2} ))
+            if ! (( o0 == sb0 && o1 == sb1 )); then
                 warnf "    Skipped one change - it didn't look the way we expected."
                 continue
             fi
             printf '\x90\xE9' | dd of="$file" bs=1 seek="$offset" count=2 conv=notrunc 2>/dev/null
+            applied=$(( applied + 1 ))
+        elif [[ "$kind" == "cbz" ]]; then
+            b0=$(read_byte "$file" "$offset"); b1=$(read_byte "$file" $(( offset + 1 )))
+            b2=$(read_byte "$file" $(( offset + 2 ))); b3=$(read_byte "$file" $(( offset + 3 )))
+            word=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
+            sw=$(( 16#${stock_hex:6:2}${stock_hex:4:2}${stock_hex:2:2}${stock_hex:0:2} ))
+            if (( (word & 0xFC000000) == 0x14000000 )); then
+                # patched form: only ours when the target matches the sig CBZ's
+                cdisp=$(( word & 0x03FFFFFF ))
+                if (( (cdisp & 0x2000000) != 0 )); then cdisp=$(( cdisp - 0x4000000 )); fi
+                sdisp=$(( (sw >> 5) & 0x7FFFF ))
+                if (( (sdisp & 0x40000) != 0 )); then sdisp=$(( sdisp - 0x80000 )); fi
+                if (( cdisp == sdisp )); then already=$(( already + 1 )); continue; fi
+                warnf "    Skipped one change - it didn't look the way we expected."
+                continue
+            fi
+            if ! (( (word & 0xFF000000) == 0x34000000 && (word & 0x1F) == (sw & 0x1F) )); then
+                warnf "    Skipped one change - it didn't look the way we expected."
+                continue
+            fi
+            # CBZ -> B with the same target: recompute imm26 from imm19
+            imm19=$(( (word >> 5) & 0x7FFFF ))
+            if (( (imm19 & 0x40000) != 0 )); then imm19=$(( imm19 - 0x80000 )); fi
+            neww=$(( 0x14000000 | (imm19 & 0x3FFFFFF) ))
+            nb0=$(( neww & 0xFF )); nb1=$(( (neww >> 8) & 0xFF ))
+            nb2=$(( (neww >> 16) & 0xFF )); nb3=$(( (neww >> 24) & 0xFF ))
+            printf "\x$(printf '%02X' $nb0)\x$(printf '%02X' $nb1)\x$(printf '%02X' $nb2)\x$(printf '%02X' $nb3)" | dd of="$file" bs=1 seek="$offset" count=4 conv=notrunc 2>/dev/null
             applied=$(( applied + 1 ))
         else  # bcond
             cur=$(read_byte "$file" "$offset")   # little-endian byte0 holds the condition
@@ -1167,7 +1227,7 @@ apply_flips_slice() {
                 continue
             fi
             newb=$(( (cur & 0xF0) | 0x0E ))
-            printf "\\x$(printf '%02X' "$newb")" | dd of="$file" bs=1 seek="$offset" count=1 conv=notrunc 2>/dev/null
+            printf "\x$(printf '%02X' "$newb")" | dd of="$file" bs=1 seek="$offset" count=1 conv=notrunc 2>/dev/null
             applied=$(( applied + 1 ))
         fi
     done
@@ -1178,20 +1238,42 @@ apply_flips_slice() {
 STATE_STOCK=0; STATE_PATCHED=0
 classify_flip_states_slice() {
     local file="$1" i kind offset o0 o1 nib
+    local stock_hex sb0 sb1 b0 b1 b2 b3 word sw cdisp sdisp
     _hexcache_load "$file"   # prime the byte cache for the per-site reads
     STATE_STOCK=0; STATE_PATCHED=0
     for (( i = 0; i < ${#FLIP_OFFSETS[@]}; i++ )); do
         kind="${FLIP_KINDS[$i]}"; offset="${FLIP_OFFSETS[$i]}"
+        stock_hex="${FLIP_STOCK[$i]:-}"
         o0=$(read_byte "$file" "$offset")
         if [[ "$kind" == "short" ]]; then
-            if (( o0 == 0x7F )); then STATE_STOCK=$(( STATE_STOCK + 1 ))
+            sb0=$(( 16#${stock_hex:0:2} ))
+            if (( o0 == sb0 )); then STATE_STOCK=$(( STATE_STOCK + 1 ))
             elif (( o0 == 0xEB )); then STATE_PATCHED=$(( STATE_PATCHED + 1 ))
             else return 1; fi
         elif [[ "$kind" == "near" ]]; then
             o1=$(read_byte "$file" $(( offset + 1 )))
-            if (( o0 == 0x0F && o1 == 0x8F )); then STATE_STOCK=$(( STATE_STOCK + 1 ))
+            sb0=$(( 16#${stock_hex:0:2} )); sb1=$(( 16#${stock_hex:2:2} ))
+            if (( o0 == sb0 && o1 == sb1 )); then STATE_STOCK=$(( STATE_STOCK + 1 ))
             elif (( o0 == 0x90 && o1 == 0xE9 )); then STATE_PATCHED=$(( STATE_PATCHED + 1 ))
             else return 1; fi
+        elif [[ "$kind" == "cbz" ]]; then
+            b0=$o0; b1=$(read_byte "$file" $(( offset + 1 )))
+            b2=$(read_byte "$file" $(( offset + 2 ))); b3=$(read_byte "$file" $(( offset + 3 )))
+            word=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
+            sw=$(( 16#${stock_hex:6:2}${stock_hex:4:2}${stock_hex:2:2}${stock_hex:0:2} ))
+            if (( (word & 0xFF000000) == 0x34000000 )); then
+                if (( (word & 0x1F) != (sw & 0x1F) )); then return 1; fi
+                STATE_STOCK=$(( STATE_STOCK + 1 ))
+            elif (( (word & 0xFC000000) == 0x14000000 )); then
+                cdisp=$(( word & 0x03FFFFFF ))
+                if (( (cdisp & 0x2000000) != 0 )); then cdisp=$(( cdisp - 0x4000000 )); fi
+                sdisp=$(( (sw >> 5) & 0x7FFFF ))
+                if (( (sdisp & 0x40000) != 0 )); then sdisp=$(( sdisp - 0x80000 )); fi
+                if (( cdisp != sdisp )); then return 1; fi
+                STATE_PATCHED=$(( STATE_PATCHED + 1 ))
+            else
+                return 1
+            fi
         else
             nib=$(( o0 & 0x0F ))
             if (( nib == 0x0C )); then STATE_STOCK=$(( STATE_STOCK + 1 ))

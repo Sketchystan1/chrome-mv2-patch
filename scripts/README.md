@@ -263,3 +263,32 @@ The masking and match-count rules mirror both runtime scripts:
 `find_site_matches` / `probe_slice` in `chrome-mv2.sh`. A table that
 verifies here must still be synchronized into the appropriate embedded table
 and exercised through the script tests.
+
+## Gate B cross-platform notes (v1.10.0)
+
+Gate B ("skip FilterSensitivePolicies", honoring off-store `ExtensionSettings`
+on unmanaged Chrome) ships as an `optional:true` site in every supported
+milestone except Linux (the guard is `#if IS_WIN || IS_MAC` — Linux compiles
+`ShouldFilterSensitivePolicies()` to `return false` and never filters):
+
+- **pe32 (x86)**: plain `short` `cmp dword [reg+0x10],1 ; jg` — the trust
+  field sits at `+0x10` on x86 (vs `+0x18` on x64). Derived from the
+  `ExtensionInstallForcelist` string construction (the function building that
+  25-byte literal via `movups`/`movdqu` is FilterSensitivePolicies; its
+  guarded E8 caller is `PolicyLoaderWin::LoadChromePolicy`).
+- **macho-x64**: `near` with `stockOpcode 0x0F84` — the guard is
+  `call ShouldFilterSensitivePolicies ; test al,al ; je near <skip>`, patched
+  to the near kind's `90 E9` (nop; jmp) with the disp32 carried over
+  bit-identically.
+- **macho-arm64**: new `cbz` kind — `mov x0,x20 ; bl SFSP ; cbz w0,<skip>`,
+  rewritten to the unconditional `B` with the same resolved target (imm26
+  recomputed from the sign-extended imm19). `derive_milestone.py --verify`
+  handles the kind; the locator method is string-anchored (FSP refs
+  `[BLOCKED]`/CWS/`EnterpriseCheck.InvalidPoliciesDetected` via ADRP+ADD).
+- **pe-arm64**: plain `bcond` — `ldr w,[x20,#0x18] ; cmp #1 ; b.gt`, flipped
+  GT→AL with the existing machinery. The arm64 PE `.pdata` directory holds
+  **8-byte (BeginRVA, UnwindRVA)** entries, not the x64 12-byte
+  RUNTIME_FUNCTION triples — parse accordingly when locating functions.
+- The `stockOpcode` field (short/near kinds) pins the sig's stock opcode at
+  load time; the sig bytes at `jgOff` remain the runtime source of truth.
+

@@ -419,7 +419,7 @@ Rule 1 grants the permission to any MV2 extension (no location restriction); rul
 
 ### Why it is data, not code
 
-`tools/json_schema_compiler/feature_compiler.py` compiles the JSON into **C++20 designated-initializer POD structs** (`SimpleFeatureData`) in `.rdata` — the constraints (`location`, `min_manifest_version`, `max_manifest_version`, …) are struct fields, not `set_*()` calls. So the reachable edit is a single byte in `.rdata`. **This representation is new in Chrome 155** — 154.0.8025 has zero such structs, 155.0.8038 has 22 — so `featurebyte` is 155+ only; 151/152/154 use the older representation and the site simply does not match there.
+`tools/json_schema_compiler/feature_compiler.py` compiles the JSON into **C++20 designated-initializer POD structs** (`SimpleFeatureData`) in `.rdata` — the constraints (`location`, `min_manifest_version`, `max_manifest_version`, …) are struct fields, not `set_*()` calls. So the reachable edit is a single byte in `.rdata`. **This representation landed in the 154.0.8037 branch point** — 154.0.8025 and earlier have zero such structs, 155.0.8038 (and 154.0.8037) have them — so `featurebyte` needs a 154.0.8037+ build; 151/152/154.0.8025 use the older representation and the site simply does not match there.
 
 ### Struct layout (64-bit) and the exact 155 win64 target
 
@@ -456,6 +456,8 @@ On **PE** the `.name` pointers sit in `.rdata` in-file. On **ELF/Mach-O** the eq
 
 It rides **inside the `155` milestone** but is marked `optional`: optional sites are located and patched best-effort yet excluded from the milestone's satisfied/total ranking, so a miss (e.g. a future point-release struct move) can never drop `155` to partial or block the MV2 gates. `derive_milestone.py --feature webRequestBlocking <chrome.dll>` re-derives the site; `--verify` reports it as `feat opt`.
 
+> **REMOVED from the shipped tables as of v1.10.0.** No milestone carries a `featurebyte` site anymore: the Gate B ExtensionSettings force-install path (below) grants the same MV3 `webRequestBlocking` capability on 155, so the site was redundant. The `featurebyte` kind itself remains supported by all three engines (for custom tables / future re-introduction — e.g. the proven-feasible 155-x86 layout).
+
 ### Gate B — honoring off-store `ExtensionSettings` on unmanaged Chrome (a `jg` flip)
 
 A related capability: letting the `ExtensionSettings` / `ExtensionInstallForcelist` policy force-install a **self-hosted (off-Web-Store)** extension on an *unmanaged* Chrome. On unmanaged Chrome `chrome://policy` reports such an entry "ignored — not from a trusted source": `FilterSensitivePolicies()` (`components/policy/core/common/policy_loader_common.cc`) `[BLOCKED]`-prefixes any force-install entry whose `update_url` ≠ the Web Store URL, and `PolicyLoaderWin::LoadChromePolicy` calls it via `if (ShouldFilterSensitivePolicies()) FilterSensitivePolicies(&policy);`.
@@ -467,3 +469,23 @@ Unlike Gate A this is **not new** — it is stable code in 152–155 — and the
 - In `LoadChromePolicy`, `ShouldFilterSensitivePolicies()` is inlined to `cmp dword [rsi+0x18], 1 ; jg <skip>` — filter runs when `[rsi+0x18] <= 1` (untrusted). The gate at **RVA `0x01FF3FFF`** (`7F`), preceded by `mov rdi,[rsp+0x120] ; cmp dword[rsi+0x18],1`, followed by `lea rcx,[rsp+0x48] ; call FilterSensitivePolicies`.
 
 **Flip `7F`→`EB`** (`jg`→`jmp`, same target `0x1FF400B`): the filter call is always skipped, so platform-source `ExtensionSettings`/`ExtensionInstallForcelist` are honored regardless of management state — direction-only, CARDINAL-RULE compliant. Shipped as an `optional short` site in the `155` milestone (`sig 488BBC2420010000837E18017F0A488D4C2448`, `jgOff 12`), so a miss never blocks MV2. **Blast radius:** all sensitive platform policies are honored on unmanaged Chrome — but setting those registry keys already requires local admin, and the alternate `chrome://policy/test` caller is left untouched. Verified byte-flip on stock 155 (`0x01FF35FF` file offset, `7F`→`EB`) in both `chrome-mv2.py` and `chrome-mv2.ps1`.
+
+#### Gate B cross-platform (v1.10.0): the guard's shape per platform
+
+`ShouldFilterSensitivePolicies()` is `AsyncPolicyLoader::ShouldFilterSensitivePolicies()` — `platform_management_trustworthiness_ < TRUSTED` — **compiled only on Windows and macOS** (`#if IS_WIN || IS_MAC` in `async_policy_loader.cc`); on Linux it is `return false`, so there is **no gate and nothing to flip** — Linux never filters (verified on 155-linux: the `FilterSensitivePolicies` loop calls it unconditionally per source). The trust value is an `optional<ManagementAuthorityTrustworthiness>` at `+0x18` (has_value byte at `+0x1C` on all four mac arches; `+0x18`/`+0x1C` likewise on win-arm64).
+
+The guard's compiled shape per container (all sites `optional:true`, verified `--verify` on stock binaries, masked-match count 1):
+
+| container | kind | stock shape | flip |
+|---|---|---|---|
+| pe (x64) | `short` | `cmp dword [rsi+0x18],1 ; jg` | `7F`→`EB` (shipped 152/154/155/154-cft) |
+| pe32 (x86) | `short` | `cmp dword [eax+0x10],1 ; jg` (field at +0x10 on x86) | `7F`→`EB` — identical sig shape on 152/154/155 |
+| macho-x64 | `near` + `stockOpcode 0x0F84` | `call SFSP ; test al,al ; je near <skip>` | `0F 84`→`90 E9` (nop; jmp near) — disp32 carries over **bit-identical** (both encodings are 6 bytes, same base) |
+| macho-arm64 | `cbz` (new kind) | `mov x0,x20 ; bl SFSP ; cbz w0,<skip> ; b` | `CBZ 0x34xxxxxx`→`B 0x14yyyyyy` with the **same resolved target**: imm26 is *recomputed* from the sign-extended imm19 (layouts differ — for a negative disp the sign extension fills the bits where CBZ's Rt lived; `0x34FFDF60`→`0x17FFFEFB`, never `0x14FFDF60`) |
+| pe-arm64 | `bcond` | `ldrb [x20,#0x1C] ; tbz (DCHECK) ; ldr w,[x20,#0x18] ; cmp #1 ; b.gt <skip>` | plain GT(0xC)→AL(0xE) — the existing bcond flip, no new machinery |
+| elf / elf-arm64 | — | guard compiled out (`return false`) | N/A — Linux never filters |
+
+On macOS `ShouldFilterSensitivePolicies()` is a real out-of-line function (`ldrb w?,[x0,#0x1C]; ldr w?,[x0,#0x18]; cmp #2; cset w0,lt; ret` — the x64 equivalent uses `setl`), and `PolicyLoaderMac::Load` selects it via the `kUseManagementServiceForSensitivePolicies` feature (enabled by default) before guarding the `FilterSensitivePolicies(&chrome_policy)` call. The other FSP caller on every platform is the `chrome://policy/test` local-test loader (`local_test_id`/`%i_%i_%i` refs), which calls FSP unconditionally and is left untouched.
+
+The `cbz` matcher decodes both encodings and compares **resolved targets** (a foreign unconditional B must not read as "ours, already patched"); Rt is pinned in the stock form only (the rewrite's imm26 sign extension overwrites those bits). The `stockOpcode` field (near/short) pins the sig's stock pair at load time — the sig bytes at `jgOff` stay the single runtime source of truth, so no matcher signature changed. Chrome-version removals/updates as of v1.10.0: the 151 milestones are gone, the 154-macos-x64 milestone is dropped (154 mac x64 is covered by the 155-macos-x64 table — verified 7/7 on 154.0.8037 — and 154 mac arm64 by the 152-macos-arm64 table, 5/5 on 154.0.8025); 152-x86/154-x86/155-x86/152-macos-x64/155-macos-x64/152-macos-arm64/155-macos-arm64/154-win-arm64 all carry a Gate B site.
+

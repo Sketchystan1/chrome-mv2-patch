@@ -51,7 +51,7 @@ import sys
 import tempfile
 import time
 
-APP_VERSION = "1.8.0"
+APP_VERSION = "1.10.0"
 SIGNATURES_FILE = "signatures.json"
 
 IS_WIN = sys.platform.startswith("win")
@@ -61,37 +61,27 @@ IS_LINUX = sys.platform.startswith("linux")
 # Embedded signature tables (verbatim signatures.json). An external
 # signatures.json beside the script overrides this; --signatures wins over both.
 EMBEDDED_SIGNATURES = r'''{"milestones":[
-{"name":"151","container":"pe","sites":[{"name":"IsExtensionAffected","kind":"short","jgRVA":"0x083012E4","jgOff":4,"expectedMatches":1,"sig":"837A50027F34488B8A280200008B413080BA08020000007508"},{"name":"ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x08301323","jgOff":3,"expectedMatches":1,"sig":"83FA027F234183F80175114183F9050F95C14183F90A"},{"name":"ShouldBlockExtensionEnable","kind":"short","jgRVA":"0x03291F6B","jgOff":7,"expectedMatches":1,"sig":"8B41684183F8027F288B493083F801751683F9050F95C2"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01618C4C","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08301436","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x08E736BA","jgOff":6,"expectedMatches":1,"sig":"8B416883FA027F3B8B493083F8010F851A01000083F905742A"},{"name":"MustRemainDisabled (inlined)","kind":"short","jgRVA":"0x016448AA","jgOff":6,"expectedMatches":1,"sig":"8B416883FA027F788B493083F801756631FF83F905740583F9"}]},
 {"name":"152","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x082D26F5","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F805"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03348754","jgOff":4,"expectedMatches":2,"sig":"837A50027F34488B8A280200008B413080BA080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0124109C","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x082D24D6","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x08DDC241","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x015A8D31","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x0205653F","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
-{"name":"151-x86","container":"pe32","sites":[{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x00B20DB9","jgOff":4,"expectedMatches":1,"sig":"837928027F2C8B91640100008B421880B95401000000750C8B"},{"name":"MustRemainDisabled (inlined)","kind":"short","jgRVA":"0x0111E3EC","jgOff":3,"expectedMatches":1,"sig":"83FA027F728B491883F801756031DB83F905740583F90A752B"},{"name":"ShouldBlockExtensionEnable","kind":"short","jgRVA":"0x029E11BE","jgOff":3,"expectedMatches":1,"sig":"83FA027F2B8B491883F801751983F9050F95C283F90A0F95C0"},{"name":"IsExtensionAffected","kind":"short","jgRVA":"0x07022F9A","jgOff":4,"expectedMatches":1,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x07022FE7","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B450C83F80175158B451083F8050F95C183F8"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x0702310D","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x079D46E7","jgOff":3,"expectedMatches":1,"sig":"83FA027F338B491883F8010F85FD00000083F905742283F90A"}]},
-{"name":"151-linux","container":"elf","sites":[{"name":"MV2DeprecationImpactChecker::IsExtensionAffected (shared predicate; covers the ManifestV2Handler thunk, OnExtensionSystemReady and MaybeReEnableExtension, which call it out-of-line)","kind":"short","jgRVA":"0x041900D4","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x09972677","jgOff":3,"expectedMatches":1,"sig":"83FE027F1F83FA01751083F9050F95C283F90A0F95C020D05D"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable","kind":"short","jgRVA":"0x099726BD","jgOff":3,"expectedMatches":1,"sig":"83FA027F298B493083F801751783F9050F95C283F90A0F95C0"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)","kind":"near","jgRVA":"0x0A3B7893","jgOff":3,"expectedMatches":1,"sig":"83FA020F8FBE0000008B493083F8010F856402000083F9050F84A900"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined)","kind":"short","jgRVA":"0x05572994","jgOff":3,"expectedMatches":1,"sig":"83FA027F7A8B493083F80175684531F683F905740583F90A75"}]},
 {"name":"152-linux","container":"elf","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)","kind":"short","jgRVA":"0x0985B449","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)","kind":"short","jgRVA":"0x0985B0F4","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::MaybeReEnableExtension (inlined)","kind":"short","jgRVA":"0x0985B238","jgOff":4,"expectedMatches":1,"sig":"837B50027F30488B8B280200008B413080BB08020000007508"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)","kind":"near","jgRVA":"0x0A256BAA","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FD1000000488B8B280200008B413080BB080200000075"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x0599A69A","jgOff":4,"expectedMatches":1,"sig":"837E50020F8F8E000000498B8E280200008B41304180BE0802000000"}]},
-{"name":"151-linux-arm64","container":"elf-arm64","sites":[{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"bcond","jgRVA":"0x05E6C0CC","jgOff":4,"expectedMatches":1,"sig":"3F0800716C0100545F040071A10000547F14007164184A7AE0079F1AC0035FD6"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined)","kind":"bcond","jgRVA":"0x06086804","jgOff":4,"expectedMatches":1,"sig":"5F0900710C010054293140B91F050071611300543F150071600000543F290071"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined, 2nd call site)","kind":"bcond","jgRVA":"0x06A71584","jgOff":4,"expectedMatches":1,"sig":"5F0900710C010054293140B91F050071A11300543F150071600000543F290071"},{"name":"MV2DeprecationImpactChecker::IsExtensionAffected (shared predicate; OnExtensionSystemReady / MaybeReEnableExtension / ShouldBlockExtensionEnable call it out-of-line)","kind":"bcond","jgRVA":"0x0A525764","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054291441F92A204839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined)","kind":"bcond","jgRVA":"0x0A69570C","jgOff":4,"expectedMatches":1,"sig":"5F090071EC030054293140B91F050071010300543F150071F4031F2A60000054"}]},
 {"name":"152-linux-arm64","container":"elf-arm64","sites":[{"name":"ManifestV2Handler::MaybeReEnableExtension (shared body)","kind":"bcond","jgRVA":"0x05D64DD8","jgOff":4,"expectedMatches":2,"sig":"1F0900712C020054691641F96A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)","kind":"bcond","jgRVA":"0x05D64F9C","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054091441F90A204839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x05F78874","jgOff":4,"expectedMatches":2,"sig":"1F0900718C010054891641F98A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady (shared body)","kind":"bcond","jgRVA":"0x0696E3C8","jgOff":4,"expectedMatches":2,"sig":"3F090071EC4A0054091541F90A214839283140B98A000037296940B93F050071"}]},
-{"name":"152-x86","container":"pe32","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x06FB7547","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x0299ED6A","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x00A580A6","jgOff":4,"expectedMatches":1,"sig":"837928027F2C8B91640100008B421880B95401000000750C8B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x06FB736D","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x0791012F","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B411880BF5401000000750C8B"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x010851A8","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B411880BB54010000007508"}]},
-{"name":"151-macos-x64","container":"macho-x64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"short","jgRVA":"0x01B652F7","jgOff":3,"expectedMatches":1,"sig":"83FA027F5B8B493083F80175494531F683F905740583F90A75"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"short","jgRVA":"0x030822AA","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable","kind":"short","jgRVA":"0x04727A9D","jgOff":3,"expectedMatches":1,"sig":"83FA027F298B493083F801751783F9050F95C283F90A0F95C0"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"short","jgRVA":"0x071364A4","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x071364F7","jgOff":3,"expectedMatches":1,"sig":"83FE027F1F83FA01751083F9050F95C283F90A0F95C020D05D"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"short","jgRVA":"0x07136608","jgOff":4,"expectedMatches":1,"sig":"837B50027F30488B8B280200008B413080BB08020000007508"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"near","jgRVA":"0x07B4CFF9","jgOff":3,"expectedMatches":1,"sig":"83FA020F8FA40000008B493083F8010F850F02000083F9050F848F00"}]},
-{"name":"151-macos-arm64","container":"macho-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x0178A5E8","jgOff":4,"expectedMatches":1,"sig":"1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x021EFD80","jgOff":4,"expectedMatches":1,"sig":"5F0900716C040054293140B91F05007181030054140080523F15007160000054"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable","kind":"bcond","jgRVA":"0x03ED7910","jgOff":4,"expectedMatches":1,"sig":"5F090071CC010054293140B91F050071E10000543F15007124194A7AE0079F1A"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"bcond","jgRVA":"0x0642852C","jgOff":4,"expectedMatches":1,"sig":"1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"bcond","jgRVA":"0x06428570","jgOff":4,"expectedMatches":1,"sig":"3F0800716C0100545F040071A10000547F14007164184A7AE0079F1AC0035FD6"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x064286A8","jgOff":4,"expectedMatches":1,"sig":"1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"bcond","jgRVA":"0x06DB8584","jgOff":4,"expectedMatches":1,"sig":"5F090071EC000054293140B91F050071210F00543F15007124194A7AC1060054"}]},
-{"name":"151-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x01058388","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x0125352C","jgOff":4,"expectedMatches":1,"sig":"5F0900716C050054293140B91F050071810400543F150071F4031F2A60000054"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable","kind":"bcond","jgRVA":"0x02C0729C","jgOff":4,"expectedMatches":1,"sig":"5F090071CC010054293140B91F050071E10000543F15007124194A7AE0079F1A"},{"name":"MV2DeprecationImpactChecker::IsExtensionAffected","kind":"bcond","jgRVA":"0x02C07334","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054291441F92A204839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"bcond","jgRVA":"0x07836B6C","jgOff":4,"expectedMatches":1,"sig":"3F0800716C0100545F040071A10000547F14007164184A7AE0079F1AC0035FD6"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x07836C94","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"bcond","jgRVA":"0x082F94F8","jgOff":4,"expectedMatches":1,"sig":"5F090071EC010054293140B91F050071610700543F150071400100543F290071"}]},
-{"name":"152-macos-x64","container":"macho-x64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"short","jgRVA":"0x01BA0A91","jgOff":4,"expectedMatches":1,"sig":"837E50027F6F498B8E280200008B41304180BE080200000075"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"short","jgRVA":"0x0312B1FA","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"short","jgRVA":"0x048BB6E4","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x075489B8","jgOff":4,"expectedMatches":1,"sig":"837B50027F30488B8B280200008B413080BB08020000007508"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation (2)","kind":"short","jgRVA":"0x07548BB9","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"near","jgRVA":"0x07F56A10","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FB7000000488B8B280200008B413080BB080200000075"}]},
-{"name":"152-macos-arm64","container":"macho-arm64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x02218740","jgOff":4,"expectedMatches":1,"sig":"1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x0320635C","jgOff":4,"expectedMatches":1,"sig":"1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"bcond","jgRVA":"0x03FFBD84","jgOff":4,"expectedMatches":1,"sig":"1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x066F0E38","jgOff":4,"expectedMatches":2,"sig":"1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x026AC410","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"}]},
+{"name":"152-x86","container":"pe32","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x06FB7547","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x0299ED6A","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x00A580A6","jgOff":4,"expectedMatches":1,"sig":"837928027F2C8B91640100008B421880B95401000000750C8B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x06FB736D","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x0791012F","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B411880BF5401000000750C8B"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x010851A8","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B411880BB54010000007508"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x018CF790","jgOff":4,"expectedMatches":1,"sig":"837810017F0953E8A403000083C40489F953E809EB95FF89D9"}]},
+{"name":"152-macos-x64","container":"macho-x64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"short","jgRVA":"0x01BA0A91","jgOff":4,"expectedMatches":1,"sig":"837E50027F6F498B8E280200008B41304180BE080200000075"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"short","jgRVA":"0x0312B1FA","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"short","jgRVA":"0x048BB6E4","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x075489B8","jgOff":4,"expectedMatches":1,"sig":"837B50027F30488B8B280200008B413080BB08020000007508"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation (2)","kind":"short","jgRVA":"0x07548BB9","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"near","jgRVA":"0x07F56A10","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FB7000000488B8B280200008B413080BB080200000075"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"near","optional":true,"jgRVA":"0x016970B1","jgOff":10,"stockOpcode":"0x0F84","expectedMatches":1,"sig":"4C89F7E8D150C20484C00F8400FDFFFFEB10"}]},
+{"name":"152-macos-arm64","container":"macho-arm64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x02218740","jgOff":4,"expectedMatches":1,"sig":"1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x0320635C","jgOff":4,"expectedMatches":1,"sig":"1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"bcond","jgRVA":"0x03FFBD84","jgOff":4,"expectedMatches":1,"sig":"1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x066F0E38","jgOff":4,"expectedMatches":2,"sig":"1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x026AC410","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"cbz","optional":true,"jgRVA":"0x01D16FB4","jgOff":8,"expectedMatches":1,"sig":"E00314AA9C28DE94A0EAFF340B000014"}]},
 {"name":"152-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x01014CBC","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x013591BC","jgOff":4,"expectedMatches":2,"sig":"1F090071EC050054891641F98A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)","kind":"bcond","jgRVA":"0x02C1FD9C","jgOff":4,"expectedMatches":2,"sig":"1F0900710C020054291441F92A204839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x07702AEC","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x017E3410","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"}]},
 {"name":"152-chromium-linux","container":"elf","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate)","kind":"short","jgRVA":"0x0923C9D9","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"}]},
 {"name":"152-chromium","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate)","kind":"short","jgRVA":"0x04723915","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"}]},
 {"name":"152-chromium-macos-x64","container":"macho-x64","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate)","kind":"short","jgRVA":"0x04814269","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"}]},
-{"name":"151-chromium-linux","container":"elf","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate)","kind":"short","jgRVA":"0x09350E79","jgOff":3,"expectedMatches":1,"sig":"83FE027F1D83FA087718BE0A0100000FA3D6730E83F9050F95"}]},
-{"name":"151-chromium-linux-xtradeb","container":"elf","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"near","jgRVA":"0x07A64A55","jgOff":4,"expectedMatches":1,"sig":"837850020F8FD5000000488B90280200008B4A3080B8080200000075"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"short","jgRVA":"0x07A65559","jgOff":4,"expectedMatches":1,"sig":"837B50027F2F488B8B280200008B413080BB08020000007512"},{"name":"ManagementSetEnabledFunction::CheckManifestV2Deprecation (inlined predicate)","kind":"short","jgRVA":"0x07DAC2A3","jgOff":3,"expectedMatches":1,"sig":"83FA027F2083F908771BBA0A0100000FA3CA73118B403083F8"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined predicate)","kind":"short","jgRVA":"0x08C5DADA","jgOff":3,"expectedMatches":1,"sig":"83FA027F4683F9087741BA0A0100000FA3CA73378B40304531"}]},
 {"name":"154","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08E81945","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F805"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x036B5704","jgOff":4,"expectedMatches":1,"sig":"837A50027F34488B8A280200008B413080BA080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x028891C3","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08E81726","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x0994F021","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01663F71","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body, 2nd copy, diverged reg)","kind":"short","jgRVA":"0x036B5784","jgOff":4,"expectedMatches":1,"sig":"837950027F34488B91280200008B423080B908020000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C21E3F","jgOff":4,"expectedMatches":1,"sig":"837F50027F2C80BF08020000000F857E010000488B87280200"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x01F0354F","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
-{"name":"154-x86","container":"pe32","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08BBA217","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x031C47CA","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01B51743","jgOff":4,"expectedMatches":2,"sig":"837928027F288B91640100008B421880B95401000000750C8B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08BBA108","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x093997BF","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B411880BF5401000000750C8B"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01205788","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B411880BB54010000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x014E0239","jgOff":4,"expectedMatches":1,"sig":"837928027F268B45D480B8540100000075628B45D48B806401"}]},
+{"name":"154-x86","container":"pe32","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08BBA217","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x031C47CA","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01B51743","jgOff":4,"expectedMatches":2,"sig":"837928027F288B91640100008B421880B95401000000750C8B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08BBA108","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x093997BF","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B411880BF5401000000750C8B"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01205788","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B411880BB54010000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x014E0239","jgOff":4,"expectedMatches":1,"sig":"837928027F268B45D480B8540100000075628B45D48B806401"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x018B45B0","jgOff":4,"expectedMatches":1,"sig":"837810017F0953E8C40F000083C40489F953E8D903000089D9"}]},
 {"name":"154-linux","container":"elf","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)","kind":"short","jgRVA":"0x0991AA29","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)","kind":"short","jgRVA":"0x0991A6D4","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::MaybeReEnableExtension (inlined)","kind":"short","jgRVA":"0x0991A818","jgOff":4,"expectedMatches":1,"sig":"837B50027F30488B8B280200008B413080BB08020000007508"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)","kind":"near","jgRVA":"0x0A37E1CA","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FD1000000488B8B280200008B413080BB080200000075"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x05AB5FFA","jgOff":4,"expectedMatches":1,"sig":"837E50020F8F8E000000498B8E280200008B41304180BE0802000000"},{"name":"IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)","kind":"short","jgRVA":"0x053B0E40","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"}]},
-{"name":"154-macos-x64","container":"macho-x64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"short","jgRVA":"0x01CD2151","jgOff":4,"expectedMatches":1,"sig":"837E50027F6F498B8E280200008B41304180BE080200000075"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"short","jgRVA":"0x0322BD39","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"short","jgRVA":"0x0497FD04","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x07789FB8","jgOff":4,"expectedMatches":1,"sig":"837B50027F30488B8B280200008B413080BB08020000007508"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation (2)","kind":"short","jgRVA":"0x0778A1B9","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"near","jgRVA":"0x081B49B0","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FB7000000488B8B280200008B413080BB080200000075"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x028F0E51","jgOff":4,"expectedMatches":1,"sig":"837F50027F34488B45A880B808020000000F852D010000488B"}]},
 {"name":"154-linux-arm64","container":"elf-arm64","sites":[{"name":"ManifestV2Handler::MaybeReEnableExtension (shared body)","kind":"bcond","jgRVA":"0x05E87478","jgOff":4,"expectedMatches":2,"sig":"1F0900712C020054691641F96A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)","kind":"bcond","jgRVA":"0x05E8763C","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054091441F90A204839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x0609B370","jgOff":4,"expectedMatches":2,"sig":"1F0900718C010054891641F98A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady (shared body)","kind":"bcond","jgRVA":"0x06AB7470","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)","kind":"bcond","jgRVA":"0x09B77244","jgOff":4,"expectedMatches":1,"sig":"7F0900718C0100544B1541F94C2148396A3140B98C0000376B6940B97F050071"}]},
-{"name":"155","container":"pe","sites":[{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0155EB53","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x016CB234","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8E000000488B8F280200008B415080BF080200000075"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C91ED1","jgOff":4,"expectedMatches":1,"sig":"837F50027F2F80BF08020000000F8501010000488B87280200"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03269A44","jgOff":4,"expectedMatches":2,"sig":"837A50027F37488B8A280200008B415080BA0802000000750B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x084DEA66","jgOff":4,"expectedMatches":1,"sig":"837E50027F30488B8E280200008B415080BE0802000000750B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x084DEC85","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x090A7931","jgOff":4,"expectedMatches":1,"sig":"837F50027F51488B8F280200008B415080BF0802000000750F"},{"name":"webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)","kind":"featurebyte","optional":true,"feature":"webRequestBlocking","structRVA":"0x10228E10","patchOff":192,"stock":2,"patched":3,"verify":{"96":2,"180":0,"188":0,"196":1},"expectedMatches":1},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x01FF3FFF","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
-{"name":"155-x86","container":"pe32","sites":[{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x011D9EB8","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B412880BB54010000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x014BC549","jgOff":4,"expectedMatches":1,"sig":"837928027F268B45D480B8540100000075628B45D48B806401"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01AFBEF3","jgOff":4,"expectedMatches":2,"sig":"837928027F288B91640100008B422880B95401000000750C8B"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x032F125A","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B412880BA540100000075088B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08F66848","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B412880BE540100000075088B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08F66957","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x097626DF","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B412880BF5401000000750C8B"}]},
+{"name":"155","container":"pe","sites":[{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0155EB53","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x016CB234","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8E000000488B8F280200008B415080BF080200000075"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C91ED1","jgOff":4,"expectedMatches":1,"sig":"837F50027F2F80BF08020000000F8501010000488B87280200"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03269A44","jgOff":4,"expectedMatches":2,"sig":"837A50027F37488B8A280200008B415080BA0802000000750B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x084DEA66","jgOff":4,"expectedMatches":1,"sig":"837E50027F30488B8E280200008B415080BE0802000000750B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x084DEC85","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x090A7931","jgOff":4,"expectedMatches":1,"sig":"837F50027F51488B8F280200008B415080BF0802000000750F"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x01FF3FFF","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
+{"name":"155-x86","container":"pe32","sites":[{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x011D9EB8","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B412880BB54010000007508"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x014BC549","jgOff":4,"expectedMatches":1,"sig":"837928027F268B45D480B8540100000075628B45D48B806401"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01AFBEF3","jgOff":4,"expectedMatches":2,"sig":"837928027F288B91640100008B422880B95401000000750C8B"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x032F125A","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B412880BA540100000075088B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08F66848","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B412880BE540100000075088B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08F66957","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x097626DF","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B412880BF5401000000750C8B"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x0189B900","jgOff":4,"expectedMatches":1,"sig":"837810017F0953E81412000083C40489F96A0053E8D7030000"}]},
 {"name":"155-linux","container":"elf","sites":[{"name":"IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)","kind":"short","jgRVA":"0x041AAAE0","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x0644CEE2","jgOff":4,"expectedMatches":1,"sig":"837F50027F324180BC2408020000000F85D6000000498B8424"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x06835F7D","jgOff":4,"expectedMatches":1,"sig":"837E50020F8F91000000498B8E280200008B41504180BE0802000000"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)","kind":"short","jgRVA":"0x099272C4","jgOff":4,"expectedMatches":1,"sig":"837E50027F32554889E5488B8E280200008B415080BE080200"},{"name":"ManifestV2Handler::MaybeReEnableExtension (inlined)","kind":"short","jgRVA":"0x09927408","jgOff":4,"expectedMatches":1,"sig":"837B50027F33488B8B280200008B415080BB0802000000750B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)","kind":"short","jgRVA":"0x09927619","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)","kind":"near","jgRVA":"0x0A3DC86A","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FD4000000488B8B280200008B415080BB080200000075"}]},
-{"name":"155-macos-x64","container":"macho-x64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"short","jgRVA":"0x01CF5558","jgOff":4,"expectedMatches":1,"sig":"837E50027F72498B8E280200008B41504180BE080200000075"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x028F526E","jgOff":4,"expectedMatches":1,"sig":"837F50027F324180BC2408020000000F85E1000000498B8424"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"short","jgRVA":"0x0322A6B9","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"short","jgRVA":"0x0496FB64","jgOff":4,"expectedMatches":1,"sig":"837E50027F32554889E5488B8E280200008B415080BE080200"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x07806AE8","jgOff":4,"expectedMatches":1,"sig":"837B50027F33488B8B280200008B415080BB0802000000750B"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation (2)","kind":"short","jgRVA":"0x07806CE9","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"near","jgRVA":"0x0827BE80","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FBA000000488B8B280200008B415080BB080200000075"}]},
-{"name":"155-macos-arm64","container":"macho-arm64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x022BD404","jgOff":4,"expectedMatches":1,"sig":"1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x026FFEFC","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x031F4CA4","jgOff":4,"expectedMatches":1,"sig":"1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"bcond","jgRVA":"0x0403B248","jgOff":4,"expectedMatches":1,"sig":"1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x068F3880","jgOff":4,"expectedMatches":2,"sig":"1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071"}]},
+{"name":"155-macos-x64","container":"macho-x64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"short","jgRVA":"0x01CF5558","jgOff":4,"expectedMatches":1,"sig":"837E50027F72498B8E280200008B41504180BE080200000075"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"short","jgRVA":"0x028F526E","jgOff":4,"expectedMatches":1,"sig":"837F50027F324180BC2408020000000F85E1000000498B8424"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"short","jgRVA":"0x0322A6B9","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"short","jgRVA":"0x0496FB64","jgOff":4,"expectedMatches":1,"sig":"837E50027F32554889E5488B8E280200008B415080BE080200"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation","kind":"short","jgRVA":"0x07806AE8","jgOff":4,"expectedMatches":1,"sig":"837B50027F33488B8B280200008B415080BB0802000000750B"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation (2)","kind":"short","jgRVA":"0x07806CE9","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"StandardManagementPolicyProvider::UserMayInstall","kind":"near","jgRVA":"0x0827BE80","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FBA000000488B8B280200008B415080BB080200000075"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"near","optional":true,"jgRVA":"0x01697E25","jgOff":10,"stockOpcode":"0x0F84","expectedMatches":1,"sig":"4C89F7E87DEBD80484C00F84FCFCFFFFEB10"}]},
+{"name":"155-macos-arm64","container":"macho-arm64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x022BD404","jgOff":4,"expectedMatches":1,"sig":"1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x026FFEFC","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x031F4CA4","jgOff":4,"expectedMatches":1,"sig":"1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"bcond","jgRVA":"0x0403B248","jgOff":4,"expectedMatches":1,"sig":"1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x068F3880","jgOff":4,"expectedMatches":2,"sig":"1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"cbz","optional":true,"jgRVA":"0x01B613F4","jgOff":8,"expectedMatches":1,"sig":"E00314AA642EEA9460DFFF340B000014"}]},
 {"name":"155-linux-arm64","container":"elf-arm64","sites":[{"name":"ManifestV2Handler::MaybeReEnableExtension (shared body)","kind":"bcond","jgRVA":"0x05E7E1E4","jgOff":4,"expectedMatches":2,"sig":"1F0900712C020054691641F96A224839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)","kind":"bcond","jgRVA":"0x05E7E3A8","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054091441F90A204839285140B98A000037298940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x06096308","jgOff":4,"expectedMatches":2,"sig":"1F0900718C010054891641F98A224839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady (shared body)","kind":"bcond","jgRVA":"0x06B05764","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)","kind":"bcond","jgRVA":"0x0A2934B4","jgOff":4,"expectedMatches":1,"sig":"7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x0A298B7C","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"}]},
-{"name":"154-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x010B5620","jgOff":4,"expectedMatches":1,"sig":"5F0900718C0100542A1541F92B214839495140B98B0000374A8940B95F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x01354B40","jgOff":4,"expectedMatches":2,"sig":"1F0900712C060054891641F98A224839285140B98A000037298940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x0182F8EC","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)","kind":"bcond","jgRVA":"0x02C30AD8","jgOff":4,"expectedMatches":2,"sig":"1F0900710C020054291441F92A204839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x079DBD98","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839285140B98A000037298940B93F050071"}]},
+{"name":"154-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x010B5620","jgOff":4,"expectedMatches":1,"sig":"5F0900718C0100542A1541F92B214839495140B98B0000374A8940B95F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x01354B40","jgOff":4,"expectedMatches":2,"sig":"1F0900712C060054891641F98A224839285140B98A000037298940B93F050071"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant)","kind":"bcond","jgRVA":"0x0182F8EC","jgOff":8,"expectedMatches":1,"sig":"C85240B91F0900718C010054C8224839"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)","kind":"bcond","jgRVA":"0x02C30AD8","jgOff":4,"expectedMatches":2,"sig":"1F0900710C020054291441F92A204839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x079DBD98","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839285140B98A000037298940B93F050071"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"bcond","optional":true,"jgRVA":"0x01B0E0E8","jgOff":8,"expectedMatches":1,"sig":"881A40B91F0500716C000054E0A30091"}]},
 {"name":"154-cft","container":"pe","sites":[{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01688BA1","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01775F73","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)","kind":"short","jgRVA":"0x01C4A96D","jgOff":4,"expectedMatches":1,"sig":"837F50027F2C80BF08020000000F857E010000488B87280200"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x033B71F4","jgOff":4,"expectedMatches":2,"sig":"837A50027F34488B8A280200008B413080BA08020000007508"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x085A9A16","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x085A9C35","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x09119E71","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","optional":true,"jgRVA":"0x01FE617F","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]}
 ]}'''
 
@@ -101,8 +91,22 @@ KIND_SHORT, KIND_NEAR, KIND_BCOND = 0, 1, 2
 # byte (e.g. webRequestBlocking's max_manifest_version 2 -> 3, granting the
 # permission to MV3). See mv2-reversing.md.
 KIND_FEATUREBYTE = 3
+# cbz: arm64 CBZ w?, target (32-bit, 0x34xxxxxx) rewritten to the unconditional
+# B (0x14yyyyyy) with the SAME resolved target: imm26 is recomputed from the
+# sign-extended imm19 (never the raw field bits - the layouts differ), so the
+# branch keeps its own existing target and only its conditionality is removed.
+# Used by the Gate B "skip FilterSensitivePolicies" sites on mac-arm64.
+KIND_CBZ = 4
 VALID_CONTAINERS = ("pe", "pe32", "pe-arm64", "elf", "elf-arm64", "macho-x64", "macho-arm64")
 ARM64_CONTAINERS = ("pe-arm64", "elf-arm64", "macho-arm64")
+
+# Default stock opcodes for the short/near kinds. A site may carry an optional
+# 'stockOpcode' field ("0x7F" / "0x0F84") when its stock encoding differs (e.g.
+# Gate B on mac-x64 is a near JE, 0F 84, patched to the same 90 E9 disp32 form).
+# The sig bytes at jgOff remain the single source of truth at runtime; the field
+# only strengthens import validation.
+STOCK_SHORT = b"\x7F"
+STOCK_NEAR = b"\x0F\x8F"
 
 
 class Mv2Error(Exception):
@@ -309,7 +313,7 @@ def import_milestones(override):
             optional = bool(rs.get("optional", False))
             kraw = rs.get("kind")
             kind = {"short": KIND_SHORT, "near": KIND_NEAR, "bcond": KIND_BCOND,
-                    "featurebyte": KIND_FEATUREBYTE}.get(kraw)
+                    "featurebyte": KIND_FEATUREBYTE, "cbz": KIND_CBZ}.get(kraw)
             if kind is None:
                 raise Mv2Error(f"milestone {name} site '{sname}': unknown kind '{kraw}'")
             if kind == KIND_FEATUREBYTE:
@@ -354,10 +358,10 @@ def import_milestones(override):
                                   stock=sb, patched=pb, verify=verify))
                 continue
             is_arm = container in ARM64_CONTAINERS
-            if kind == KIND_BCOND and not is_arm:
-                raise Mv2Error(f"milestone {name} site '{sname}': 'bcond' is only valid in an arm64 milestone")
-            if kind != KIND_BCOND and is_arm:
-                raise Mv2Error(f"milestone {name} site '{sname}': arm64 milestones use the 'bcond' kind, not '{kraw}'")
+            if kind in (KIND_BCOND, KIND_CBZ) and not is_arm:
+                raise Mv2Error(f"milestone {name} site '{sname}': '{kraw}' is only valid in an arm64 milestone")
+            if kind not in (KIND_BCOND, KIND_CBZ) and is_arm:
+                raise Mv2Error(f"milestone {name} site '{sname}': arm64 milestones use the 'bcond'/'cbz' kinds, not '{kraw}'")
             sig_text = str(rs.get("sig", ""))
             if not sig_text or len(sig_text) % 2 or not re.fullmatch(r"[0-9A-Fa-f]+", sig_text):
                 raise Mv2Error(f"milestone {name} site '{sname}': sig must be non-empty hexadecimal bytes")
@@ -365,17 +369,42 @@ def import_milestones(override):
             jg_off = rs.get("jgOff")
             if not isinstance(jg_off, int) or isinstance(jg_off, bool) or jg_off < 0 or jg_off >= len(sig):
                 raise Mv2Error(f"milestone {name} site '{sname}': jgOff out of range (sig len {len(sig)})")
-            need = {KIND_SHORT: 2, KIND_NEAR: 6, KIND_BCOND: 4}[kind]
+            need = {KIND_SHORT: 2, KIND_NEAR: 6, KIND_BCOND: 4, KIND_CBZ: 4}[kind]
             if jg_off + need > len(sig):
                 raise Mv2Error(f"milestone {name} site '{sname}': jump runs past the sig")
-            if kind == KIND_SHORT and sig[jg_off] != 0x7F:
-                raise Mv2Error(f"milestone {name} site '{sname}': jgOff points at 0x{sig[jg_off]:02X}, not a short jg")
-            if kind == KIND_NEAR and sig[jg_off:jg_off + 2] != b"\x0f\x8f":
-                raise Mv2Error(f"milestone {name} site '{sname}': near jg is not 0F 8F")
+            # Optional stockOpcode field: the sig bytes at jgOff are the real
+            # stock encoding; this field only pins it at load time.
+            stock_field = rs.get("stockOpcode")
+            expected_stock = None
+            if stock_field is not None:
+                sf = str(stock_field)
+                if not re.fullmatch(r"0[xX][0-9A-Fa-f]+", sf):
+                    raise Mv2Error(f"milestone {name} site '{sname}': bad stockOpcode")
+                sb = bytes.fromhex(sf[2:].zfill(2))
+                want = 1 if kind == KIND_SHORT else (2 if kind == KIND_NEAR else None)
+                if want is None:
+                    raise Mv2Error(f"milestone {name} site '{sname}': stockOpcode is only valid for the short/near kinds")
+                if len(sb) != want:
+                    raise Mv2Error(f"milestone {name} site '{sname}': stockOpcode must be {want} byte(s) for '{kraw}'")
+                expected_stock = sb
+            if expected_stock is None:
+                expected_stock = STOCK_SHORT if kind == KIND_SHORT else (STOCK_NEAR if kind == KIND_NEAR else None)
+            if kind == KIND_SHORT:
+                if expected_stock is not None and sig[jg_off:jg_off + len(expected_stock)] != expected_stock:
+                    raise Mv2Error(f"milestone {name} site '{sname}': jgOff points at 0x{sig[jg_off]:02X}, not the declared stockOpcode")
+            elif kind == KIND_NEAR:
+                if expected_stock is not None and sig[jg_off:jg_off + 2] != expected_stock:
+                    raise Mv2Error(f"milestone {name} site '{sname}': near stock opcode is not {' '.join(f'{b:02X}' for b in expected_stock)}")
+            if kind == KIND_CBZ and jg_off % 4 != 0:
+                raise Mv2Error(f"milestone {name} site '{sname}': cbz jgOff must be word-aligned (4-byte steps)")
             if kind == KIND_BCOND:
                 w = int.from_bytes(sig[jg_off:jg_off + 4], "little")
                 if (w & 0xFF00001F) != 0x5400000C:
                     raise Mv2Error(f"milestone {name} site '{sname}': jgOff is not a stock b.gt (GT) word (0x{w:08X})")
+            if kind == KIND_CBZ:
+                w = int.from_bytes(sig[jg_off:jg_off + 4], "little")
+                if (w & 0xFF000000) != 0x34000000:
+                    raise Mv2Error(f"milestone {name} site '{sname}': jgOff is not a stock 32-bit CBZ word (0x{w:08X})")
             expected = rs.get("expectedMatches")
             if not isinstance(expected, int) or isinstance(expected, bool) or expected < 1:
                 raise Mv2Error(f"milestone {name} site '{sname}': expectedMatches must be >= 1")
@@ -389,12 +418,37 @@ def import_milestones(override):
 
 # ============================================================================
 # Matching engine. Exact on every byte except the masked jump:
-#   short : jgOff in {7F,EB}; jgOff+1 (disp8) wild
-#   near  : jgOff,+1 the pair {0F 8F | 90 E9}; +2..+5 (disp32) wild
+#   short : jgOff in {stock byte (sig), EB}; jgOff+1 (disp8) wild
+#   near  : jgOff,+1 the pair {sig stock pair | 90 E9}; +2..+5 (disp32) wild
 #   bcond : the 4-byte LE word at jgOff - 0x54 + bit4=0 fixed, cond in {0xC,0xE},
-#           imm19 wild. Accepting the patched form (EB / 90 E9 / AL) is what makes
-#           a re-run idempotent instead of "no known layout matched".
+#           imm19 wild
+#   cbz   : the 4-byte LE word at jgOff is the stock CBZ (0x34, imm19 wild, Rt
+#           = the sig's Rt) OR the patched unconditional B (0x14) whose
+#           resolved target equals the sig CBZ's target (imm19/imm26 layouts
+#           differ, so both encodings are decoded and compared by target)
+# Accepting the patched form (EB / 90 E9 / AL / 0x14) is what makes a re-run
+# idempotent instead of "no known layout matched".
 # ============================================================================
+def _sign_extend(v, bits):
+    if v & (1 << (bits - 1)):
+        v -= 1 << bits
+    return v
+
+
+def _cbz_word_ok(cand_word, sig_word):
+    """True when cand_word is the stock CBZ or the patched B for the CBZ
+    recorded in sig_word. Stock: 0x34 CBZ, imm19 wild (drift-tolerant), Rt
+    pinned to the sig's. Patched: unconditional B (0x14) whose resolved target
+    equals the sig CBZ's (so a foreign B never reads as 'ours')."""
+    if (cand_word & 0xFF000000) == 0x34000000:
+        return (cand_word & 0x1F) == (sig_word & 0x1F)
+    if (cand_word & 0xFC000000) == 0x14000000:
+        disp_cand = _sign_extend(cand_word & 0x03FFFFFF, 26)
+        disp_ref = _sign_extend((sig_word >> 5) & 0x7FFFF, 19)
+        return disp_cand == disp_ref
+    return False
+
+
 def sig_matches_at(buf, start, sig, jg_off, kind):
     n = len(sig)
     if start < 0 or start + n > len(buf):
@@ -407,11 +461,17 @@ def sig_matches_at(buf, start, sig, jg_off, kind):
         cond = word & 0xF
         if cond != 0x0C and cond != 0x0E:
             return False
+    elif kind == KIND_CBZ:
+        w0 = start + jg_off
+        word = buf[w0] | (buf[w0 + 1] << 8) | (buf[w0 + 2] << 16) | (buf[w0 + 3] << 24)
+        sig_word = int.from_bytes(sig[jg_off:jg_off + 4], "little")
+        if not _cbz_word_ok(word, sig_word):
+            return False
     for k in range(n):
         p = buf[start + k]
         if kind == KIND_SHORT:
             if k == jg_off:
-                if p != 0x7F and p != 0xEB:
+                if p != sig[k] and p != 0xEB:
                     return False
             elif k == jg_off + 1:
                 pass
@@ -420,7 +480,7 @@ def sig_matches_at(buf, start, sig, jg_off, kind):
         elif kind == KIND_NEAR:
             if k == jg_off:
                 p1 = buf[start + jg_off + 1]
-                if not ((p == 0x0F and p1 == 0x8F) or (p == 0x90 and p1 == 0xE9)):
+                if not ((p == sig[k] and p1 == sig[k + 1]) or (p == 0x90 and p1 == 0xE9)):
                     return False
             elif k == jg_off + 1:
                 pass
@@ -428,7 +488,7 @@ def sig_matches_at(buf, start, sig, jg_off, kind):
                 pass
             elif p != sig[k]:
                 return False
-        else:  # bcond: the 4 branch-word bytes were validated above
+        else:  # bcond / cbz: the branch word was validated above
             if jg_off <= k <= jg_off + 3:
                 pass
             elif p != sig[k]:
@@ -440,7 +500,7 @@ def _build_anchor(sig, jg_off, kind):
     """Longest fixed (unmasked) run in the sig -> a raw anchor for bytes.find.
     The two maximal runs are [0, jgOff) and [jgOff+masklen, len); pick the longer.
     Returns (anchor_bytes, anchor_off_within_sig)."""
-    mask_len = {KIND_SHORT: 2, KIND_NEAR: 6, KIND_BCOND: 4}[kind]
+    mask_len = {KIND_SHORT: 2, KIND_NEAR: 6, KIND_BCOND: 4, KIND_CBZ: 4}[kind]
     mask_end = jg_off + mask_len
     a_len, a_start = jg_off, 0
     tail = len(sig) - mask_end
@@ -1017,26 +1077,28 @@ def apply_flips(buf, flips, apply=True, verbose=False):
         k = site.kind
         if k == KIND_SHORT:
             cur = buf[off]
+            stock_b = site.sig[site.jg_off]
             if cur == 0xEB:
                 already += 1
                 written.append((off, b"\xEB"))
                 continue
-            if cur != 0x7F:
+            if cur != stock_b:
                 if verbose:
                     print(f"    {TAG['warn']} Skipped one change - it didn't look the way we expected.")
                 continue
             stock += 1
+            applied += 1
             if apply:
                 buf[off] = 0xEB
-            applied += 1
             written.append((off, b"\xEB"))
         elif k == KIND_NEAR:
             o0, o1 = buf[off], buf[off + 1]
+            stock_b = bytes(site.sig[site.jg_off:site.jg_off + 2])
             if o0 == 0x90 and o1 == 0xE9:
                 already += 1
                 written.append((off, b"\x90\xE9"))
                 continue
-            if not (o0 == 0x0F and o1 == 0x8F):
+            if bytes((o0, o1)) != stock_b:
                 if verbose:
                     print(f"    {TAG['warn']} Skipped one change - it didn't look the way we expected.")
                 continue
@@ -1061,6 +1123,27 @@ def apply_flips(buf, flips, apply=True, verbose=False):
                 buf[off] = site.patched
             applied += 1
             written.append((off, bytes([site.patched])))
+        elif k == KIND_CBZ:
+            w = int.from_bytes(bytes(buf[off:off + 4]), "little")
+            sig_w = int.from_bytes(site.sig[site.jg_off:site.jg_off + 4], "little")
+            if _cbz_word_ok(w, sig_w) and (w & 0xFC000000) == 0x14000000:
+                already += 1
+                written.append((off, bytes(buf[off:off + 4])))
+                continue
+            if not ((w & 0xFF000000) == 0x34000000 and (w & 0x1F) == (sig_w & 0x1F)):
+                if verbose:
+                    print(f"    {TAG['warn']} Skipped one change - it didn't look the way we expected.")
+                continue
+            # Rewrite CBZ -> unconditional B with the SAME resolved target:
+            # recompute imm26 from the sign-extended imm19 (the field layouts
+            # differ, so the raw bits never carry over).
+            imm19 = _sign_extend((w >> 5) & 0x7FFFF, 19)
+            new_w = 0x14000000 | (imm19 & 0x3FFFFFF)
+            stock += 1
+            if apply:
+                buf[off:off + 4] = new_w.to_bytes(4, "little")
+            applied += 1
+            written.append((off, new_w.to_bytes(4, "little")))
         else:  # bcond
             cur = buf[off]
             cond = cur & 0x0F
@@ -1088,7 +1171,7 @@ def classify_flip_states(buf, flips):
         k = site.kind
         if k == KIND_SHORT:
             o0 = buf[off]
-            if o0 == 0x7F:
+            if o0 == site.sig[site.jg_off]:
                 stock += 1
             elif o0 == 0xEB:
                 patched += 1
@@ -1096,7 +1179,7 @@ def classify_flip_states(buf, flips):
                 raise Mv2Error("mixed")
         elif k == KIND_NEAR:
             o0, o1 = buf[off], buf[off + 1]
-            if o0 == 0x0F and o1 == 0x8F:
+            if bytes((o0, o1)) == bytes(site.sig[site.jg_off:site.jg_off + 2]):
                 stock += 1
             elif o0 == 0x90 and o1 == 0xE9:
                 patched += 1
@@ -1110,6 +1193,15 @@ def classify_flip_states(buf, flips):
                 patched += 1
             else:
                 raise Mv2Error("mixed")
+        elif k == KIND_CBZ:
+            w = int.from_bytes(bytes(buf[off:off + 4]), "little")
+            sig_w = int.from_bytes(site.sig[site.jg_off:site.jg_off + 4], "little")
+            if not _cbz_word_ok(w, sig_w):
+                raise Mv2Error("mixed")
+            if (w & 0xFF000000) == 0x34000000:
+                stock += 1
+            else:  # unconditional B with the sig CBZ's target
+                patched += 1
         else:
             nib = buf[off] & 0x0F
             if nib == 0x0C:

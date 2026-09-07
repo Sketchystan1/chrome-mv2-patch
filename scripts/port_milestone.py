@@ -195,7 +195,7 @@ def harden(img, cmp_pos, jg_pos, kind):
     just the one it came from.
     """
     text = img.text
-    step = 4 if kind == "bcond" else 1
+    step = 4 if kind in ("bcond", "cbz") else 1
     floor = NEED[kind] + 4
     best = None
     for start in _backoff_starts(text, cmp_pos, kind):
@@ -300,7 +300,7 @@ def carry_names(sites, img, table_path, prev_name, arm, moves):
         matched = False
         for sig_hex in (rewrite_offsets(old["sig"], moves, arm), old["sig"]):
             full = bytes.fromhex(sig_hex)
-            step = 4 if old["kind"] == "bcond" else 1
+            step = 4 if old["kind"] in ("bcond", "cbz") else 1
             lengths = list(range(len(full), max(floor, step) - 1, -step))
             for length in lengths:
                 sig = full[:length]

@@ -98,6 +98,45 @@ def test_pe(tmp):
     A.eq(T.byte_at(a, 0x444), 0x8C, "arm64 PE restore should recover the stock b.gt")
     A.true(pyrun("patch", a, sigs).returncode != 0, "pe (x64) table must not patch a pe-arm64 binary")
 
+    # arm64 PE CBZ -> B rewrite (Gate B mac-arm64 shape)
+    cbz_sig = "E00314AA642EEA9460DFFF340B000014"   # mov; bl; CBZ w0(34FFDF60); b; mov
+    csigs = tmp / "pe.cbz.json"
+    csigs.write_text(json.dumps({"milestones": [{"name": "t-cbz", "container": "pe-arm64", "sites": [
+        {"name": "gate", "kind": "cbz", "jgRVA": "0x00001044", "jgOff": 8,
+         "expectedMatches": 1, "sig": cbz_sig}]}]}))
+    c = tmp / "cbz fixture.dll"
+    T.make_pe(c, cbz_sig, machine=0xAA64)
+    A.true(pyrun("patch", c, csigs).returncode == 0, "cbz PE patch should succeed")
+    A.eq(T.read_word(c, 0x448), 0x17FFFEFB, "cbz patch should rewrite 34FFDF60 -> 17FFFEFB (B, same target)")
+    h = T.sha256(c)
+    pyrun("patch", c, csigs)
+    A.eq(T.sha256(c), h, "idempotent cbz re-patch should preserve bytes")
+    pyrun("restore", c, csigs)
+    A.eq(T.read_word(c, 0x448), 0x34FFDF60, "cbz restore should recover the stock CBZ")
+    # a foreign B (wrong target) must not read as patched
+    fb = tmp / "cbz foreign.dll"
+    T.make_pe(fb, cbz_sig, machine=0xAA64)
+    T.write_word(fb, 0x448, 0x14000001)          # B +4 - not our target
+    A.true(pyrun("patch", fb, csigs).returncode != 0, "foreign B word must not match as patched cbz")
+
+    # near stockOpcode (Gate B mac-x64 shape): stock 0F 84 (je) patched to 90 E9
+    je_sig = "837F50020F84FCFCFFFF488B8C24200100"   # cmp; je near; mov
+    jsigs = tmp / "pe.je.json"
+    jsigs.write_text(json.dumps({"milestones": [{"name": "t-je", "container": "pe", "sites": [
+        {"name": "gate", "kind": "near", "stockOpcode": "0x0F84", "jgRVA": "0x00001044",
+         "jgOff": 4, "expectedMatches": 1, "sig": je_sig}]}]}))
+    j = tmp / "je fixture.dll"
+    T.make_pe(j, je_sig)
+    A.true(pyrun("patch", j, jsigs).returncode == 0, "near-je stockOpcode patch should succeed")
+    A.eq(T.byte_at(j, 0x444), 0x90, "near-je patch should write the 90 E9 nop/jmp pair")
+    A.eq(T.byte_at(j, 0x445), 0xE9, "near-je patch should write E9 at jgOff+1")
+    A.eq(T.read_dword(j, 0x446), -0x304, "near-je patch must preserve disp32 bit-identically")
+    h = T.sha256(j)
+    pyrun("patch", j, jsigs)
+    A.eq(T.sha256(j), h, "idempotent near-je re-patch should preserve bytes")
+    pyrun("restore", j, jsigs)
+    A.eq(T.byte_at(j, 0x444), 0x0F, "near-je restore should recover the stock 0F 84")
+
 
 def test_elf(tmp):
     sigs = tmp / "elf.json"

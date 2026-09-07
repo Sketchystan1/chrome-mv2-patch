@@ -287,10 +287,28 @@ def open_image(path):
 def _masked_indices(jg_off, kind):
     if kind == "short":
         return {jg_off, jg_off + 1}
-    if kind == "bcond":
-        # the whole 4-byte little-endian B.cond word is special (bit-masked in full_ok)
+    if kind in ("bcond", "cbz"):
+        # the whole 4-byte little-endian branch word is special (bit-masked in full_ok)
         return {jg_off, jg_off + 1, jg_off + 2, jg_off + 3}
     return {jg_off, jg_off + 1, jg_off + 2, jg_off + 3, jg_off + 4, jg_off + 5}
+
+
+def _sign_extend(v, bits):
+    if v & (1 << (bits - 1)):
+        v -= 1 << bits
+    return v
+
+
+def _cbz_word_ok(cand_word, sig_word):
+    """True when cand_word is the stock CBZ (0x34, Rt pinned to the sig's) or the
+    patched unconditional B (0x14) whose resolved target equals the sig CBZ's."""
+    if (cand_word & 0xFF000000) == 0x34000000:
+        return (cand_word & 0x1F) == (sig_word & 0x1F)
+    if (cand_word & 0xFC000000) == 0x14000000:
+        disp_cand = _sign_extend(cand_word & 0x03FFFFFF, 26)
+        disp_ref = _sign_extend((sig_word >> 5) & 0x7FFFF, 19)
+        return disp_cand == disp_ref
+    return False
 
 
 def _longest_fixed_run(n, masked):
@@ -328,19 +346,28 @@ def masked_match_count(text, sig, jg_off, kind, cap=None):
                 return False
             if (w & 0xF) not in (0x0C, 0x0E):
                 return False
+        # arm64 CBZ->B: the word is either the stock 32-bit CBZ (Rt pinned,
+        # imm19 wild) or the patched unconditional B with the same target.
+        if kind == "cbz":
+            w = int.from_bytes(bytes(text[r + jg_off:r + jg_off + 4]), "little")
+            sig_w = int.from_bytes(bytes(sig[jg_off:jg_off + 4]), "little")
+            if not _cbz_word_ok(w, sig_w):
+                return False
         for k in range(n):
             if k in masked:
                 b = text[r + k]
                 if kind == "short" and k == jg_off:
-                    if b != 0x7F and b != 0xEB:
+                    # the sig's own stock byte (default 7F jg) or the EB patch
+                    if b != sig[k] and b != 0xEB:
                         return False
                 elif kind == "near" and k == jg_off:
-                    if b != 0x0F and b != 0x90:
+                    # the sig's own stock pair (default 0F 8F jg) or 90 (nop)
+                    if b != sig[k] and b != 0x90:
                         return False
                 elif kind == "near" and k == jg_off + 1:
-                    if b != 0x8F and b != 0xE9:
+                    if b != sig[k] and b != 0xE9:
                         return False
-                # displacement bytes (and bcond word, already validated): wildcard
+                # displacement bytes (and bcond/cbz words, already validated): wildcard
                 continue
             if text[r + k] != sig[k]:
                 return False
@@ -529,9 +556,9 @@ def find_gates_for(img):
 # Default signature window past the cmp, matching the shipping entries (24-32B).
 # Long enough to span the follow-up type/location check, so the anchor is a
 # distinctive fixed run and the masked count is meaningful.
-SIGLEN = {"short": 25, "near": 28, "bcond": 32}
+SIGLEN = {"short": 25, "near": 28, "bcond": 32, "cbz": 32}
 # Minimum bytes that must follow jg_off inside the signature (the jump itself).
-NEED = {"short": 2, "near": 6, "bcond": 4}
+NEED = {"short": 2, "near": 6, "bcond": 4, "cbz": 4}
 
 
 def build_site(img, cmp_pos, jg_pos, kind, name):

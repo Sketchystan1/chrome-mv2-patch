@@ -186,12 +186,15 @@ def audit_table(table, rep):
                 rep.fail("%s: sig is not hex" % tag)
                 bad += 1
                 continue
-            need = 4 if s["kind"] == "bcond" else (6 if s["kind"] == "near" else 2)
+            need = 4 if s["kind"] in ("bcond", "cbz") else (6 if s["kind"] == "near" else 2)
             if s["jgOff"] + need > len(raw):
                 rep.fail("%s: jgOff %d + %d bytes runs past a %d-byte sig"
                          % (tag, s["jgOff"], need, len(raw)))
                 bad += 1
-            elif s["kind"] in JUMP_OPCODE and raw[s["jgOff"]] not in JUMP_OPCODE[s["kind"]]:
+            elif (s["kind"] in JUMP_OPCODE
+                  and raw[s["jgOff"]] in (0xEB, 0xE9)) or (
+                  s["kind"] == "near" and raw[s["jgOff"]] == 0x90 and
+                  len(raw) > s["jgOff"] + 1 and raw[s["jgOff"] + 1] == 0xE9):
                 rep.fail("%s: kind %s but byte at jgOff is 0x%02X, not %s"
                          % (tag, s["kind"], raw[s["jgOff"]],
                             "/".join("0x%02X" % b for b in JUMP_OPCODE[s["kind"]])))
@@ -200,6 +203,21 @@ def audit_table(table, rep):
                                            & 0xFF00001F) not in (0x5400000C, 0x5400000E):
                 rep.fail("%s: kind bcond but the word at jgOff is not b.gt/b.al" % tag)
                 bad += 1
+            elif s["kind"] == "cbz" and (int.from_bytes(raw[s["jgOff"]:s["jgOff"] + 4], "little")
+                                         & 0xFF000000) != 0x34000000:
+                rep.fail("%s: kind cbz but the word at jgOff is not a 32-bit CBZ" % tag)
+                bad += 1
+            elif s.get("stockOpcode") is not None:
+                so = str(s["stockOpcode"])
+                if not re.fullmatch(r"0[xX][0-9A-Fa-f]+", so):
+                    rep.fail("%s: bad stockOpcode" % tag)
+                    bad += 1
+                else:
+                    sb = bytes.fromhex(so[2:].zfill(2))
+                    want = 1 if s["kind"] == "short" else 2
+                    if len(sb) != want or raw[s["jgOff"]:s["jgOff"] + want] != sb:
+                        rep.fail("%s: sig bytes at jgOff do not match stockOpcode" % tag)
+                        bad += 1
             if s["expectedMatches"] < 1:
                 rep.fail("%s: expectedMatches must be >= 1" % tag)
                 bad += 1

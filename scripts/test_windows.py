@@ -203,6 +203,82 @@ try {
     Assert-True (-not (Test-Path -LiteralPath "$armTarget.bak")) 'arm64 restore should remove the backup'
     $script:Signatures = $sigPath
 
+    # --- Windows on ARM (pe-arm64 / cbz) --------------------------------------
+    # Gate B mac-arm64 shape: mov x0,x20 ; bl SFSP ; cbz w0,<skip> ; b +0x2c.
+    # The flip rewrites the CBZ word 0x34FFDF60 to the unconditional B 0x17FFFEFB
+    # with the SAME resolved target (imm26 recomputed from the sign-extended imm19).
+    $cbzSigHex = 'E00314AA642EEA9460DFFF340B000014'
+    $cbzSig = [byte[]]@(0xE0,0x03,0x14,0xAA, 0x64,0x2E,0xEA,0x94, 0x60,0xDF,0xFF,0x34, 0x0B,0x00,0x00,0x14)
+    $cbzTarget = Join-Path $temp 'cbz fixture.dll'
+    $cbzSigPath = Join-Path $temp 'cbz signatures.json'
+    New-TestPe -Path $cbzTarget -Signature $cbzSig -Machine 0xAA64
+    $cbzBuf = [IO.File]::ReadAllBytes($cbzTarget)
+    $cstart = 0x440
+    Assert-True (Test-SigAt -Buf $cbzBuf -Start $cstart -Sig $cbzSig -JgOff 8 -Kind 4) 'stock CBZ should match (cbz)'
+    # patched form: B 0x17FFFEFB - same target as the sig CBZ
+    $cbzBuf[$cstart + 8]  = 0xFB; $cbzBuf[$cstart + 9]  = 0xFE; $cbzBuf[$cstart + 10] = 0xFF; $cbzBuf[$cstart + 11] = 0x17
+    Assert-True (Test-SigAt -Buf $cbzBuf -Start $cstart -Sig $cbzSig -JgOff 8 -Kind 4) 'patched B (same target) should match (idempotent)'
+    Assert-True ([Mv2Native]::SigMatchesAt($cbzBuf, $cstart, $cbzSig, 8, 4)) 'compiled matcher accepts the patched B'
+    # a foreign B (different target) must NOT read as ours
+    $cbzBuf[$cstart + 8] = 0x01; $cbzBuf[$cstart + 9] = 0x00; $cbzBuf[$cstart + 10] = 0x00; $cbzBuf[$cstart + 11] = 0x14
+    Assert-True (-not (Test-SigAt -Buf $cbzBuf -Start $cstart -Sig $cbzSig -JgOff 8 -Kind 4)) 'foreign B target must not match'
+    Assert-True (-not [Mv2Native]::SigMatchesAt($cbzBuf, $cstart, $cbzSig, 8, 4)) 'compiled matcher rejects a foreign B'
+
+    Write-Signatures -Path $cbzSigPath -Milestones @(
+        @{ name='t-cbz'; container='pe-arm64'; sites=@(
+            @{ name='gate'; kind='cbz'; jgRVA='0x00001048'; jgOff=8; expectedMatches=1; sig=$cbzSigHex }
+        ) }
+    )
+    $script:Signatures = $cbzSigPath
+    $cbzObj = [pscustomobject]@{ Path=$cbzTarget; Channel='Test'; Running=$false; Holders=0 }
+    Assert-True ((Invoke-Patch -Target $cbzObj -AssumeYes $true) -eq 0) 'cbz synthetic PE patch should succeed'
+    $cbzPatched = [IO.File]::ReadAllBytes($cbzTarget)
+    $patchedWord = [BitConverter]::ToUInt32($cbzPatched, 0x448)
+    Assert-True ($patchedWord -eq 0x17FFFEFB) 'cbz patch should rewrite 34FFDF60 -> 17FFFEFB (B, same target)'
+    $cbzHash = (Get-FileHash -LiteralPath $cbzTarget -Algorithm SHA256).Hash
+    Assert-True ((Invoke-Patch -Target $cbzObj -AssumeYes $true) -eq 0) 'idempotent cbz re-patch should succeed'
+    Assert-True ((Get-FileHash -LiteralPath $cbzTarget -Algorithm SHA256).Hash -eq $cbzHash) 'idempotent cbz re-patch should not rewrite different bytes'
+    Assert-True ((Invoke-Restore -Target $cbzObj -AssumeYes $true) -eq 0) 'cbz restore should succeed'
+    $cbzRestored = [IO.File]::ReadAllBytes($cbzTarget)
+    $stockWord = [BitConverter]::ToUInt32($cbzRestored, 0x448)
+    Assert-True ($stockWord -eq 0x34FFDF60) 'cbz restore should recover the stock CBZ word'
+    $script:Signatures = $sigPath
+
+    # --- near stockOpcode (Gate B mac-x64 shape, pe container) -----------------
+    # cmp ...,2 ; je near (0F 84 disp32) ; mov. Stock pair 0F 84 (not 0F 8F):
+    # the flip writes 90 E9 keeping the disp32 bit-identical.
+    $jeSigHex = '837F50020F84FCFCFFFF488B8C24200100'
+    $jeSig = [byte[]]@(0x83,0x7F,0x50,0x02, 0x0F,0x84,0xFC,0xFC,0xFF,0xFF, 0x48,0x8B,0x8C,0x24,0x20,0x01,0x00)
+    $jeTarget = Join-Path $temp 'je fixture.dll'
+    $jeSigPath = Join-Path $temp 'je signatures.json'
+    New-TestPe -Path $jeTarget -Signature $jeSig
+    $jeBuf = [IO.File]::ReadAllBytes($jeTarget)
+    Assert-True (Test-SigAt -Buf $jeBuf -Start 0x440 -Sig $jeSig -JgOff 4 -Kind 1) 'stock near je (0F 84) should match'
+    $jeBuf[0x444] = 0x90; $jeBuf[0x445] = 0xE9
+    Assert-True (Test-SigAt -Buf $jeBuf -Start 0x440 -Sig $jeSig -JgOff 4 -Kind 1) 'patched 90 E9 should match (idempotent)'
+    Assert-True ([Mv2Native]::SigMatchesAt($jeBuf, 0x440, $jeSig, 4, 1)) 'compiled matcher accepts 90 E9 over a 0F 84 stock'
+    $jeBuf[0x444] = 0x0F; $jeBuf[0x445] = 0x85
+    Assert-True (-not (Test-SigAt -Buf $jeBuf -Start 0x440 -Sig $jeSig -JgOff 4 -Kind 1)) 'a jne pair (0F 85) must not match the 0F 84 stock sig'
+
+    Write-Signatures -Path $jeSigPath -Milestones @(
+        @{ name='t-je'; container='pe'; sites=@(
+            @{ name='gate'; kind='near'; stockOpcode='0x0F84'; jgRVA='0x00001044'; jgOff=4; expectedMatches=1; sig=$jeSigHex }
+        ) }
+    )
+    $script:Signatures = $jeSigPath
+    $jeObj = [pscustomobject]@{ Path=$jeTarget; Channel='Test'; Running=$false; Holders=0 }
+    Assert-True ((Invoke-Patch -Target $jeObj -AssumeYes $true) -eq 0) 'near-je stockOpcode patch should succeed'
+    $patched = [IO.File]::ReadAllBytes($jeTarget)
+    Assert-True ($patched[0x444] -eq 0x90 -and $patched[0x445] -eq 0xE9) 'near-je patch should write 90 E9 at jgOff'
+    Assert-True ($patched[0x446] -eq 0xFC -and $patched[0x447] -eq 0xFC -and $patched[0x448] -eq 0xFF -and $patched[0x449] -eq 0xFF) 'near-je patch must preserve disp32 bit-identically'
+    $jeHash = (Get-FileHash -LiteralPath $jeTarget -Algorithm SHA256).Hash
+    Assert-True ((Invoke-Patch -Target $jeObj -AssumeYes $true) -eq 0) 'idempotent near-je re-patch should succeed'
+    Assert-True ((Get-FileHash -LiteralPath $jeTarget -Algorithm SHA256).Hash -eq $jeHash) 'idempotent near-je re-patch should not rewrite different bytes'
+    Assert-True ((Invoke-Restore -Target $jeObj -AssumeYes $true) -eq 0) 'near-je restore should succeed'
+    $restored = [IO.File]::ReadAllBytes($jeTarget)
+    Assert-True ($restored[0x444] -eq 0x0F -and $restored[0x445] -eq 0x84) 'near-je restore should recover the stock 0F 84'
+    $script:Signatures = $sigPath
+
     # --- window pause decision -----------------------------------------------
     # An interactive run always holds the window open ("Press Enter to exit."),
     # success included - the window is often opened by a double-click, so a
