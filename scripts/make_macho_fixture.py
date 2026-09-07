@@ -1,6 +1,7 @@
 """Write a synthetic universal (fat) Mach-O to disk for the derive_milestone
-self-check — an x86_64 short-jg gate and an arm64 b.cond gate, both discoverable
-by the finder. Thin CLI over _testutil.make_fat_macho (single source of truth).
+self-check — an x86_64 short-jg gate (skipped: Intel macOS is unsupported) and
+an arm64 b.cond gate (the one the finder derives). Thin CLI over
+_testutil.make_fat_macho (single source of truth).
 
     python scripts/make_macho_fixture.py <out-path>
 """

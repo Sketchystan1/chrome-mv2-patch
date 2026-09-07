@@ -244,7 +244,7 @@ try {
     Assert-True ($stockWord -eq 0x34FFDF60) 'cbz restore should recover the stock CBZ word'
     $script:Signatures = $sigPath
 
-    # --- near stockOpcode (Gate B mac-x64 shape, pe container) -----------------
+    # --- near stockOpcode (near-JE shape, pe container) -----------------
     # cmp ...,2 ; je near (0F 84 disp32) ; mov. Stock pair 0F 84 (not 0F 8F):
     # the flip writes 90 E9 keeping the disp32 bit-identical.
     $jeSigHex = '837F50020F84FCFCFFFF488B8C24200100'

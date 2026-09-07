@@ -11,9 +11,9 @@ This repository ships two self-contained patch scripts:
 - `chrome-mv2.sh` is the cross-platform Unix implementation (Linux **and**
   macOS in one script). It detects the target container from the file magic and
   patches either the x86-64 ELF `chrome` executable (`elf`), or the universal
-  `Google Chrome Framework` Mach-O — the x86_64 slice (`macho-x64`, reusing the
-  `jg` flip) and the arm64 slice (`macho-arm64`, a `B.cond` GT→AL flip); each Mac
-  patches only its own CPU's slice — then ad-hoc re-signs the app so it launches.
+  `Google Chrome Framework` Mach-O — the arm64 slice (`macho-arm64`, a `B.cond`
+  GT→AL flip); then ad-hoc re-signs the app so it launches. (Intel x86_64 macOS
+  support was dropped in v1.10.0.)
 
 There is no compiled patcher or build step. Do not add instructions for the
 removed Go application, `cmd/chrome-mv2`, `internal/app`, `build.bat`, or
@@ -90,17 +90,23 @@ platform-specific embedded copies:
 - `$EmbeddedSignatures` in `chrome-mv2.ps1` contains the Windows `pe`, `pe32`,
   and `pe-arm64` milestones.
 - `EMBEDDED_SIGNATURES` in `chrome-mv2.sh` contains the Linux `elf` and the macOS
-  `macho-x64`/`macho-arm64` milestones together, **pre-tokenized** (pipe-delimited
+  `macho-arm64` milestones together, **pre-tokenized** (pipe-delimited
   records) so the default path needs no `python3`/JSON parser. Each runtime
   script skips milestones whose container it does not own.
+- `EMBEDDED_SIGNATURES` in `chrome-mv2.py` (the universal stdlib port) carries a
+  full copy of **every** container's milestones. **`sync_embedded.py` does NOT
+  manage this one** — regenerate it by hand whenever `signatures.json` changes
+  (strip `_comment`, one compact milestone per line), or it silently ships a
+  stale table.
 
 Runtime precedence is an explicitly supplied signature file, then a
 `signatures.json` beside the script, then the embedded table. A file in the
 caller's current directory must not be loaded implicitly.
 
 When adding or changing a milestone, update `signatures.json` and the matching
-embedded table in the same change — run `python scripts/sync_embedded.py`, which
-does it per entry (including removals) instead of appending. A release must not
+embedded table in the same change — run `python scripts/sync_embedded.py` (rewrites
+the ps1 + sh tables per entry, including removals), and regenerate the
+`chrome-mv2.py` copy by hand (the tool does not touch it). A release must not
 depend on an external JSON file merely because the embedded copy was forgotten.
 Keep older milestones so the scripts can continue probing supported Chrome
 versions. `python scripts/sync_embedded.py --check` fails when the two drift, and
@@ -114,7 +120,7 @@ See [`scripts/README.md`](../scripts/README.md) for the complete workflow.
 
 - `fetch_chrome_binary.py`: fetch and unwrap a stock `chrome.dll` (x64, x86, or
   arm64 `win-arm64` via the enterprise MSI), Linux `chrome`, or the macOS
-  universal framework (`mac-x64`/`mac-arm64`) into `_scratch/`. Requires Python
+  universal framework (`mac-arm64`) into `_scratch/`. Requires Python
   and 7-Zip. `--browser chromium` instead fetches an open-source Chromium
   continuous-build snapshot (`--milestone`/`--position`, else trunk `LAST_CHANGE`;
   no Linux-arm64 snapshot exists). Chromium is NOT PGO-built, so its MV2 gate is a
@@ -140,7 +146,8 @@ See [`scripts/README.md`](../scripts/README.md) for the complete workflow.
   Learns the Extension field offsets from the build, keeps only candidates carrying
   the real gate markers, folds linker-shared bodies into one `expectedMatches=N`
   site, picks the shortest signature that is free of build-specific PC-relative
-  immediates, carries site names over from `--prev`, and can `--merge`/`--sync`.
+  immediates, carries site names over from `--prev` and carries forward any prior
+  site the finder cannot reproduce (Gate B / `featurebyte`), and can `--merge`/`--sync`.
 - `audit_signatures.py`: audit the table for the defects that silently break
   patching — equal-rank ties, fragile signatures, weak anchors, malformed sites —
   and with `--binary` also report which milestone the runtime would select and run
@@ -204,7 +211,7 @@ patchers via `bash` and the PowerShell patcher via `pwsh` (the PE test is
 skipped off-Windows). A native-arm64 `windows-11-arm` GitHub runner also
 round-trips patch/restore against a real arm64 `chrome.dll`. The real-macOS
 runtime proof (patch → ad-hoc re-sign → headless launch → functional MV2 A/B →
-restore, on both Intel and Apple Silicon) runs in GitHub Actions
+restore, on Apple Silicon) runs in GitHub Actions
 (`.github/workflows/tests.yml`), since it needs `codesign` and real hardware. The
 MV2 A/B (`.github/mv2_probe.py`, a CI helper — not part of the derivation
 toolkit) loads a Manifest V2 extension whose persistent background page pings a

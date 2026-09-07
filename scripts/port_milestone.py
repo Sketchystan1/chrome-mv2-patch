@@ -418,14 +418,16 @@ def main():
         for entry in derived:
             if entry["name"] in by_name:
                 old = table["milestones"][by_name[entry["name"]]]
-                # The jg-gate deriver does not produce featurebyte / optional sites
-                # (e.g. webRequestBlocking), so carry them over from the old entry.
-                carried = [s for s in old.get("sites", [])
-                           if s.get("kind") == "featurebyte" or s.get("optional")]
+                # Carry forward any prior site the jg-gate deriver did not
+                # reproduce (matched by name): featurebyte sites (e.g.
+                # webRequestBlocking) and the ExtensionSettings /
+                # FilterSensitivePolicies gate, which is authored by hand rather
+                # than pattern-derived. Required or optional, it must persist.
+                have = {s.get("name") for s in entry["sites"]}
+                carried = [s for s in old.get("sites", []) if s.get("name") not in have]
                 if carried:
-                    have = {s.get("name") for s in entry["sites"]}
-                    entry["sites"].extend(s for s in carried if s.get("name") not in have)
-                    print("  carried %d featurebyte/optional site(s) into %s" % (len(carried), entry["name"]))
+                    entry["sites"].extend(carried)
+                    print("  carried %d prior site(s) into %s" % (len(carried), entry["name"]))
                 table["milestones"][by_name[entry["name"]]] = entry
                 print("replaced %s in %s" % (entry["name"], args.signatures))
             else:

@@ -12,11 +12,11 @@
 #       arm64 (aarch64) has no cmp/jg - the gate is cmp w,#2 ; b.gt and the flip
 #       rewrites ONLY the B.cond condition GT(0xC) -> AL(0xE), same bcond flip as
 #       macOS/Windows arm64.
-#   - Mach-O (macOS): the universal (fat) "Google Chrome Framework" inside
-#       Google Chrome.app. Only the slice matching this Mac's CPU is patched.
-#       x86_64 uses the same short/near flip; arm64 (Apple Silicon) has no
-#       cmp/jg - the mv>=3 early-out is a cmp w,#2 ; b.gt, and the flip rewrites
-#       ONLY the branch condition GT(0xC) -> AL(0xE), one byte, preserving imm19.
+#   - Mach-O (macOS): the arm64 (Apple Silicon) slice of the universal (fat)
+#       "Google Chrome Framework" inside Google Chrome.app. Intel x86_64 is no
+#       longer supported. arm64 has no cmp/jg - the mv>=3 early-out is a
+#       cmp w,#2 ; b.gt, and the flip rewrites ONLY the branch condition
+#       GT(0xC) -> AL(0xE), one byte, preserving imm19.
 #
 # The container is detected from the file magic (ELF vs Mach-O), so the ELF and
 # Mach-O flows run wherever bash does; only default install discovery is chosen
@@ -54,7 +54,7 @@ readonly APP_VERSION="1.10.0"
 # Records, one per line, pipe-delimited:
 #   M|<milestone name>|<container>
 #   S|<site name>|<kind>|<jgRVA>|<jgOff>|<expectedMatches>|<sig hex>
-# container: elf | elf-arm64 | macho-x64 | macho-arm64
+# container: elf | elf-arm64 | macho-arm64
 # kind: short (7F->EB) | near (0F8F->90E9) | bcond (arm64 B.cond GT->AL)
 # jgRVA: hex RVA of the jg/b.cond opcode in the reference build (fast-path probe)
 # jgOff: byte index of the jump opcode within sig
@@ -64,90 +64,68 @@ readonly APP_VERSION="1.10.0"
 # ============================================================================
 readonly EMBEDDED_SIGNATURES='
 M|152-linux|elf
-S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0985B449|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x0985B0F4|4|1|837E50027F2F554889E5488B8E280200008B413080BE080200
-S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x0985B238|4|1|837B50027F30488B8B280200008B413080BB08020000007508
-S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A256BAA|4|1|837B50020F8FD1000000488B8B280200008B413080BB080200000075
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x0599A69A|4|1|837E50020F8F8E000000498B8E280200008B41304180BE0802000000
+S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0985B449|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
+S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x0985B0F4|4|1|0|837E50027F2F554889E5488B8E280200008B413080BE080200
+S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x0985B238|4|1|0|837B50027F30488B8B280200008B413080BB08020000007508
+S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A256BAA|4|1|0|837B50020F8FD1000000488B8B280200008B413080BB080200000075
+S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x0599A69A|4|1|0|837E50020F8F8E000000498B8E280200008B41304180BE0802000000
 E
 M|152-chromium-linux|elf
-S|manifest_v2_util::IsExtensionAffected (free predicate)|short|0x0923C9D9|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
+S|manifest_v2_util::IsExtensionAffected (free predicate)|short|0x0923C9D9|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
 E
 M|152-linux-arm64|elf-arm64
-S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05D64DD8|4|2|1F0900712C020054691641F96A224839283140B98A000037296940B93F050071
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05D64F9C|4|1|1F0900710C020054091441F90A204839283140B98A000037296940B93F050071
-S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x05F78874|4|2|1F0900718C010054891641F98A224839283140B98A000037296940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x0696E3C8|4|2|3F090071EC4A0054091541F90A214839283140B98A000037296940B93F050071
-E
-M|152-macos-x64|macho-x64
-S|StandardManagementPolicyProvider::MustRemainDisabled|short|0x01BA0A91|4|1|837E50027F6F498B8E280200008B41304180BE080200000075
-S|ManifestV2Handler::OnExtensionSystemReady|short|0x0312B1FA|4|1|837950027F2D488B91280200008B423080B90802000000750C
-S|ManifestV2Handler::IsExtensionAffected|short|0x048BB6E4|4|1|837E50027F2F554889E5488B8E280200008B413080BE080200
-S|ManifestV2Handler::ShouldBlockExtensionInstallation|short|0x075489B8|4|1|837B50027F30488B8B280200008B413080BB08020000007508
-S|ManifestV2Handler::ShouldBlockExtensionInstallation (2)|short|0x07548BB9|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|StandardManagementPolicyProvider::UserMayInstall|near|0x07F56A10|4|1|837B50020F8FB7000000488B8B280200008B413080BB080200000075
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|near|0x016970B1|10|1|4C89F7E8D150C20484C00F8400FDFFFFEB10
-E
-M|152-chromium-macos-x64|macho-x64
-S|manifest_v2_util::IsExtensionAffected (free predicate)|short|0x04814269|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
+S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05D64DD8|4|2|0|1F0900712C020054691641F96A224839283140B98A000037296940B93F050071
+S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05D64F9C|4|1|0|1F0900710C020054091441F90A204839283140B98A000037296940B93F050071
+S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x05F78874|4|2|0|1F0900718C010054891641F98A224839283140B98A000037296940B93F050071
+S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x0696E3C8|4|2|0|3F090071EC4A0054091541F90A214839283140B98A000037296940B93F050071
 E
 M|152-macos-arm64|macho-arm64
-S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x02218740|4|1|1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x0320635C|4|1|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
-S|ManifestV2Handler::IsExtensionAffected|bcond|0x03FFBD84|4|1|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
-S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x066F0E38|4|2|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x026AC410|8|1|C85240B91F0900718C010054C8224839
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01D16FB4|8|1|E00314AA9C28DE94A0EAFF340B000014
+S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x02218740|4|1|0|1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071
+S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x0320635C|4|1|0|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
+S|ManifestV2Handler::IsExtensionAffected|bcond|0x03FFBD84|4|1|0|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
+S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x066F0E38|4|2|0|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
+S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x026AC410|8|1|0|C85240B91F0900718C010054C8224839
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01D16FB4|8|1|0|E00314AA9C28DE94A0EAFF340B000014
 E
 M|154-linux|elf
-S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0991AA29|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x0991A6D4|4|1|837E50027F2F554889E5488B8E280200008B413080BE080200
-S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x0991A818|4|1|837B50027F30488B8B280200008B413080BB08020000007508
-S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A37E1CA|4|1|837B50020F8FD1000000488B8B280200008B413080BB080200000075
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x05AB5FFA|4|1|837E50020F8F8E000000498B8E280200008B41304180BE0802000000
-S|IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)|short|0x053B0E40|4|1|837950027F2D488B91280200008B423080B90802000000750C
+S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0991AA29|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
+S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x0991A6D4|4|1|0|837E50027F2F554889E5488B8E280200008B413080BE080200
+S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x0991A818|4|1|0|837B50027F30488B8B280200008B413080BB08020000007508
+S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A37E1CA|4|1|0|837B50020F8FD1000000488B8B280200008B413080BB080200000075
+S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x05AB5FFA|4|1|0|837E50020F8F8E000000498B8E280200008B41304180BE0802000000
+S|IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)|short|0x053B0E40|4|1|0|837950027F2D488B91280200008B423080B90802000000750C
 E
 M|154-linux-arm64|elf-arm64
-S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05E87478|4|2|1F0900712C020054691641F96A224839283140B98A000037296940B93F050071
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05E8763C|4|1|1F0900710C020054091441F90A204839283140B98A000037296940B93F050071
-S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x0609B370|4|2|1F0900718C010054891641F98A224839283140B98A000037296940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06AB7470|4|1|3F0900718C010054091541F90A214839283140B98A000037296940B93F050071
-S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x09B77244|4|1|7F0900718C0100544B1541F94C2148396A3140B98C0000376B6940B97F050071
+S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05E87478|4|2|0|1F0900712C020054691641F96A224839283140B98A000037296940B93F050071
+S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05E8763C|4|1|0|1F0900710C020054091441F90A204839283140B98A000037296940B93F050071
+S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x0609B370|4|2|0|1F0900718C010054891641F98A224839283140B98A000037296940B93F050071
+S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06AB7470|4|1|0|3F0900718C010054091541F90A214839283140B98A000037296940B93F050071
+S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x09B77244|4|1|0|7F0900718C0100544B1541F94C2148396A3140B98C0000376B6940B97F050071
 E
 M|155-linux|elf
-S|IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)|short|0x041AAAE0|4|1|837950027F30488B91280200008B425080B90802000000750F
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|short|0x0644CEE2|4|1|837F50027F324180BC2408020000000F85D6000000498B8424
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x06835F7D|4|1|837E50020F8F91000000498B8E280200008B41504180BE0802000000
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x099272C4|4|1|837E50027F32554889E5488B8E280200008B415080BE080200
-S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x09927408|4|1|837B50027F33488B8B280200008B415080BB0802000000750B
-S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x09927619|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A3DC86A|4|1|837B50020F8FD4000000488B8B280200008B415080BB080200000075
-E
-M|155-macos-x64|macho-x64
-S|StandardManagementPolicyProvider::MustRemainDisabled|short|0x01CF5558|4|1|837E50027F72498B8E280200008B41504180BE080200000075
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|short|0x028F526E|4|1|837F50027F324180BC2408020000000F85E1000000498B8424
-S|ManifestV2Handler::OnExtensionSystemReady|short|0x0322A6B9|4|1|837950027F30488B91280200008B425080B90802000000750F
-S|ManifestV2Handler::IsExtensionAffected|short|0x0496FB64|4|1|837E50027F32554889E5488B8E280200008B415080BE080200
-S|ManifestV2Handler::ShouldBlockExtensionInstallation|short|0x07806AE8|4|1|837B50027F33488B8B280200008B415080BB0802000000750B
-S|ManifestV2Handler::ShouldBlockExtensionInstallation (2)|short|0x07806CE9|3|1|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|StandardManagementPolicyProvider::UserMayInstall|near|0x0827BE80|4|1|837B50020F8FBA000000488B8B280200008B415080BB080200000075
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|near|0x01697E25|10|1|4C89F7E87DEBD80484C00F84FCFCFFFFEB10
+S|IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)|short|0x041AAAE0|4|1|0|837950027F30488B91280200008B425080B90802000000750F
+S|IsExtensionAffected (type!=PLATFORM_APP variant)|short|0x0644CEE2|4|1|0|837F50027F324180BC2408020000000F85D6000000498B8424
+S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x06835F7D|4|1|0|837E50020F8F91000000498B8E280200008B41504180BE0802000000
+S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x099272C4|4|1|0|837E50027F32554889E5488B8E280200008B415080BE080200
+S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x09927408|4|1|0|837B50027F33488B8B280200008B415080BB0802000000750B
+S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x09927619|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
+S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A3DC86A|4|1|0|837B50020F8FD4000000488B8B280200008B415080BB080200000075
 E
 M|155-macos-arm64|macho-arm64
-S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x022BD404|4|1|1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x026FFEFC|8|1|C85240B91F0900718C010054C8224839
-S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031F4CA4|4|1|1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071
-S|ManifestV2Handler::IsExtensionAffected|bcond|0x0403B248|4|1|1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071
-S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x068F3880|4|2|1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B613F4|8|1|E00314AA642EEA9460DFFF340B000014
+S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x022BD404|4|1|0|1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071
+S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x026FFEFC|8|1|0|C85240B91F0900718C010054C8224839
+S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031F4CA4|4|1|0|1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071
+S|ManifestV2Handler::IsExtensionAffected|bcond|0x0403B248|4|1|0|1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071
+S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x068F3880|4|2|0|1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B613F4|8|1|0|E00314AA642EEA9460DFFF340B000014
 E
 M|155-linux-arm64|elf-arm64
-S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05E7E1E4|4|2|1F0900712C020054691641F96A224839285140B98A000037298940B93F050071
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05E7E3A8|4|1|1F0900710C020054091441F90A204839285140B98A000037298940B93F050071
-S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x06096308|4|2|1F0900718C010054891641F98A224839285140B98A000037298940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06B05764|4|1|3F0900718C010054091541F90A214839285140B98A000037298940B93F050071
-S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x0A2934B4|4|1|7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x0A298B7C|8|1|C85240B91F0900718C010054C8224839
+S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05E7E1E4|4|2|0|1F0900712C020054691641F96A224839285140B98A000037298940B93F050071
+S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05E7E3A8|4|1|0|1F0900710C020054091441F90A204839285140B98A000037298940B93F050071
+S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x06096308|4|2|0|1F0900718C010054891641F98A224839285140B98A000037298940B93F050071
+S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06B05764|4|1|0|3F0900718C010054091541F90A214839285140B98A000037298940B93F050071
+S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x0A2934B4|4|1|0|7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071
+S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x0A298B7C|8|1|0|C85240B91F0900718C010054C8224839
 E
 '
 
@@ -156,7 +134,7 @@ E
 # milestone's sites are recovered by filtering, avoiding dynamic array names.
 MILESTONE_NAMES=()
 MILESTONE_CONTAINERS=()
-ALL_SITES=()          # "idx|name|kind|jgRVA|jgOff|expectedMatches|sig"
+ALL_SITES=()          # "idx|name|kind|jgRVA|jgOff|expectedMatches|optional|sig"
 NUM_MILESTONES=0
 
 # ============================================================================
@@ -333,7 +311,7 @@ get_signatures_path() {
 }
 
 # JSON -> pipe-tokenized records (M|.. / S|..). Keeps only the containers THIS
-# script patches (elf + elf-arm64 + macho-x64/arm64), skipping the shared table's
+# script patches (elf + elf-arm64 + macho-arm64), skipping the shared table's
 # pe/pe32/pe-arm64 Windows milestones. Validates kinds and the stock opcode at jgOff.
 # Requires python3.
 json_to_tokens() {
@@ -353,8 +331,8 @@ for m in ms:
     if name in seen: raise ValueError("duplicate milestone " + name)
     seen.add(name)
     container = m.get("container")
-    if container not in ("elf", "elf-arm64", "macho-x64", "macho-arm64"):
-        continue  # this script patches ELF + Mach-O; skip pe/pe32/pe-arm64
+    if container not in ("elf", "elf-arm64", "macho-arm64"):
+        continue  # this script patches ELF + Mach-O (arm64); skip pe/pe32/pe-arm64 and the Intel macOS slice
     sites = m.get("sites")
     if not isinstance(sites, list) or not sites:
         raise ValueError("milestone %s has no sites" % name)
@@ -367,10 +345,10 @@ for m in ms:
         kind = s.get("kind")
         if kind not in ("short", "near", "bcond", "cbz"):
             raise ValueError("bad kind in %s/%s" % (name, snm))
-        # x86_64 gates (elf, macho-x64) are cmp/jg (short/near); the arm64 gates
-        # (elf-arm64, macho-arm64) are the bcond flip or the cbz rewrite. Reject
-        # a kind that does not match the container architecture.
-        if kind in ("bcond", "cbz") and container in ("elf", "macho-x64"):
+        # x86_64 gates (elf) are cmp/jg (short/near); the arm64 gates (elf-arm64,
+        # macho-arm64) are the bcond flip or the cbz rewrite. Reject a kind that
+        # does not match the container architecture.
+        if kind in ("bcond", "cbz") and container == "elf":
             raise ValueError("x86_64 milestone %s has an arm64 site %s" % (name, snm))
         if kind not in ("bcond", "cbz") and container in ("elf-arm64", "macho-arm64"):
             raise ValueError("arm64 milestone %s has a non-bcond/cbz site %s" % (name, snm))
@@ -397,17 +375,20 @@ for m in ms:
         need = {"short": 2, "near": 6, "bcond": 4, "cbz": 4}[kind]
         if off + need > len(raw):
             raise ValueError("jump past sig in %s/%s" % (name, snm))
-        if so is not None:
-            sb = bytes.fromhex(str(so)[2:].zfill(2))
+        # Stock-opcode check: the sig bytes at jgOff must be the stock branch
+        # encoding. stockOpcode overrides the default (a near JE site carries
+        # 0x0F84); otherwise short must be 0x7F and near 0x0F 0x8F. Mirrors
+        # chrome-mv2.py so a mis-authored sig is rejected here, not flipped.
+        if kind in ("short", "near"):
             want = 1 if kind == "short" else 2
-            if len(sb) != want:
-                raise ValueError("stockOpcode must be %d byte(s) in %s/%s" % (want, name, snm))
-            if raw[off:off+want] != sb:
-                raise ValueError("sig[jgOff] does not match stockOpcode in %s/%s" % (name, snm))
-        if kind == "short" and raw[off] == 0xEB:
-            raise ValueError("jgOff is the patched 0xEB in %s/%s" % (name, snm))
-        if kind == "near" and raw[off+1] == 0xE9:
-            raise ValueError("near stock second opcode is the patched 0xE9 in %s/%s" % (name, snm))
+            if so is not None:
+                exp_stock = bytes.fromhex(str(so)[2:].zfill(2))
+                if len(exp_stock) != want:
+                    raise ValueError("stockOpcode must be %d byte(s) in %s/%s" % (want, name, snm))
+            else:
+                exp_stock = b"\x7f" if kind == "short" else b"\x0f\x8f"
+            if raw[off:off+want] != exp_stock:
+                raise ValueError("sig[jgOff] is not the expected stock opcode in %s/%s" % (name, snm))
         if kind == "bcond":
             w = int.from_bytes(raw[off:off+4], "little")
             if (w & 0xFF000010) != 0x54000000 or (w & 0xF) != 0x0C:
@@ -418,20 +399,21 @@ for m in ms:
             w = int.from_bytes(raw[off:off+4], "little")
             if (w & 0xFF000000) != 0x34000000:
                 raise ValueError("jgOff not a stock 32-bit CBZ in %s/%s" % (name, snm))
-        print("S|%s|%s|%s|%d|%d|%s" % (snm, kind, rva, off, exp, sig.upper()))
+        opt = 1 if s.get("optional") else 0
+        print("S|%s|%s|%s|%d|%d|%d|%s" % (snm, kind, rva, off, exp, opt, sig.upper()))
     print("E")
 ' 2>&1
 }
 
 populate_from_tokens() {
     MILESTONE_NAMES=(); MILESTONE_CONTAINERS=(); ALL_SITES=(); NUM_MILESTONES=0
-    local idx=-1 rec f1 f2 f3 f4 f5 f6
-    while IFS='|' read -r rec f1 f2 f3 f4 f5 f6; do
+    local idx=-1 rec f1 f2 f3 f4 f5 f6 f7
+    while IFS='|' read -r rec f1 f2 f3 f4 f5 f6 f7; do
         # Strip any trailing CR from every field: a JSON stream tokenized by a
         # Windows python emits CRLF, and a stray \r would corrupt a container or
         # sig comparison. A no-op on the LF embedded tables / on Unix hosts.
-        rec="${rec%$'\r'}"; f1="${f1%$'\r'}"; f2="${f2%$'\r'}"
-        f3="${f3%$'\r'}"; f4="${f4%$'\r'}"; f5="${f5%$'\r'}"; f6="${f6%$'\r'}"
+        rec="${rec%$'\r'}"; f1="${f1%$'\r'}"; f2="${f2%$'\r'}"; f3="${f3%$'\r'}"
+        f4="${f4%$'\r'}"; f5="${f5%$'\r'}"; f6="${f6%$'\r'}"; f7="${f7%$'\r'}"
         case "$rec" in
             M)
                 idx=$(( idx + 1 ))
@@ -439,8 +421,8 @@ populate_from_tokens() {
                 MILESTONE_CONTAINERS+=("$f2")
                 ;;
             S)
-                # store "idx|name|kind|jgRVA|jgOff|expected|sig"
-                ALL_SITES+=("${idx}|${f1}|${f2}|${f3}|${f4}|${f5}|${f6}")
+                # store "idx|name|kind|jgRVA|jgOff|expected|optional|sig"
+                ALL_SITES+=("${idx}|${f1}|${f2}|${f3}|${f4}|${f5}|${f6}|${f7}")
                 ;;
         esac
     done
@@ -480,7 +462,7 @@ load_milestones() {
     return 0
 }
 
-# Sites of milestone index $1 -> "name|kind|jgRVA|jgOff|expected|sig" per line.
+# Sites of milestone index $1 -> "name|kind|jgRVA|jgOff|expected|optional|sig" per line.
 sites_of() {
     local want="$1" spec
     for spec in "${ALL_SITES[@]}"; do
@@ -491,7 +473,7 @@ sites_of() {
 # ============================================================================
 # Binary parsers. Both containers populate the SAME per-"slice" parallel arrays
 # so the matching engine is container-agnostic:
-#   - Mach-O: one SLICE_* entry per CPU slice (x86_64 / arm64).
+#   - Mach-O: one SLICE_* entry per patched CPU slice (arm64 only).
 #   - ELF: a single SLICE_* entry with container "elf".
 # section_64.offset is ALREADY the slice-relative file offset for Mach-O (NO
 # vmaddr delta - the opposite of ELF, whose sh_offset is an absolute file off).
@@ -499,7 +481,6 @@ sites_of() {
 MH_MAGIC_64=4277009103          # 0xFEEDFACF (thin 64-bit, little-endian on disk)
 FAT_MAGIC=3405691582            # 0xCAFEBABE (fat, big-endian, 32-bit fat_arch)
 FAT_MAGIC_64=3405691583         # 0xCAFEBABF (fat, big-endian, 64-bit fat_arch)
-CPU_X86_64=16777223             # 0x01000007
 CPU_ARM64=16777228              # 0x0100000C
 LC_SEGMENT_64=25                # 0x19
 LC_UUID=27                      # 0x1B
@@ -525,9 +506,8 @@ parse_thin_slice() {
     local cputype ncmds container
     cputype=$(read_u32_le "$file" $(( base + 4 )))
     ncmds=$(read_u32_le "$file" $(( base + 16 )))
-    if (( cputype == CPU_X86_64 )); then container="macho-x64"
-    elif (( cputype == CPU_ARM64 )); then container="macho-arm64"
-    else return 1; fi
+    if (( cputype == CPU_ARM64 )); then container="macho-arm64"
+    else return 1; fi          # x86_64 and any other CPU: skip the slice
 
     local p=$(( base + 32 )) i cmd cmdsize
     local t_addr="" t_off="" t_size="" uuid=""
@@ -969,14 +949,14 @@ except Exception:
 
 # find_site_matches <file> <base> <traw> <tvaddr> <tsize> <spec> -> FOUND_OFFSETS, RELOCATED
 
-# spec is "name|kind|jgRVA|jgOff|expectedMatches|sig". FOUND_OFFSETS holds
+# spec is "name|kind|jgRVA|jgOff|expectedMatches|optional|sig". FOUND_OFFSETS holds
 # ABSOLUTE file offsets of the jump opcode within this slice. Fast path probes
 # the recorded RVA; a miss falls back to one raw fixed-string grep for the site.
 FOUND_OFFSETS=(); RELOCATED=false; FAST_PROBE_ONLY=false
 find_site_matches() {
     local file="$1" base="$2" traw="$3" tvaddr="$4" tsize="$5" spec="$6"
-    local name kind jg_rva_hex jg_off expected sig_hex
-    IFS='|' read -r name kind jg_rva_hex jg_off expected sig_hex <<< "$spec"
+    local name kind jg_rva_hex jg_off expected optional sig_hex
+    IFS='|' read -r name kind jg_rva_hex jg_off expected optional sig_hex <<< "$spec"
     local jg_rva=$(( jg_rva_hex )) sig_len=$(( ${#sig_hex} / 2 ))
     FOUND_OFFSETS=(); RELOCATED=false
 
@@ -1080,17 +1060,17 @@ probe_slice_pass() {
         local ms_name="${MILESTONE_NAMES[$mi]}"
         local satisfied=0 total=0
         local fn=() fk=() fo=() fr=() fs=()
-        local spec s_name s_kind s_jgrva s_jgoff s_expected s_sig off stock_hex
+        local spec s_name s_kind s_jgrva s_jgoff s_expected s_optional s_sig off stock_hex matched
         while IFS= read -r spec; do
             [[ -n "$spec" ]] || continue
-            total=$(( total + 1 ))
-            IFS='|' read -r s_name s_kind s_jgrva s_jgoff s_expected s_sig <<< "$spec"
+            IFS='|' read -r s_name s_kind s_jgrva s_jgoff s_expected s_optional s_sig <<< "$spec"
             find_site_matches "$file" "$base" "$traw" "$tvaddr" "$tsize" "$spec"
-            if (( ${#FOUND_OFFSETS[@]} == s_expected )); then
-                satisfied=$(( satisfied + 1 ))
+            matched=false
+            if (( ${#FOUND_OFFSETS[@]} == s_expected )); then matched=true; fi
+            if $matched; then
                 # The sig bytes at jgOff are the stock encoding (7F short,
-                # 0F8F near, or the 4-byte CBZ word for cbz); the flip engine
-                # works off arrays without the sig, so carry them along.
+                # 0F8F/0F84 near, or the 4-byte CBZ word for cbz); the flip
+                # engine works off arrays without the sig, so carry them along.
                 if [[ "$s_kind" == "cbz" ]]; then
                     stock_hex="${s_sig:$(( s_jgoff*2 )):8}"
                 elif [[ "$s_kind" == "near" ]]; then
@@ -1102,6 +1082,11 @@ probe_slice_pass() {
                     fn+=("$s_name"); fk+=("$s_kind"); fo+=("$off"); fr+=("$RELOCATED"); fs+=("$stock_hex")
                 done
             fi
+            # Optional (best-effort) sites apply if located but never count toward
+            # ranking, so a miss can't drop the milestone to partial / block MV2.
+            if [[ "$s_optional" == "1" ]]; then continue; fi
+            total=$(( total + 1 ))
+            if $matched; then satisfied=$(( satisfied + 1 )); fi
         done < <(sites_of "$mi")
 
         (( satisfied > 0 )) || continue
@@ -1424,7 +1409,7 @@ backup_path() {
 BACKUP_BUILD_ID=""; BACKUP_IDENTITY=""; BACKUP_SIZE=0; BACKUP_HASH=""; BACKUP_LEGACY=false
 
 # save_backup_snapshot <target> <backup> <source> <identity>
-# identity = build-id (elf) or "macho-x64:HEX,macho-arm64:HEX" (macho).
+# identity = build-id (elf) or "macho-arm64:HEX" (macho).
 save_backup_snapshot() {
     local target="$1" backup="$2" source="$3" identity="$4"
     mkdir -p -- "$(dirname "$backup")" || { errf "Couldn't create the backup folder."; return 1; }
@@ -1546,7 +1531,7 @@ HOST_CONTAINER=""
 detect_host_container() {
     case "${MV2_TEST_HOST_ARCH:-}" in
         arm64|aarch64)  HOST_CONTAINER="macho-arm64"; return ;;
-        x86_64|amd64|x64) HOST_CONTAINER="macho-x64"; return ;;
+        x86_64|amd64|x64) HOST_CONTAINER=""; return ;;   # Intel: no longer supported
     esac
     if command -v sysctl >/dev/null 2>&1 \
        && [[ "$(sysctl -n hw.optional.arm64 2>/dev/null)" == "1" ]]; then
@@ -1554,7 +1539,7 @@ detect_host_container() {
     fi
     case "$(uname -m 2>/dev/null || echo)" in
         arm64|aarch64) HOST_CONTAINER="macho-arm64" ;;
-        *)             HOST_CONTAINER="macho-x64" ;;
+        *)             HOST_CONTAINER="" ;;
     esac
 }
 
@@ -2470,16 +2455,15 @@ do_patch_macho() {
 
     # Decide which slices we will patch (probe each against the live target).
     infof "Searching for MV2 signatures..."
-    local idx to_patch=() ic=() any=false default_declined=false
+    local idx to_patch=() any=false
     for (( idx = 0; idx < NUM_SLICES; idx++ )); do
         local c="${SLICE_CONTAINER[$idx]}"
         probe_slice "$idx" "$target"
         if slice_decision "$c" "$allow_partial"; then
-            to_patch+=("$idx"); ic+=("$c"); any=true
+            to_patch+=("$idx"); any=true
             okf "  ${c#macho-}: found matching signatures (${BEST_MS_NAME%%-*}, ${BEST_SATISFIED} gates)."
         else
             warnf "  ${c#macho-}: skipped (${SKIP_REASON})."
-            [[ "$c" == "macho-x64" ]] && default_declined=true
         fi
     done
     if ! $any; then errf "This Chrome version isn't recognized - nothing was changed."; return 1; fi
@@ -2743,6 +2727,10 @@ main() {
     if [[ "$TARGET_CONTAINER" == "macho" ]]; then
         detect_host_container
         infof "Your Mac: $(host_arch_label)."
+        if [[ "$HOST_CONTAINER" != "macho-arm64" ]]; then
+            errf "Intel (x86_64) macOS is no longer supported - only Apple Silicon (arm64)."
+            return 1
+        fi
         if [[ -n "$APP_PATH" ]]; then
             if (( CHOSEN_INDEX >= 0 && ${#MAC_LABELS[@]:-0} > 0 )); then
                 sel_name="$(display_name "${MAC_LABELS[$CHOSEN_INDEX]}")"

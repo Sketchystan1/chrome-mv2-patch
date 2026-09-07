@@ -8,7 +8,6 @@ carries the inlined `IsExtensionAffected` gates --
     Windows x86    chrome.dll   (PE32,  container "pe32")
     Windows arm64  chrome.dll   (PE32+, container "pe-arm64")
     Linux  x86-64  chrome       (ELF,   container "elf")
-    macOS  x86-64  Google Chrome Framework  (Mach-O, container "macho-x64")
     macOS  arm64   Google Chrome Framework  (Mach-O, container "macho-arm64")
 
 macOS has no consumer offline installer we can unwrap off-Mac (it ships a `.dmg`),
@@ -37,7 +36,6 @@ The binary is unwrapped out of the installer and dropped in `_scratch/`
     python scripts/fetch_chrome_binary.py --platform linux
     python scripts/fetch_chrome_binary.py --platform win       # 32-bit chrome.dll
     python scripts/fetch_chrome_binary.py --platform mac-arm64 # Apple Silicon framework
-    python scripts/fetch_chrome_binary.py --platform mac-x64   # Intel framework
     python scripts/fetch_chrome_binary.py --platform win-arm64          # arm64 enterprise MSI
     python scripts/fetch_chrome_binary.py --channel beta
     python scripts/fetch_chrome_binary.py --version 152.0.7977.30
@@ -93,7 +91,6 @@ PLATFORMS = {
     "linux-arm64": {"api": "linux", "container": "elf-arm64", "binary": "chrome", "pe_magic": None, "machine": 0xB7, "tag": "linux-arm64", "suffix": ""},
     # macOS: CfT-only. The gate binary is the framework Mach-O inside the .app;
     # matched brand-agnostically by a "framework" name + the slice's cputype.
-    "mac-x64":   {"api": "mac",       "container": "macho-x64",   "binary": None, "pe_magic": None, "tag": "mac-x64",   "suffix": "", "cft": "mac-x64",   "cputype": 0x01000007, "cft_only": True},
     "mac-arm64": {"api": "mac_arm64", "container": "macho-arm64", "binary": None, "pe_magic": None, "tag": "mac-arm64", "suffix": "", "cft": "mac-arm64", "cputype": 0x0100000C, "cft_only": True},
 }
 
@@ -157,7 +154,6 @@ SNAPSHOT_PLATFORMS = {
     "win":       {"snap": "Win",       "zip": "chrome-win.zip",   "container": "pe32",       "binary": "chrome.dll", "pe_magic": 0x10B,                    "tag": "chromium-win32"},
     "win-arm64": {"snap": "Win_Arm64", "zip": "chrome-win.zip",   "container": "pe-arm64",   "binary": "chrome.dll", "pe_magic": 0x20B, "machine": 0xAA64, "tag": "chromium-win-arm64"},
     "linux":     {"snap": "Linux_x64", "zip": "chrome-linux.zip", "container": "elf",        "binary": "chrome",     "pe_magic": None,  "machine": 0x3E,   "tag": "chromium-linux64"},
-    "mac-x64":   {"snap": "Mac",       "zip": "chrome-mac.zip",   "container": "macho-x64",  "binary": None,         "pe_magic": None,  "cputype": 0x01000007, "tag": "chromium-mac-x64"},
     "mac-arm64": {"snap": "Mac_Arm",   "zip": "chrome-mac.zip",   "container": "macho-arm64","binary": None,         "pe_magic": None,  "cputype": 0x0100000C, "tag": "chromium-mac-arm64"},
 }
 

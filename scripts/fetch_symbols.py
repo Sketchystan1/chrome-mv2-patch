@@ -64,7 +64,7 @@ FAT_MAGIC = 0xCAFEBABE
 FAT_MAGIC_64 = 0xCAFEBABF
 LC_SYMTAB = 0x2
 LC_UUID_ = 0x1B
-CPU_BY_ARCH = {"x86_64": 0x01000007, "arm64": 0x0100000C}
+CPU_BY_ARCH = {"arm64": 0x0100000C}
 GATE_KW = ("isextensionaffected", "shouldblockextension", "onextensionsystemready",
            "maybereenableextension", "usermayinstall", "mustremaindisabled")
 
@@ -90,7 +90,7 @@ def _macho_slices(data):
         arch = next((a for a, c in CPU_BY_ARCH.items() if c == cpu), None)
         if arch is None:
             continue
-        out.append(("macho-" + ("x64" if arch == "x86_64" else "arm64"), arch, base,
+        out.append(("macho-arm64", arch, base,
                     _macho_slice_uuid(data, base)))
     return out
 

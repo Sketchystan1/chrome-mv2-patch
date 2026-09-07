@@ -102,7 +102,7 @@ def test_pe(tmp):
     cbz_sig = "E00314AA642EEA9460DFFF340B000014"   # mov; bl; CBZ w0(34FFDF60); b; mov
     csigs = tmp / "pe.cbz.json"
     csigs.write_text(json.dumps({"milestones": [{"name": "t-cbz", "container": "pe-arm64", "sites": [
-        {"name": "gate", "kind": "cbz", "jgRVA": "0x00001044", "jgOff": 8,
+        {"name": "gate", "kind": "cbz", "jgRVA": "0x00001048", "jgOff": 8,
          "expectedMatches": 1, "sig": cbz_sig}]}]}))
     c = tmp / "cbz fixture.dll"
     T.make_pe(c, cbz_sig, machine=0xAA64)
@@ -119,7 +119,7 @@ def test_pe(tmp):
     T.write_word(fb, 0x448, 0x14000001)          # B +4 - not our target
     A.true(pyrun("patch", fb, csigs).returncode != 0, "foreign B word must not match as patched cbz")
 
-    # near stockOpcode (Gate B mac-x64 shape): stock 0F 84 (je) patched to 90 E9
+    # near stockOpcode (near-JE shape): stock 0F 84 (je) patched to 90 E9
     je_sig = "837F50020F84FCFCFFFF488B8C24200100"   # cmp; je near; mov
     jsigs = tmp / "pe.je.json"
     jsigs.write_text(json.dumps({"milestones": [{"name": "t-je", "container": "pe", "sites": [
@@ -230,8 +230,6 @@ def test_elf(tmp):
 def test_macho(tmp):
     sigs = tmp / "mac.json"
     sigs.write_text(json.dumps({"milestones": [
-        {"name": "t-x64", "container": "macho-x64", "sites": [
-            site("gx", "short", "0x100000044", "837E50027F2F554889E5")]},
         {"name": "t-arm64", "container": "macho-arm64", "sites": [
             site("ga", "bcond", "0x100000044", "1F0900718C000054")]}]}))
     ENVX = {"MV2_TEST_HOST_ARCH": "x86_64"}
@@ -239,21 +237,29 @@ def test_macho(tmp):
 
     t = tmp / "fixture-fat"
     x64_jg, arm_jg = T.make_fat_macho(t)
-    A.true(pyrun("check", t, sigs, env=ENVX).returncode == 0, "check parses the fat fixture")
+    A.true(pyrun("check", t, sigs, env=ENVA).returncode == 0, "check parses the fat fixture (arm64 slice)")
 
-    pyrun("patch", t, sigs, env=ENVX)
-    A.eq(T.byte_at(t, x64_jg), 0xEB, "x64 short jg flipped by default (x64 host)")
-    A.eq(T.byte_at(t, arm_jg) & 0x0F, 0x0C, "arm64 left stock (GT) on an x64 host")
+    # arm64 host: the arm64 slice is patched; the x64 slice is unsupported and skipped.
+    pyrun("patch", t, sigs, env=ENVA)
+    A.eq(T.byte_at(t, arm_jg) & 0x0F, 0x0E, "arm64 b.cond flipped GT(0xC)->AL(0xE) by default")
+    A.eq(T.byte_at(t, x64_jg), 0x7F, "x64 slice left stock (unsupported, skipped)")
     A.is_file(f"{t}.bak", "macho patch creates a backup")
     A.is_file(f"{t}.bak.meta", "macho patch creates backup metadata")
 
     h1 = T.sha256(t)
-    pyrun("patch", t, sigs, env=ENVX)
+    pyrun("patch", t, sigs, env=ENVA)
     A.eq(T.sha256(t), h1, "idempotent macho patch preserves bytes")
 
-    pyrun("restore", t, sigs, env=ENVX)
-    A.eq(T.byte_at(t, x64_jg), 0x7F, "restore recovers x64 stock byte")
+    pyrun("restore", t, sigs, env=ENVA)
+    A.eq(T.byte_at(t, arm_jg) & 0x0F, 0x0C, "restore recovers arm64 stock (GT)")
     A.true(not Path(f"{t}.bak").exists(), "macho restore removes the backup")
+
+    # Intel (x86_64) host is no longer supported.
+    t2 = tmp / "fixture-fat2"
+    T.make_fat_macho(t2)
+    A.true(pyrun("patch", t2, sigs, env=ENVX).returncode != 0,
+           "patch on an Intel (x86_64) host is refused")
+    A.true(not Path(f"{t2}.bak").exists(), "refused Intel patch creates no backup")
 
     # arm64 host: arm64 slice is the default target
     ah = tmp / "fixture-armhost"

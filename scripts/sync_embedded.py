@@ -56,9 +56,10 @@ def sh_block(entry):
             raise SystemExit("sync_embedded: featurebyte site in non-PE milestone %r" % entry["name"])
         # The whole table is one single-quoted shell string, so an apostrophe in a
         # site name would terminate it. Names are documentation only; strip it.
-        out.append("S|%s|%s|%s|%d|%d|%s"
+        out.append("S|%s|%s|%s|%d|%d|%d|%s"
                    % (site["name"].replace("'", ""), site["kind"], site["jgRVA"],
-                      site["jgOff"], site["expectedMatches"], site["sig"]))
+                      site["jgOff"], site["expectedMatches"],
+                      1 if site.get("optional") else 0, site["sig"]))
     out.append("E")
     return out
 

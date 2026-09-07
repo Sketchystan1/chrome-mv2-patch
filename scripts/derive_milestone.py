@@ -6,10 +6,9 @@ One tool, all containers and both x86 `jg` encodings:
     `bcond` flip as macOS arm64 below)
   - ELF `chrome` on Linux: x86_64 (`elf`) and the arm64 build (`elf-arm64`, the
     same `bcond` flip as macOS/Windows arm64 below)
-  - the universal "Google Chrome Framework" Mach-O on macOS: the x86_64 slice
-    (`macho-x64`, reusing the x86 short/near `jg` flip) and the arm64 slice
-    (`macho-arm64`, a new `bcond` kind: `cmp w,#2 ; b.gt` with the condition
-    rewritten GT->AL). A fat binary yields one milestone per CPU slice.
+  - the universal "Google Chrome Framework" Mach-O on macOS: the arm64 slice
+    (`macho-arm64`, a `bcond` kind: `cmp w,#2 ; b.gt` with the condition
+    rewritten GT->AL). Intel x86_64 is no longer supported; its slice is skipped.
 
 It is a single symbol-free finder that works for any future Chrome version,
 replacing an earlier version- and Windows-specific derivation.
@@ -54,7 +53,7 @@ DEFAULT_JSON = REPO / "signatures.json"
 # ---------------------------------------------------------------------------
 class Image:
     def __init__(self, container, text_virt, text_raw, text_size, data):
-        self.container = container      # "pe" | "pe32" | "pe-arm64" | "elf" | "elf-arm64" | "macho-x64" | "macho-arm64"
+        self.container = container      # "pe" | "pe32" | "pe-arm64" | "elf" | "elf-arm64" | "macho-arm64"
         self.text_virt = text_virt
         self.text_raw = text_raw
         self.text_size = text_size
@@ -168,7 +167,6 @@ def parse_elf(data):
 MH_MAGIC_64 = 0xFEEDFACF          # thin 64-bit Mach-O, little-endian on disk (CF FA ED FE)
 FAT_MAGIC = 0xCAFEBABE            # fat header, big-endian, 32-bit fat_arch entries
 FAT_MAGIC_64 = 0xCAFEBABF         # fat header, big-endian, 64-bit fat_arch entries
-CPU_TYPE_X86_64 = 0x01000007
 CPU_TYPE_ARM64 = 0x0100000C
 LC_SEGMENT_64 = 0x19
 LC_UUID = 0x1B
@@ -176,9 +174,9 @@ LC_UUID = 0x1B
 
 def _parse_macho_thin(data, base, cputype_hint=None):
     """Parse one thin Mach-O slice starting at file offset `base`. Returns an
-    Image (container macho-x64 / macho-arm64) with the UUID stashed on it, or
-    raises ValueError. Only 64-bit little-endian slices are supported (both
-    Chrome slices are); anything else declines."""
+    Image (container macho-arm64) with the UUID stashed on it, or raises
+    ValueError. Only the 64-bit little-endian arm64 slice is supported; the
+    x86_64 slice and anything else declines (Intel macOS is unsupported)."""
     if base + 32 > len(data):
         raise ValueError("Mach-O slice header out of bounds")
     magic = struct.unpack_from("<I", data, base)[0]
@@ -186,11 +184,10 @@ def _parse_macho_thin(data, base, cputype_hint=None):
         raise ValueError("not a 64-bit little-endian Mach-O (magic 0x%08X)" % magic)
     cputype = struct.unpack_from("<I", data, base + 4)[0]
     ncmds = struct.unpack_from("<I", data, base + 16)[0]
-    if cputype == CPU_TYPE_X86_64:
-        container = "macho-x64"
-    elif cputype == CPU_TYPE_ARM64:
+    if cputype == CPU_TYPE_ARM64:
         container = "macho-arm64"
     else:
+        # x86_64 and any other CPU: skip (Intel macOS is no longer supported).
         raise ValueError("unsupported Mach-O cputype 0x%08X" % cputype)
 
     text_addr = text_off = text_size = None

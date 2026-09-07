@@ -1,2 +1,5 @@
 /_scratch/
 __pycache__/
+mv2-mem-patch-win/detours/
+mv2-mem-patch-win/build/
+mv2-mem-patch-win/out/
