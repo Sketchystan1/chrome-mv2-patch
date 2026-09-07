@@ -1,0 +1,149 @@
+name: mv2-mem-patch-mac
+
+# Manually-triggered build + smoke test for the macOS in-process MV2 mem-patch
+# dylib (mv2-mem-patch-mac/). On each native arch (Apple Silicon + Intel):
+#   1. build the universal (arm64 + x86_64) dylib and offline inspector on real
+#      macOS - this is the authoritative COMPILE check for the .mm/.cpp;
+#   2. run the Mach-O load-command injector's self-test (pure Python);
+#   3. --offline: the AUTHORITATIVE byte-level check that signatures.json still
+#      locates every MV2 gate in the current stable Chrome for Testing build
+#      (goes red -> a new macOS milestone is due, same contract as the launcher);
+#   4. install into a scratch CfT copy (inject LC_LOAD_DYLIB + re-sign), confirm
+#      the app still verifies and LAUNCHES, and prove the mem-patch guarantee:
+#      the ON-DISK framework stays BYTE-IDENTICAL. The in-memory "ENABLED" trace
+#      is captured when present (strong positive signal), warned otherwise.
+#
+# CfT is unhardened and ships no Widevine/VMP, so DRM is out of scope here (that
+# is the "verify on a real Mac" step in the README). Production Google Chrome
+# cannot be exercised in CI.
+#
+# Trigger: Actions tab, or
+#   gh workflow run mv2-mem-patch-mac.yml --ref <branch>
+
+on:
+  workflow_dispatch:
+
+jobs:
+  mempatch-dylib:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15          # Apple Silicon (arm64)
+            arch: mac-arm64
+          - os: macos-15-intel    # Intel (x86_64)
+            arch: mac-x64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the universal dylib + inspector (arm64 + x86_64)
+        run: |
+          set -eo pipefail
+          bash mv2-mem-patch-mac/build.sh
+          DYLIB="$PWD/mv2-mem-patch-mac/mv2-mem-patch.dylib"
+          INSPECT="$PWD/mv2-mem-patch-mac/mv2-inspect"
+          test -f "$DYLIB" || { echo "::error::dylib was not built"; exit 1; }
+          test -x "$INSPECT" || { echo "::error::inspector was not built"; exit 1; }
+          for f in "$DYLIB" "$INSPECT"; do
+            lipo -info "$f" | tee -a lipo.txt
+          done
+          grep -q "arm64" lipo.txt && grep -q "x86_64" lipo.txt \
+            || { echo "::error::artifacts are not universal (arm64+x86_64)"; exit 1; }
+          echo "APP_DYLIB=$DYLIB" >> "$GITHUB_ENV"
+
+      - name: Mach-O load-command injector self-test (Python)
+        run: python3 scripts/macho_insert_dylib.py --self-test
+
+      - name: Stage a scratch Google Chrome for Testing.app
+        run: |
+          set -eo pipefail
+          python3 - <<'PY'
+          import json, urllib.request
+          plat = "${{ matrix.arch }}"
+          data = json.load(urllib.request.urlopen(
+            "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"))
+          st = data["channels"]["Stable"]
+          url = next(d["url"] for d in st["downloads"]["chrome"] if d["platform"] == plat)
+          print("downloading", url)
+          with open("chrome.zip", "wb") as f:
+            f.write(urllib.request.urlopen(url).read())
+          PY
+          ditto -x -k chrome.zip _app
+          rm -f chrome.zip
+          APP=$(find _app -maxdepth 2 -name "*.app" -type d | head -1)
+          FW=$(find "$APP/Contents/Frameworks" -maxdepth 4 -name "*Framework" -type f | head -1)
+          test -n "$APP" && test -n "$FW" || { echo "::error::could not stage CfT"; exit 1; }
+          echo "APP=$APP" >> "$GITHUB_ENV"
+          echo "FW=$FW"   >> "$GITHUB_ENV"
+          echo "staged $APP"
+
+      - name: --offline byte-level gate check (AUTHORITATIVE; changes nothing)
+        run: |
+          set -o pipefail
+          rc=0
+          bash mv2-mem-patch-mac/install.sh --offline "$APP" | tee offline.log || rc=$?
+          if grep -q "no milestone located" offline.log; then
+            echo "::error::signatures.json does not cover the current stable CfT build - add a new macOS milestone"
+            exit 1
+          fi
+          [ "$rc" -eq 0 ] || { echo "::error::--offline failed (rc=$rc)"; tail -c 2000 offline.log; exit 1; }
+          grep -Eq "[1-9]+ gate\(s\)" offline.log \
+            || { echo "::error::--offline reported no gate sites"; exit 1; }
+          echo "authoritative byte-level gate check OK"
+
+      - name: Install (inject + re-sign) and prove disk stays stock
+        timeout-minutes: 6
+        run: |
+          set -o pipefail
+          STOCK=$(shasum -a 256 "$FW" | awk '{print $1}')
+          echo "stock framework sha256=$STOCK"
+
+          bash mv2-mem-patch-mac/install.sh --chrome "$APP" | tee install.log \
+            || { echo "::error::install failed"; exit 1; }
+
+          # The injected load command must be present, and the app must still verify.
+          python3 scripts/macho_insert_dylib.py present \
+            "@executable_path/../Frameworks/mv2/mv2-mem-patch.dylib" \
+            "$APP/Contents/MacOS/$(basename "$APP" .app)" \
+            || { echo "::error::load command missing after install"; exit 1; }
+          codesign --verify "$APP" \
+            || { echo "::error::re-signed app fails codesign --verify"; exit 1; }
+
+          # Launch headless with debug tracing; capture stderr to a FILE (never a
+          # pipe - Chrome inherits the fd and would hang a tee until timeout).
+          EXE="$APP/Contents/MacOS/$(basename "$APP" .app)"
+          PROF="$(mktemp -d)"
+          MV2_MEMPATCH_DEBUG=1 "$EXE" \
+            --headless=new --disable-gpu --no-sandbox --no-first-run \
+            --no-default-browser-check --user-data-dir="$PROF" \
+            >launch.log 2>&1 &
+          sleep 12
+          pkill -9 -f "Chrome for Testing" 2>/dev/null || true
+          echo "--- launch trace ---"; cat launch.log || true
+
+          if grep -Eq "MV2 extensions ENABLED - .*patched in memory" launch.log; then
+            echo "PROOF: dylib loaded and flipped MV2 gates in the live process"
+          else
+            echo "::warning::did not capture the in-memory ENABLED trace on this runner (headless launch quirk); the disk-stock + launch + verify checks below are the deterministic proof"
+          fi
+
+          # Core mem-patch guarantee: the on-disk framework is never touched.
+          AFTER=$(shasum -a 256 "$FW" | awk '{print $1}')
+          echo "post-launch framework sha256=$AFTER"
+          [ "$AFTER" = "$STOCK" ] \
+            || { echo "::error::on-disk framework changed - mem-patch MUST leave the framework byte-identical"; exit 1; }
+          echo "PROOF: on-disk framework byte-identical (disk stays stock)"
+
+      - name: Restore removes the load command
+        run: |
+          set -o pipefail
+          bash mv2-mem-patch-mac/install.sh --restore --chrome "$APP" | tee restore.log
+          if python3 scripts/macho_insert_dylib.py present \
+               "@executable_path/../Frameworks/mv2/mv2-mem-patch.dylib" \
+               "$APP/Contents/MacOS/$(basename "$APP" .app)"; then
+            echo "::error::load command still present after --restore"; exit 1
+          fi
+          test ! -d "$APP/Contents/Frameworks/mv2" \
+            || { echo "::error::mv2 payload dir survived --restore"; exit 1; }
+          echo "restore OK: load command and payload removed"

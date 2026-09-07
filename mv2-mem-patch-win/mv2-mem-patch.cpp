@@ -14,11 +14,19 @@
 //    .text is scanned against signatures.json and every MV2 gate (jg) is
 //    flipped to jmp in the loaded image — synchronously on Chrome's own
 //    loading thread, before any chrome.dll code can execute.
-// 4. The signatures source can be set by mv2-launcher-config.txt next to
-//    chrome.exe (the same TOML file the launcher reads). When it names an https
-//    URL and the local signatures.json does not fully match this Chrome, a
-//    background thread refreshes signatures.json for the NEXT launch — the fetch
-//    never runs under the loader lock.
+// 4. The signatures source can be set by config.txt in
+//    %LOCALAPPDATA%\mv2-mem-patch\ (a TOML file). When it names an https URL and
+//    no local store fully matches this Chrome, a background thread refreshes the
+//    signatures store for the NEXT launch — the fetch never runs under the loader
+//    lock. The store is signatures.json next to chrome.exe, or
+//    %LOCALAPPDATA%\mv2-mem-patch\signatures.json when that Application dir is
+//    read-only (a Program Files install running unelevated); both are read at
+//    launch, so a system-wide Chrome self-heals without any elevated step.
+// 5. On a truly fresh machine (no store exists at all) the background refresh
+//    would only help the NEXT launch, so the FIRST launch instead does a
+//    one-time, timeout-bounded download via curl.exe in a child process — safe
+//    under the loader lock because the network I/O is out-of-process — then
+//    patches from the just-downloaded table.
 
 #define NOMINMAX
 #define _CRT_SECURE_NO_WARNINGS 1
@@ -374,14 +382,14 @@ static std::vector<Milestone> ParseMilestones(const JV& doc,
 }
 
 // ---------------------------------------------------------------------------
-// Config (mv2-launcher-config.txt next to chrome.exe) — the same TOML the
-// mv2-launcher reads, so one file can serve both. Keys:
-//   browser    — ignored here (this DLL is already inside the chosen Chrome).
+// Config: config.txt in %LOCALAPPDATA%\mv2-mem-patch\ (the same
+// per-user directory as the fallback signatures store). TOML keys:
 //   signatures — an https URL or a local path. See PatchChromeDll for how a URL
 //                is honored off the loader lock.
-//   args       — accepted for compatibility but ignored (a DLL cannot rewrite
-//                Chrome's command line safely; use the launcher for flags).
-// Ported from mv2-launcher.
+//   download_timeout_ms — ms bound on the one-time first-launch download (see below).
+//   browser / args  — accepted for mv2-launcher compatibility, but ignored here
+//                (this DLL is already inside the chosen Chrome, and cannot safely
+//                rewrite its command line; use the launcher for flags).
 // ---------------------------------------------------------------------------
 
 static const wchar_t* kDefaultSigUrl =
@@ -389,7 +397,23 @@ static const wchar_t* kDefaultSigUrl =
 
 struct Config {
   std::wstring signatures = kDefaultSigUrl;
+  int downloadTimeoutMs = 8000;  // hard bound on the one-time first-launch curl seed
 };
+
+// Per-user, always-writable data directory: %LOCALAPPDATA%\mv2-mem-patch. Holds
+// the config file and the fallback signatures store — used because a Program
+// Files install's Application dir is read-only to unelevated Chrome.
+static std::wstring UserStoreDir() {
+  wchar_t buf[MAX_PATH];
+  DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
+  if (n == 0 || n >= MAX_PATH) return std::wstring();
+  return std::wstring(buf) + L"\\mv2-mem-patch";
+}
+
+static std::wstring ConfigPath() {
+  std::wstring d = UserStoreDir();
+  return d.empty() ? std::wstring() : d + L"\\config.txt";
+}
 
 static std::wstring Utf8ToWide(const std::string& s) {
   if (s.empty()) return std::wstring();
@@ -444,12 +468,14 @@ static bool TomlStr(const std::string& in, std::string& out) {
   return false;
 }
 
-// Read mv2-launcher-config.txt next to chrome.exe. Only "signatures" is honored;
-// "browser" and "args" are accepted (launcher compatibility) and ignored.
-static Config LoadConfig(const std::wstring& exeDir) {
+// Read %LOCALAPPDATA%\mv2-mem-patch\config.txt. "signatures"
+// (source) and "download_timeout_ms" (first-launch curl bound, 1000–60000) are
+// honored; "browser" and "args" are accepted (launcher compatibility) and ignored.
+static Config LoadConfig() {
   Config c;
-  std::vector<BYTE> raw =
-      ReadFileBytes((exeDir + L"\\mv2-launcher-config.txt").c_str());
+  std::wstring cfgPath = ConfigPath();
+  if (cfgPath.empty()) return c;
+  std::vector<BYTE> raw = ReadFileBytes(cfgPath.c_str());
   if (raw.empty()) return c;
   std::string text((const char*)raw.data(), raw.size());
   auto trim = [](std::string& s) {
@@ -473,6 +499,12 @@ static Config LoadConfig(const std::wstring& exeDir) {
     std::string s;
     if (key == "signatures" && TomlStr(val, s) && !s.empty())
       c.signatures = Utf8ToWide(s);
+    else if (key == "download_timeout_ms") {
+      // Bare TOML integer, ms. Clamp to a sane range so a bad value can never
+      // stall Chrome startup for long, nor make the seed give up instantly.
+      long v = strtol(val.c_str(), nullptr, 10);
+      if (v >= 1000 && v <= 60000) c.downloadTimeoutMs = (int)v;
+    }
   }
   return c;
 }
@@ -555,13 +587,36 @@ static bool WriteAllBytesAtomic(const std::wstring& path,
   return true;
 }
 
+// The per-user fallback signatures store: %LOCALAPPDATA%\mv2-mem-patch\
+// signatures.json. When chrome.exe sits in a read-only Application dir — the
+// normal case for a Program Files install running unelevated — the DLL cannot
+// write signatures.json next to it, so the deferred URL refresh lands the
+// download here instead. PatchChromeDll reads this store too.
+static std::wstring FallbackStorePath() {
+  std::wstring d = UserStoreDir();
+  return d.empty() ? std::wstring() : d + L"\\signatures.json";
+}
+
+// Create the immediate parent directory of a file path (one level; the rest of
+// the path — %LOCALAPPDATA% — already exists). Succeeds if it is already there.
+static bool EnsureParentDir(const std::wstring& file) {
+  size_t slash = file.find_last_of(L'\\');
+  if (slash == std::wstring::npos) return true;
+  std::wstring dir = file.substr(0, slash);
+  return CreateDirectoryW(dir.c_str(), nullptr) ||
+         GetLastError() == ERROR_ALREADY_EXISTS;
+}
+
 // Deferred signatures refresh. The current run is already patched from the local
 // file; this only replaces signatures.json for the NEXT launch, so it can run
 // after Chrome's loader has released the lock. It validates the fetched body has
-// pe milestones before overwriting, and never touches the loaded image.
+// pe milestones before overwriting, and never touches the loaded image. It
+// writes the Application-dir store when that is writable, else the per-user
+// fallback store — so a read-only Program Files install still self-heals.
 struct RefreshArg {
   std::wstring url;
-  std::wstring localPath;
+  std::wstring localPath;      // preferred store, next to chrome.exe
+  std::wstring fallbackPath;   // %LOCALAPPDATA% store, used if localPath is RO
 };
 
 static DWORD WINAPI RefreshThread(LPVOID p) {
@@ -573,8 +628,19 @@ static DWORD WINAPI RefreshThread(LPVOID p) {
           JParser(std::string((const char*)body.data(), body.size())).val(),
           kHostContainer);
       if (!ms.empty()) {
-        if (WriteAllBytesAtomic(a->localPath, body))
+        // Prefer the Application-dir store (read first at launch). If that write
+        // fails — a read-only Program Files install running unelevated — fall
+        // back to the per-user store PatchChromeDll also reads, so the download
+        // still lands somewhere usable for the next launch.
+        if (WriteAllBytesAtomic(a->localPath, body)) {
           DBG(L"signatures refreshed for next launch");
+        } else if (!a->fallbackPath.empty() &&
+                   EnsureParentDir(a->fallbackPath) &&
+                   WriteAllBytesAtomic(a->fallbackPath, body)) {
+          DBG(L"signatures refreshed to per-user store for next launch");
+        } else {
+          DBG(L"could not write refreshed signatures to any store");
+        }
       } else {
         DBG(L"fetched signatures had no pe milestones — kept the old file");
       }
@@ -842,6 +908,72 @@ static bool IsBrowserProcess() {
   return !cmd || !wcsstr(cmd, L"--type=");
 }
 
+// One-time blocking bootstrap. Only used when NO signatures store exists yet (a
+// fresh machine), so the FIRST launch can still patch instead of waiting for the
+// deferred refresh to help the next one. curl.exe (System32, Win 10 1803+) does
+// the download into a temp file, renamed onto the per-user store on success.
+//
+// This is safe to call under the loader lock precisely because the network I/O
+// happens in a SEPARATE process: CreateProcessW and WaitForSingleObject never
+// acquire our loader lock, and curl has its own, so there is no re-entrancy — in
+// contrast to the deferred RefreshThread, whose thread cannot even start until
+// the lock is released. It is hard-bounded twice: curl's own --max-time, and our
+// WaitForSingleObject timeout, after which curl is terminated. Worst case the
+// first launch stalls timeoutMs and patches nothing (deferred refresh still runs
+// for the next launch) — it never hangs.
+static bool SeedViaCurl(const std::wstring& url, const std::wstring& outPath,
+                        DWORD timeoutMs) {
+  if (_wcsnicmp(url.c_str(), L"https://", 8) != 0) return false;
+  if (outPath.empty() || !EnsureParentDir(outPath)) return false;
+
+  wchar_t curl[MAX_PATH];
+  UINT n = GetSystemDirectoryW(curl, MAX_PATH);
+  if (n == 0 || n >= MAX_PATH - 10) return false;
+  lstrcatW(curl, L"\\curl.exe");
+  if (GetFileAttributesW(curl) == INVALID_FILE_ATTRIBUTES) return false;
+
+  DWORD curlSecs = timeoutMs / 1000;
+  if (curlSecs == 0) curlSecs = 1;  // curl --max-time takes whole seconds
+  wchar_t secs[16];
+  wsprintfW(secs, L"%lu", curlSecs);
+
+  // Download to a temp sibling and rename on success, so a killed/partial curl
+  // never leaves a truncated file the next scan would try to parse.
+  std::wstring tmp = outPath + L".dl";
+  std::wstring cmd = std::wstring(L"\"") + curl +
+                     L"\" -fsSL --proto =https --max-time " + secs +
+                     L" -o \"" + tmp + L"\" \"" + url + L"\"";
+  std::vector<wchar_t> mutableCmd(cmd.begin(), cmd.end());
+  mutableCmd.push_back(0);
+
+  STARTUPINFOW si{};
+  si.cb = sizeof(si);
+  PROCESS_INFORMATION pi{};
+  if (!CreateProcessW(curl, mutableCmd.data(), nullptr, nullptr, FALSE,
+                      CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi)) {
+    DeleteFileW(tmp.c_str());
+    return false;
+  }
+
+  bool ok = false;
+  if (WaitForSingleObject(pi.hProcess, timeoutMs) == WAIT_OBJECT_0) {
+    DWORD code = 1;
+    if (GetExitCodeProcess(pi.hProcess, &code) && code == 0) ok = true;
+  } else {
+    TerminateProcess(pi.hProcess, 1);      // timed out — do not let curl linger
+    WaitForSingleObject(pi.hProcess, 2000);
+    DBG(L"first-launch seed timed out");
+  }
+  CloseHandle(pi.hThread);
+  CloseHandle(pi.hProcess);
+
+  if (ok &&
+      MoveFileExW(tmp.c_str(), outPath.c_str(), MOVEFILE_REPLACE_EXISTING))
+    return true;
+  DeleteFileW(tmp.c_str());
+  return false;
+}
+
 static void PatchChromeDll(HMODULE chromeDll) {
   try {
     wchar_t dllPath[MAX_PATH * 2]{};
@@ -860,7 +992,7 @@ static void PatchChromeDll(HMODULE chromeDll) {
 
     std::wstring appDir    = AppDir();
     std::wstring localStore = appDir + L"\\signatures.json";
-    Config cfg = LoadConfig(appDir);
+    Config cfg = LoadConfig();
     bool isUrl = _wcsnicmp(cfg.signatures.c_str(), L"https://", 8) == 0;
 
     // Where to read the gate table for THIS run. A URL source always reads the
@@ -890,26 +1022,66 @@ static void PatchChromeDll(HMODULE chromeDll) {
       }
     };
 
-    std::vector<Milestone> milestones = loadFrom(readPath.c_str());
-    if (milestones.empty() && readPath != localStore)
-      milestones = loadFrom(localStore.c_str());  // fall back to signatures.json
+    // Read the gate table from the first store that yields a match for THIS
+    // chrome.dll, trying in order: the configured / Application-dir path, the
+    // Application-dir signatures.json, then the per-user fallback store the URL
+    // refresh writes when the Application dir is read-only. A full match wins
+    // immediately; a partial one is kept only until something better turns up,
+    // so a stale Application-dir file never shadows a fresh fallback download.
+    std::wstring userStore = FallbackStorePath();
+    std::wstring candidates[3] = {readPath, localStore, userStore};
 
-    bool full = false;
+    bool full = false, haveHits = false, anyMilestones = false;
     std::vector<std::pair<Site, std::vector<long long>>> hits;
-    if (!milestones.empty() &&
-        Locate(dll.data, dll.size, img, milestones, &hits, &full))
+
+    auto scan = [&]() {
+      full = haveHits = anyMilestones = false;
+      hits.clear();
+      for (int i = 0; i < 3 && !full; i++) {
+        const std::wstring& sp = candidates[i];
+        if (sp.empty()) continue;
+        bool dup = false;
+        for (int j = 0; j < i; j++)
+          if (candidates[j] == sp) { dup = true; break; }
+        if (dup) continue;
+        std::vector<Milestone> ms = loadFrom(sp.c_str());
+        if (ms.empty()) continue;
+        anyMilestones = true;
+        std::vector<std::pair<Site, std::vector<long long>>> h;
+        bool f = false;
+        if (Locate(dll.data, dll.size, img, ms, &h, &f)) {
+          if (f) { hits = std::move(h); full = true; haveHits = true; }
+          else if (!haveHits) { hits = std::move(h); haveHits = true; }  // best partial
+        }
+      }
+    };
+
+    scan();
+
+    // Fresh machine: no store had any readable table. Do a ONE-TIME blocking
+    // download into the per-user store (bounded by cfg.downloadTimeoutMs) so THIS
+    // first launch can patch, then re-scan. Only for an https URL source, and
+    // only when nothing was found — later launches always have a table and never
+    // block here.
+    if (!anyMilestones && isUrl &&
+        SeedViaCurl(cfg.signatures, userStore, (DWORD)cfg.downloadTimeoutMs))
+      scan();
+
+    if (haveHits)
       ApplyInProcess((BYTE*)chromeDll, img, hits);
-    else if (milestones.empty())
-      DBG(L"no usable signatures (local file missing or unparseable)");
+    else if (!anyMilestones)
+      DBG(L"no usable signatures (no store had a readable table)");
     else
       DBG(L"no milestone matched this chrome.dll build");
 
-    // URL source + not a full match → refresh signatures.json for the next
+    // URL source + not a full match → refresh the signatures store for the next
     // launch. The thread is created here, but Chrome's loader thread cannot run
     // it until the current load finishes, so WinHTTP never runs inline. It only
-    // rewrites the on-disk store; the current run is already patched.
+    // rewrites the on-disk store; the current run is already patched. When the
+    // Application dir is read-only it writes the per-user fallback store above.
     if (isUrl && !full) {
-      RefreshArg* a = new (std::nothrow) RefreshArg{cfg.signatures, localStore};
+      RefreshArg* a = new (std::nothrow)
+          RefreshArg{cfg.signatures, localStore, userStore};
       if (a) {
         HANDLE t = CreateThread(nullptr, 0, RefreshThread, a, 0, nullptr);
         if (t)

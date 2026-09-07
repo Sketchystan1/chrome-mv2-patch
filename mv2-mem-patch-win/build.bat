@@ -4,9 +4,9 @@ rem
 rem   build.bat [x64|x86|arm64|all]      (default: all)
 rem
 rem Fetches the Detours source on first use (curl, built into Windows 10 1803+),
-rem then compiles out\<arch>\version.dll. A version.dll proxy is loaded INTO
+rem then compiles build\<arch>\version.dll. A version.dll proxy is loaded INTO
 rem chrome.exe, so it must match chrome.exe's architecture: place the DLL from
-rem out\<arch>\ next to the matching chrome.exe, together with signatures.json.
+rem build\<arch>\ next to the matching chrome.exe, together with signatures.json.
 rem
 rem An architecture whose MSVC target toolchain is not installed is skipped with
 rem a clear note (install "C++ ARM64 build tools" for arm64, etc.).
@@ -76,7 +76,7 @@ echo.
 if defined BUILT   echo Built:            !BUILT!
 if defined FAILED  echo Skipped/failed:  !FAILED!   ^(that target's MSVC toolchain may not be installed^)
 if not defined BUILT ( echo Nothing was built. & exit /b 1 )
-echo Place out\^<arch^>\version.dll next to the matching chrome.exe, with signatures.json.
+echo Place build\^<arch^>\version.dll next to the matching chrome.exe, with signatures.json.
 exit /b 0
 
 rem ===========================================================================
@@ -107,7 +107,6 @@ where cl >nul 2>nul || ( echo   [skip] %ARCH%: cl not found for %VCARG%. & endlo
 
 set "OBJ=build\%ARCH%"
 if not exist "%OBJ%" mkdir "%OBJ%"
-if not exist "out\%ARCH%" mkdir "out\%ARCH%"
 
 rem Detours: common sources plus this arch's opcode-length table. /FIintrin.h
 rem force-includes the intrinsics first so the SDK headers find Interlocked*64
@@ -122,12 +121,15 @@ cl /nologo /c /O2 /W3 /EHsc /std:c++20 /FIintrin.h /DUNICODE /D_UNICODE ^
   /I detours\src /Fo%OBJ%\mv2-mem-patch.obj mv2-mem-patch.cpp
 if errorlevel 1 ( echo   [fail] %ARCH%: patch compile failed. & endlocal & exit /b 1 )
 
-link /nologo /DLL /OUT:out\%ARCH%\version.dll /IMPLIB:%OBJ%\version.lib ^
+link /nologo /DLL /OUT:%OBJ%\version.dll /IMPLIB:%OBJ%\version.lib ^
   /DYNAMICBASE /MANIFEST:NO /MACHINE:%MACH% kernel32.lib user32.lib winhttp.lib ^
   %OBJ%\detours.obj %OBJ%\disasm.obj %OBJ%\image.obj %OBJ%\modules.obj ^
   %OBJ%\%DISOL%.obj %OBJ%\mv2-mem-patch.obj
 if errorlevel 1 ( echo   [fail] %ARCH%: link failed. & endlocal & exit /b 1 )
 
-echo   [ok] out\%ARCH%\version.dll
+rem Keep only the final DLL; drop object/import-lib/export temporaries.
+del /q "%OBJ%\*.obj" "%OBJ%\version.lib" "%OBJ%\version.exp" >nul 2>nul
+
+echo   [ok] %OBJ%\version.dll
 endlocal
 exit /b 0

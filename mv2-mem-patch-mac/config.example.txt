@@ -1,0 +1,16 @@
+# mv2-mem-patch settings (macOS in-process dylib build). Lines starting with # are notes.
+# Copy this file to config.txt next to mv2-mem-patch.dylib (i.e. inside
+# Contents/Frameworks/mv2/) to override defaults. This build reads only LOCAL
+# signatures — no network — so the keys exist mainly for parity with the launchers.
+
+# browser: ignored here. This dylib is already loaded inside the chosen Chrome.
+browser = "auto"
+
+# signatures: a LOCAL path to signatures.json. Relative paths resolve next to the
+# dylib. An https URL (or the default) is ignored and signatures.json next to the
+# dylib is used instead (this build never fetches over the network).
+signatures = "signatures.json"
+
+# args: ignored. A dylib cannot rewrite Chrome's command line; pass Chrome flags
+# yourself (e.g. via the .app launch or a wrapper) if you need them.
+args = []

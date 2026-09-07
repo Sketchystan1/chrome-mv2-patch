@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Entitlements applied to Chrome's MAIN EXECUTABLE when install.sh re-signs it.
+
+  install.sh normally MERGES these two keys into Chrome's own existing entitlements
+  (read back with `codesign -d --entitlements`) so nothing Chrome needs is lost.
+  This file is the fallback used only if that read-back fails, and documents intent.
+
+  - com.apple.security.cs.disable-library-validation: lets the ad-hoc-signed main
+    executable load BOTH the untouched Google-signed Chrome Framework AND our
+    ad-hoc mv2-mem-patch.dylib. Without it, library validation would reject the
+    mixed-signer set.
+
+  - com.apple.security.cs.allow-unsigned-executable-memory: belt-and-suspenders for
+    the in-process gate flip. The patch uses a VM_PROT_COPY (copy-on-write) reprotect
+    so the modified page becomes private/anonymous; this entitlement guarantees the
+    kernel won't object to executing it if any hardened-runtime enforcement lingers.
+
+  NOTE: install.sh re-signs the main executable WITHOUT the hardened-runtime flag
+  (no `--options runtime`). Hardened-ness is set by the main executable, so dropping
+  it disarms CS_KILL for the whole process — which is what makes the in-process write
+  reliable. The Chrome Framework keeps its own stock Google signature and flags.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+</dict>
+</plist>

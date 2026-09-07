@@ -2,4 +2,7 @@
 __pycache__/
 mv2-mem-patch-win/detours/
 mv2-mem-patch-win/build/
-mv2-mem-patch-win/out/
+mv2-mem-patch-mac/mv2-mem-patch.dylib
+mv2-mem-patch-mac/mv2-inspect
+mv2-mem-patch-mac/signatures.json
+mv2-mem-patch-mac/config.txt
