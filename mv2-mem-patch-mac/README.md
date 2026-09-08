@@ -40,6 +40,10 @@ defaults write com.google.Chrome ExtensionSettings '{"fkgkibajhfbepljeaefdnfnegd
 - No SIP change, but editing `/Applications` needs **Full Disk Access** for your
   terminal (System Settings → Privacy & Security).
 - Re-run `install.sh` after Chrome auto-updates.
+- Chrome's main program is a tiny stub with little header room, so the injector drops
+  a few metadata-only load commands (UUID / source-version / function-starts /
+  data-in-code) from **it** to fit the load command. Execution is unaffected; the
+  framework and helpers are never touched. `--restore` puts the stock exe back.
 - Debug: `MV2_MEMPATCH_DEBUG=1 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"`.
 - DRM: if Widevine drops a tier, the ad-hoc signature is why — `--restore` and use the
   disk patch `chrome-mv2.sh` instead.

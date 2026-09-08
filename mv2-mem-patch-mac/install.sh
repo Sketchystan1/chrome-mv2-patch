@@ -7,7 +7,10 @@
 # (the DRM-preserving point of this build). To load a dylib into hardened Chrome,
 # macOS requires it in the load commands + a valid signature, so this:
 #   1. injects an LC_LOAD_DYLIB into Chrome's MAIN EXECUTABLE only (never the
-#      framework), via ../scripts/macho_insert_dylib.py;
+#      framework), via ../scripts/macho_insert_dylib.py. Chrome's main exe is a tiny
+#      stub with almost no header padding, so the injector reclaims room by dropping
+#      load commands the stub doesn't need to run (LC_UUID/SOURCE_VERSION/
+#      FUNCTION_STARTS/DATA_IN_CODE) - it prints a "note:" line for each;
 #   2. re-signs the main executable ad-hoc and NON-hardened, merging Chrome's own
 #      entitlements with disable-library-validation + allow-unsigned-executable-memory,
 #      and re-seals the bundle WITHOUT --deep so the framework/helpers keep their

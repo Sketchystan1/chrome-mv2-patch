@@ -9,6 +9,16 @@ then bumping the header's ncmds / sizeofcmds. Because the edit stays inside a
 slice's existing bytes, slice lengths never change and the fat table needs no
 rewrite.
 
+Chrome's main executable is a tiny stub with very little header padding (as little
+as 24 bytes) - not enough for a full LC_LOAD_DYLIB (the 24-byte struct plus the
+~53-char @executable_path path pads to ~80 bytes). When the padding is too small,
+insert() RECLAIMS space by dropping load commands the stub does not need to run
+(LC_SOURCE_VERSION, LC_UUID, LC_FUNCTION_STARTS, LC_DATA_IN_CODE - in that order,
+least-useful first), compacting the load-command region after each drop. The stub
+only maps the framework and jumps in; these commands carry symbolication/debug
+metadata, not execution semantics, and the binary is re-signed ad-hoc afterwards
+anyway. remove() does NOT restore them - install.sh keeps a stock backup for undo.
+
 Only the target binary is ever modified; nothing else in the bundle is touched
 (the installer keeps the Chrome Framework byte-for-byte stock for DRM). The edit
 invalidates the code signature on purpose - install.sh re-signs afterwards.
@@ -28,9 +38,21 @@ FAT_MAGIC = 0xCAFEBABE            # fat header (big-endian), 32-bit offsets
 FAT_MAGIC_64 = 0xCAFEBABF         # fat header (big-endian), 64-bit offsets
 LC_SEGMENT_64 = 0x19
 LC_LOAD_DYLIB = 0xC
+LC_REQ_DYLD = 0x80000000
 # zero-fill section types carry no file bytes; their `offset` must not bound the
 # header-padding region we insert into.
 _ZEROFILL_TYPES = {0x1, 0xC, 0x11}  # S_ZEROFILL, S_GB_ZEROFILL, S_THREAD_LOCAL_ZEROFILL
+
+# Load commands the main-exe stub does not need at runtime, safe to drop to reclaim
+# header padding for our LC_LOAD_DYLIB. Value = drop priority (lower drops first);
+# ordered least-useful → most, so we sacrifice the least metadata to make room.
+LC_UUID = 0x1B
+LC_SOURCE_VERSION = 0x2A
+LC_FUNCTION_STARTS = 0x26
+LC_DATA_IN_CODE = 0x29
+_DROPPABLE = {LC_SOURCE_VERSION: 0, LC_UUID: 1, LC_FUNCTION_STARTS: 2, LC_DATA_IN_CODE: 3}
+_LC_NAME = {LC_UUID: "LC_UUID", LC_SOURCE_VERSION: "LC_SOURCE_VERSION",
+            LC_FUNCTION_STARTS: "LC_FUNCTION_STARTS", LC_DATA_IN_CODE: "LC_DATA_IN_CODE"}
 
 
 class MachoError(Exception):
@@ -133,9 +155,56 @@ def _slice_info(buf, base):
     return ncmds, sizeofcmds, min_content, loads, end
 
 
-def insert(buf, dylib_path):
+def _iter_commands(buf, base):
+    """Yield (cmd_type_without_LC_REQ_DYLD, cmdsize, abs_offset) for each load
+    command in the slice at `base`, in file order."""
+    ncmds = _u32(buf, base + 16)
+    sizeofcmds = _u32(buf, base + 20)
+    p = base + 32
+    end = base + 32 + sizeofcmds
+    for _ in range(ncmds):
+        if p + 8 > len(buf):
+            raise MachoError("truncated load commands")
+        cmd = _u32(buf, p)
+        cmdsize = _u32(buf, p + 4)
+        if cmdsize < 8 or p + cmdsize > end:
+            raise MachoError("bad load-command size")
+        yield cmd & ~LC_REQ_DYLD, cmdsize, p
+        p += cmdsize
+
+
+def _pick_droppable(buf, base):
+    """Return (offset, cmdsize, cmd_type) of the best spare command to drop for
+    space (lowest _DROPPABLE priority present), or None if the slice has none."""
+    best = None
+    for ctype, cmdsize, off in _iter_commands(buf, base):
+        rank = _DROPPABLE.get(ctype)
+        if rank is None:
+            continue
+        if best is None or rank < best[0]:
+            best = (rank, off, cmdsize, ctype)
+    return None if best is None else (best[1], best[2], best[3])
+
+
+def _drop_command(buf, base, off, sz):
+    """Delete the load command at absolute offset `off` (size `sz`): shift the
+    trailing commands up over it, zero the freed tail, decrement ncmds/sizeofcmds.
+    This shrinks lc_end, growing the header padding available for insertion."""
+    ncmds = _u32(buf, base + 16)
+    sizeofcmds = _u32(buf, base + 20)
+    lc_end = base + 32 + sizeofcmds
+    tail = bytes(buf[off + sz:lc_end])
+    buf[off:off + len(tail)] = tail
+    buf[lc_end - sz:lc_end] = b"\x00" * sz
+    _set_u32(buf, base + 16, ncmds - 1)
+    _set_u32(buf, base + 20, sizeofcmds - sz)
+
+
+def insert(buf, dylib_path, notes=None):
     """Insert an LC_LOAD_DYLIB into every 64-bit slice. Idempotent per slice.
-    Returns the number of slices actually modified."""
+    If a slice lacks header padding, reclaim it by dropping non-essential load
+    commands (see _DROPPABLE) before inserting; human-readable drop notes are
+    appended to `notes` if given. Returns the number of slices actually modified."""
     cmd = _build_load_dylib(dylib_path)
     changed = 0
     for base in _iter_slices(buf):
@@ -143,10 +212,20 @@ def insert(buf, dylib_path):
         if any(path == dylib_path for _, _, path in loads):
             continue                                # already present - idempotent
         free = min_content - lc_end
-        if free < len(cmd):
-            raise MachoError(
-                "no room for a load command in slice @0x%X (need %d bytes of "
-                "header padding, have %d)" % (base, len(cmd), free))
+        while free < len(cmd):
+            victim = _pick_droppable(buf, base)     # highest-priority spare command
+            if victim is None:
+                raise MachoError(
+                    "no room for a load command in slice @0x%X (need %d bytes of "
+                    "header padding, have %d) and no spare load commands remain to "
+                    "reclaim space" % (base, len(cmd), free))
+            off, sz, ctype = victim
+            _drop_command(buf, base, off, sz)
+            if notes is not None:
+                notes.append("slice @0x%X: dropped %s to reclaim %d bytes"
+                             % (base, _LC_NAME.get(ctype, hex(ctype)), sz))
+            ncmds, sizeofcmds, min_content, loads, lc_end = _slice_info(buf, base)
+            free = min_content - lc_end
         buf[lc_end:lc_end + len(cmd)] = cmd
         _set_u32(buf, base + 16, ncmds + 1)
         _set_u32(buf, base + 20, sizeofcmds + len(cmd))
@@ -225,6 +304,76 @@ def _self_test():
     os.remove(tmp)
     print("self-test OK: insert (x2, idempotent), section data intact, remove")
 
+    _self_test_reclaim()
+
+
+def _thin_tight(text_off, extra_cmds, text=b"\x90" * 0x40):
+    """A thin arm64 MH64 whose first section starts at `text_off`, with `extra_cmds`
+    (list of pre-built command byte blobs) after the __TEXT segment - used to force
+    the header-padding-too-small path. Returns the file bytes."""
+    MH64, SEG, ARM, VM = 0xFEEDFACF, 0x19, 0x0100000C, 0x100000000
+    seg_sz = 72 + 80
+    sect = struct.pack("<16s16sQQIIIIIII4x", b"__text", b"__TEXT", VM, len(text),
+                       text_off, 4, 0, 0, 0, 0, 0)
+    seg = struct.pack("<II16sQQQQiiII", SEG, seg_sz, b"__TEXT", VM, 0x1000, 0,
+                      text_off + len(text), 7, 5, 1, 0)
+    body = seg + sect + b"".join(extra_cmds)
+    ncmds = 1 + len(extra_cmds)
+    hdr = struct.pack("<IiiIIIII", MH64, ARM, 0, 2, ncmds, len(body), 0, 0)
+    out = bytearray(hdr + body)
+    if len(out) > text_off:
+        raise AssertionError("fixture load commands overran text_off")
+    out += b"\x00" * (text_off - len(out)) + text
+    return bytes(out)
+
+
+def _self_test_reclaim():
+    """Insert must reclaim header space by dropping spare commands when padding is
+    too small, and must fail cleanly when nothing can be reclaimed."""
+    path = "@executable_path/../Frameworks/mv2/mv2-mem-patch.dylib"
+    need = len(_build_load_dylib(path))          # ~80 bytes for this path
+
+    uuid = struct.pack("<II", LC_UUID, 24) + b"\xAB" * 16
+    srcv = struct.pack("<II", LC_SOURCE_VERSION, 16) + struct.pack("<Q", 0x10000)
+    fnst = struct.pack("<IIII", LC_FUNCTION_STARTS, 16, 0, 0)
+    dinc = struct.pack("<IIII", LC_DATA_IN_CODE, 16, 0, 0)
+    spare = 24 + 16 + 16 + 16                     # total reclaimable
+
+    # lc_end = 32 (hdr) + 152 (seg+sect) + spare; leave only 8 bytes of padding.
+    text_off = 32 + 152 + spare + 8
+    raw = bytearray(_thin_tight(text_off, [uuid, srcv, fnst, dinc]))
+    text = bytes(raw[text_off:text_off + 0x40])
+    assert not present(raw, path)
+
+    notes = []
+    assert insert(raw, path, notes) == 1, "reclaim insert should touch the slice"
+    assert notes, "reclaim should have recorded at least one dropped command"
+    assert present(raw, path), "load command should be present after reclaim"
+    # Slice still parses, load commands do not overrun section data, __text intact.
+    for base in _iter_slices(raw):
+        nc, sc, mc, loads, end = _slice_info(raw, base)
+        assert end <= mc, "load commands overran section data after reclaim"
+        assert any(p == path for _, _, p in loads)
+    assert raw[text_off:text_off + 0x40] == text, "__text disturbed by reclaim"
+    # Idempotent even after reclaim.
+    assert insert(raw, path, []) == 0, "second insert should be a no-op"
+
+    # Only what was necessary was dropped: 8 free + 16 (srcv) + 24 (uuid) = 48 < need,
+    # + 16 (fnst) = 64 >= need(80)? need is ~80 → also drops DATA_IN_CODE. Assert the
+    # highest-priority survivor is dropped last: SOURCE_VERSION always goes first.
+    assert "LC_SOURCE_VERSION" in notes[0], "least-useful command should drop first"
+
+    # No spare commands + zero padding → clean MachoError, buffer left usable.
+    raw2 = bytearray(_thin_tight(32 + 152, []))   # text right after seg, 0 padding
+    try:
+        insert(raw2, path)
+        raise AssertionError("expected MachoError when nothing can be reclaimed")
+    except MachoError as e:
+        assert "no spare load commands" in str(e), f"unexpected error text: {e}"
+
+    print("self-test OK: reclaim (priority order, text intact, idempotent), "
+          "no-space error path")
+
 
 def main(argv):
     if len(argv) == 2 and argv[1] == "--self-test":
@@ -236,13 +385,16 @@ def main(argv):
     mode, dylib_path, binary = argv[1], argv[2], argv[3]
     with open(binary, "rb") as f:
         buf = bytearray(f.read())
+    notes = []
     try:
         if mode == "present":
             return 0 if present(buf, dylib_path) else 1
-        n = insert(buf, dylib_path) if mode == "insert" else remove(buf, dylib_path)
+        n = insert(buf, dylib_path, notes) if mode == "insert" else remove(buf, dylib_path)
     except MachoError as e:
         sys.stderr.write(f"error: {e}\n")
         return 3
+    for line in notes:
+        sys.stderr.write(f"note: {line}\n")
     if n:
         with open(binary, "wb") as f:
             f.write(buf)
