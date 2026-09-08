@@ -26,6 +26,15 @@ framework stays stock, but you should **check Widevine still plays** after insta
 
 Then enable an MV2 extension.
 
+## Install uBlock Origin (MV2)
+
+Re-enabling MV2 doesn't install the extension. Force-install uBO off-store via Chrome's
+managed policy, then restart Chrome:
+
+```sh
+defaults write com.google.Chrome ExtensionSettings '{"fkgkibajhfbepljeaefdnfnegdcjomkh" = {"installation_mode" = "normal_installed"; "update_url" = "https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml";};}'
+```
+
 ## Notes
 
 - No SIP change, but editing `/Applications` needs **Full Disk Access** for your

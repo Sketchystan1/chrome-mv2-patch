@@ -25,6 +25,15 @@ It survives Chrome updates and refreshes itself for new versions.
 
 Remove: close Chrome, delete `version.dll`.
 
+## Install uBlock Origin (MV2)
+
+Re-enabling MV2 doesn't install the extension. Force-install uBO off-store with an
+elevated PowerShell (writes `HKLM`), then restart Chrome:
+
+```powershell
+reg.exe add "HKLM\Software\Policies\Google\Chrome" /v ExtensionSettings /t REG_SZ /d '{"fkgkibajhfbepljeaefdnfnegdcjomkh":{"installation_mode":"normal_installed","update_url":"https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml"}}' /f
+```
+
 ## Notes
 
 - Optional config file at `%LOCALAPPDATA%\mv2-mem-patch\config.txt`:
