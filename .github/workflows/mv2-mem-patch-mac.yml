@@ -104,9 +104,13 @@ jobs:
 
           # The injected load command must be present, and the app must still verify.
           python3 scripts/macho_insert_dylib.py present \
-            "@executable_path/../Frameworks/mv2/mv2-mem-patch.dylib" \
+            "@loader_path/mv" \
             "$APP/Contents/MacOS/$(basename "$APP" .app)" \
             || { echo "::error::load command missing after install"; exit 1; }
+          test -f "$APP/Contents/MacOS/mv" \
+            || { echo "::error::dylib not placed at Contents/MacOS/mv"; exit 1; }
+          test -f "$APP/Contents/Frameworks/mv2/signatures.json" \
+            || { echo "::error::signatures.json not placed in Frameworks/mv2"; exit 1; }
           codesign --verify "$APP" \
             || { echo "::error::re-signed app fails codesign --verify"; exit 1; }
 
@@ -140,10 +144,12 @@ jobs:
           set -o pipefail
           bash mv2-mem-patch-mac/install.sh --restore --chrome "$APP" | tee restore.log
           if python3 scripts/macho_insert_dylib.py present \
-               "@executable_path/../Frameworks/mv2/mv2-mem-patch.dylib" \
+               "@loader_path/mv" \
                "$APP/Contents/MacOS/$(basename "$APP" .app)"; then
             echo "::error::load command still present after --restore"; exit 1
           fi
+          test ! -e "$APP/Contents/MacOS/mv" \
+            || { echo "::error::dylib survived --restore"; exit 1; }
           test ! -d "$APP/Contents/Frameworks/mv2" \
             || { echo "::error::mv2 payload dir survived --restore"; exit 1; }
           echo "restore OK: load command and payload removed"

@@ -26,8 +26,9 @@
 //      ParseMachO the host slice, Locate the milestone from signatures.json, then
 //      translate each branch file-offset to a runtime address and flip it in memory.
 //
-// signatures.json is read from next to this dylib. No network (parity with the mac
-// launchers); refresh signatures.json out of band and relaunch.
+// signatures.json is read from the payload dir (Frameworks/mv2/ beside the dylib's
+// MacOS/ home; see PayloadDir). No network (parity with the mac launchers); refresh
+// signatures.json out of band and relaunch.
 
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
@@ -99,7 +100,7 @@ static bool IsChromeFramework(const char* path) {
   return path && strstr(path, " Framework.framework/Versions/") != nullptr;
 }
 
-// Directory containing this dylib (signatures.json sits beside it).
+// Directory containing this dylib.
 static std::string SelfDir() {
   Dl_info info{};
   if (dladdr((const void*)&SelfDir, &info) && info.dli_fname) {
@@ -108,6 +109,26 @@ static std::string SelfDir() {
     if (s != std::string::npos) return p.substr(0, s);
   }
   return ".";
+}
+
+static bool FileExists(const std::string& p) {
+  struct stat st{};
+  return stat(p.c_str(), &st) == 0 && S_ISREG(st.st_mode);
+}
+
+// Where signatures.json / config.txt live. The dylib installs to Contents/MacOS/
+// (so the injected LC_LOAD_DYLIB path stays short), but its sidecars stay in
+// Contents/Frameworks/mv2/ — never a non-code file in MacOS/. Prefer whichever
+// candidate actually holds them; fall back to the Frameworks/mv2 sibling so the
+// debug message points at the intended location. A co-located layout (dylib +
+// json in one dir, e.g. a test bundle) still works via the SelfDir candidate.
+static std::string PayloadDir() {
+  std::string self = SelfDir();
+  std::string sibling = self + "/../Frameworks/mv2";
+  for (const std::string& d : {self, sibling})
+    if (FileExists(d + "/signatures.json") || FileExists(d + "/config.txt"))
+      return d;
+  return sibling;
 }
 
 static std::vector<uint8_t> ReadFileBytes(const std::string& path) {
@@ -128,10 +149,10 @@ static std::vector<uint8_t> ReadFileBytes(const std::string& path) {
   return out;
 }
 
-// Read + parse signatures.json (next to the dylib). An optional config.txt next
-// to the dylib may name a different local signatures path.
+// Read + parse signatures.json (from the payload dir). An optional config.txt in
+// the same dir may name a different local signatures path.
 static std::vector<mv2::Milestone> LoadSignatures() {
-  std::string dir = SelfDir();
+  std::string dir = PayloadDir();
   std::string sigPath = dir + "/signatures.json";
 
   std::vector<uint8_t> cfg = ReadFileBytes(dir + "/config.txt");
@@ -164,7 +185,7 @@ static std::vector<mv2::Milestone> LoadSignatures() {
 
   std::vector<uint8_t> bytes = ReadFileBytes(sigPath);
   if (bytes.empty()) {
-    DBG("no signatures.json next to the dylib (%s)", sigPath.c_str());
+    DBG("no signatures.json in the payload dir (%s)", sigPath.c_str());
     return {};
   }
   try {

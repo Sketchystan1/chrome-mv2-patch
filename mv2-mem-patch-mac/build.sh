@@ -19,11 +19,13 @@ fi
 COMMON="-std=c++17 -O2 -Wall -Wextra -arch arm64 -arch x86_64"
 
 # 2) The dylib. Its install name matches where install.sh places it in the bundle
-#    (Contents/Frameworks/mv2/) so dyld resolves the LC_LOAD_DYLIB we inject.
-#    System libs only (mach_vm*, dyld, dladdr, sys_icache_invalidate live in
-#    libSystem); no framework link needed.
+#    (Contents/MacOS/, next to the main-exe stub) so the SHORT LC_LOAD_DYLIB we
+#    inject (@loader_path/mv) fits the stub's tiny header. System libs only
+#    (mach_vm*, dyld, dladdr, sys_icache_invalidate live in libSystem); no
+#    framework link needed. signatures.json/config.txt stay in Frameworks/mv2/
+#    (the dylib searches ../Frameworks/mv2/ relative to itself).
 clang++ $COMMON -dynamiclib \
-    -install_name "@executable_path/../Frameworks/mv2/mv2-mem-patch.dylib" \
+    -install_name "@loader_path/mv" \
     -o mv2-mem-patch.dylib mv2-mem-patch.mm
 echo "built mv2-mem-patch.dylib (universal)"
 

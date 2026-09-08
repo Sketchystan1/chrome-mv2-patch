@@ -25,7 +25,13 @@
 # Run build.sh first to produce mv2-mem-patch.dylib, mv2-inspect and signatures.json.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-LOAD_PATH="@executable_path/../Frameworks/mv2/mv2-mem-patch.dylib"
+# The dylib is installed next to the main-exe stub as Contents/MacOS/mv, loaded via
+# a deliberately SHORT path: the stub has almost no header padding, and a longer
+# @executable_path/../Frameworks/... path won't fit even after reclaiming spare load
+# commands (@loader_path/mv = a 40-byte command; the long path needed ~80). Only the
+# small code dylib goes in MacOS/; signatures.json/config.txt stay in Frameworks/mv2/.
+LOAD_PATH="@loader_path/mv"
+DYLIB_NAME="mv"
 ENT_KEYS=(com.apple.security.cs.disable-library-validation \
           com.apple.security.cs.allow-unsigned-executable-memory)
 
@@ -149,11 +155,14 @@ do_install() {  # app
   cp "$exe" "$bk/main.stock" || die "could not back up the stock executable"
   printf '%s\n' "$exe" > "$bk/meta"
 
-  # Place the dylib + signatures beside it, inside the bundle.
+  # signatures.json/config.txt live in Frameworks/mv2/ (never a non-code file in
+  # MacOS/); the dylib searches ../Frameworks/mv2/ relative to itself.
   mkdir -p "$mv2dir" || die "could not create $mv2dir"
-  cp "$SCRIPT_DIR/mv2-mem-patch.dylib" "$mv2dir/" || die "could not copy dylib"
-  cp "$SCRIPT_DIR/signatures.json"     "$mv2dir/" || die "could not copy signatures.json"
+  cp "$SCRIPT_DIR/signatures.json" "$mv2dir/" || die "could not copy signatures.json"
   [ -f "$SCRIPT_DIR/config.txt" ] && cp "$SCRIPT_DIR/config.txt" "$mv2dir/"
+  # The dylib itself goes next to the main-exe stub so LOAD_PATH stays short.
+  local dylib="$app/Contents/MacOS/$DYLIB_NAME"
+  cp "$SCRIPT_DIR/mv2-mem-patch.dylib" "$dylib" || die "could not copy dylib"
 
   # Inject the load command into the main executable only.
   "$py" "$inj" insert "$LOAD_PATH" "$exe" || die "load-command injection failed"
@@ -161,7 +170,7 @@ do_install() {  # app
   # Re-sign: dylib ad-hoc; main exe ad-hoc + merged entitlements, NON-hardened; then
   # re-seal the bundle (no --deep) so framework/helpers keep their stock signatures.
   ent="$(mktemp)"; merge_entitlements "$bk/main.stock" "$ent"
-  codesign --force --sign - "$mv2dir/mv2-mem-patch.dylib" || die "could not sign the dylib"
+  codesign --force --sign - "$dylib" || die "could not sign the dylib"
   if ! codesign --force --sign - --entitlements "$ent" "$app"; then
     rm -f "$ent"
     die "re-signing failed - if it looks like a permissions error, grant Full Disk Access (see above) or use --chrome on a writable copy"
@@ -204,6 +213,7 @@ do_restore() {  # app
       || warn "no backup found and could not strip the load command"
   fi
   rm -rf "$app/Contents/Frameworks/mv2"
+  rm -f "$app/Contents/MacOS/$DYLIB_NAME"
 
   # Re-seal ad-hoc, keeping disable-library-validation so the (now ad-hoc) main exe
   # can still load the stock Google-signed framework at launch.
