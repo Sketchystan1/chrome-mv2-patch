@@ -402,14 +402,6 @@
      "sig": "837950027F34488B91280200008B423080B908020000007508"
     },
     {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)",
-     "kind": "short",
-     "jgRVA": "0x01C21E3F",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50027F2C80BF08020000000F857E010000488B87280200"
-    },
-    {
      "_comment": "Gate B: honor off-store ExtensionSettings/ExtensionInstallForcelist on UNMANAGED Chrome. PolicyLoaderWin::LoadChromePolicy guards its FilterSensitivePolicies(&policy) call with ShouldFilterSensitivePolicies() (inlined to `cmp dword[rsi+0x18],1 ; jg skip`). FilterSensitivePolicies [BLOCKED]-prefixes force-install entries whose update_url != the Chrome Web Store, so on an unmanaged browser a self-hosted extension is dropped (chrome://policy: 'ignored - not from a trusted source'). Flipping the jg to jmp always skips the filter, so platform-source ExtensionSettings is honored. Direction-only flip (same target, no call removed). Blast radius: all sensitive platform policies are honored on unmanaged Chrome (setting those registry keys already requires admin). required: this gate is enforced, so a build where it does not match reports partial rather than enabling MV2 without ExtensionSettings. The other FilterSensitivePolicies caller is the chrome://policy/test local-test loader (not this platform path).",
      "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
      "kind": "short",
@@ -609,14 +601,6 @@
      "jgOff": 4,
      "expectedMatches": 1,
      "sig": "837F50020F8F8E000000488B8F280200008B415080BF080200000075"
-    },
-    {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)",
-     "kind": "short",
-     "jgRVA": "0x01C91ED1",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50027F2F80BF08020000000F8501010000488B87280200"
     },
     {
      "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
@@ -952,77 +936,6 @@
      "jgOff": 8,
      "expectedMatches": 1,
      "sig": "881A40B91F0500716C000054E0A30091"
-    }
-   ]
-  },
-  {
-   "name": "154-cft",
-   "container": "pe",
-   "sites": [
-    {
-     "name": "MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x01688BA1",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50020F8F8B000000488B8F280200008B413080BF080200000075"
-    },
-    {
-     "name": "OnExtensionSystemReady startup loop",
-     "kind": "short",
-     "jgRVA": "0x01775F73",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837950027F2D488B91280200008B423080B90802000000750C"
-    },
-    {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant; +0x208 flag then +0x228 manifest)",
-     "kind": "short",
-     "jgRVA": "0x01C4A96D",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50027F2C80BF08020000000F857E010000488B87280200"
-    },
-    {
-     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
-     "kind": "short",
-     "jgRVA": "0x033B71F4",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "837A50027F34488B8A280200008B413080BA08020000007508"
-    },
-    {
-     "name": "MaybeReEnableExtension",
-     "kind": "short",
-     "jgRVA": "0x085A9A16",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50027F2D488B8E280200008B413080BE08020000007508"
-    },
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
-     "kind": "short",
-     "jgRVA": "0x085A9C35",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"
-    },
-    {
-     "name": "UserMayInstall (inlined)",
-     "kind": "short",
-     "jgRVA": "0x09119E71",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50027F4E488B8F280200008B413080BF0802000000750C"
-    },
-    {
-     "_comment": "Gate B: honor off-store ExtensionSettings/ExtensionInstallForcelist on UNMANAGED Chrome. PolicyLoaderWin::LoadChromePolicy guards its FilterSensitivePolicies(&policy) call with ShouldFilterSensitivePolicies() (inlined to `cmp dword[rsi+0x18],1 ; jg skip`). FilterSensitivePolicies [BLOCKED]-prefixes force-install entries whose update_url != the Chrome Web Store, so on an unmanaged browser a self-hosted extension is dropped (chrome://policy: 'ignored - not from a trusted source'). Flipping the jg to jmp always skips the filter, so platform-source ExtensionSettings is honored. Direction-only flip (same target, no call removed). Blast radius: all sensitive platform policies are honored on unmanaged Chrome (setting those registry keys already requires admin). required: this gate is enforced, so a build where it does not match reports partial rather than enabling MV2 without ExtensionSettings. The other FilterSensitivePolicies caller is the chrome://policy/test local-test loader (not this platform path).",
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
-     "kind": "short",
-     "jgRVA": "0x01FE617F",
-     "jgOff": 12,
-     "expectedMatches": 1,
-     "sig": "488BBC2420010000837E18017F0A488D4C2448"
     }
    ]
   }
