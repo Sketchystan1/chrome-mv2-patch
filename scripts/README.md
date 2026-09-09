@@ -32,6 +32,25 @@ The test suite is Python too and lives flat in this folder (no subfolder):
 Mach-O and `_testutil.py` holds the shared fixture builders/helpers. Run all of
 it with `python scripts/run_tests.py`.
 
+The steps are independent (each uses its own tmp dir and only reads the shared
+tables) and spawn/IO-bound rather than CPU-bound — the harness itself does almost
+no computation, it waits on child processes — so they run **concurrently in two
+waves**. Wave 1 is the fast, deterministic set (table audits, the PowerShell PE
+suite, and the pure-Python universal port that already covers PE + ELF + Mach-O);
+if anything there fails the run stops before wave 2 starts, so a real regression
+still fails in seconds. Wave 2 is the bash black-box tests (`test_linux.py` /
+`test_macos.py`), which shell out to `chrome-mv2.sh`; on a Windows host they go
+through the git-bash/WSL launcher where every patch/restore/check spawn is slow
+(`test_linux.py` can exceed a few minutes) and the environment is fragile — that
+slowness/failure is a WSL artifact, not a table defect (those tests use synthetic
+fixtures, never `signatures.json`). Parallelizing the waves cut the fast run from
+~91s to ~53s here; because the cost is spawn/IO latency, not compute, rewriting
+the harness in a faster language would not help (it would spawn the same bash).
+Use `python scripts/run_tests.py --fast` (or `MV2_TEST_FAST=1`) to skip the bash
+black-box pair; CI still runs them on native Linux/macOS, and `test_pyport.py`
+covers the same ELF/Mach-O patch logic cross-platform via the `MV2_TEST_*` toggles.
+
+
 ## Verify the shipping table still fits a build
 
 ```
@@ -63,6 +82,21 @@ it folded, any signature it could not make build-independent, and which sites it
 could not carry a name for (a gate that is new this version has no previous name
 to inherit — write one by hand). `--moved old:new` tells the name-carry which
 Extension field offsets shifted since `--prev`; omit it if nothing moved.
+
+> **Gotcha — a `cmp <mv>,2 ; jg` can be a reason-string selector, not a gate.**
+> The `IsExtensionAffected (type!=PLATFORM_APP variant)` site added in the 154
+> pass turned out to match a *message-string builder* (it picks the
+> MV2-deprecation warning text), not an enforcement gate. Flipping it crash-loops
+> the browser with a `CHECK`/`STATUS_BREAKPOINT` — but **only after a real MV2
+> extension is installed**, so a fresh-profile launch and a clean `--verify` both
+> pass. It was removed from all 11 tables on 2026-09-09 (`154-cft` deleted as a
+> redundant dup of `152`). When adding any `cmp,2;jg` site, disassemble **both**
+> branches: a real gate reads the manifest-version field (`[member+0x30]`, x86
+> `+0x164`) and returns a bool; a string-selector loads string-literal addresses
+> (`lea rip→.rdata` / `adrp+add` / `mov imm32`) and converges — reject it. It
+> matches exactly once, so the `matches>2` rule never flags it. Full postmortem:
+> `../mv2-reversing.md` §5 and §7. Runtime-test with an MV2 extension installed,
+> never just an empty profile.
 
 ## Derive a new milestone by hand (e.g. Chrome 153)
 
