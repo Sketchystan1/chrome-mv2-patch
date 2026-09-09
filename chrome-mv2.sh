@@ -128,7 +128,7 @@ S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x0227E868|4|1|0|1F
 S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031BC304|4|1|0|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
 S|ManifestV2Handler::IsExtensionAffected|bcond|0x0401C690|4|1|0|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
 S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x0682D710|4|2|0|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B19DE0|8|1|0|E00314AA1879E99460DFFF340B000014F40300AAE83FC239
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B19DE0|8|1|0|E00314AA1879E99460DFFF340B000014F40300AA
 E
 '
 

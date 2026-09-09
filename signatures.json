@@ -261,7 +261,7 @@
   {
    "name": "153-macos-arm64",
    "container": "macho-arm64",
-   "_comment": "macOS Apple Silicon, 153.0.8010.36 (current stable). Chrome 153 keeps the 152 (un-shifted) Extension field layout, so the four bcond gates are byte-identical to 152-macos-arm64; only the FilterSensitivePolicies cbz differs, because its frame slot moved (ldrsb w8,[sp,#0x6f] -> #0x8f) between 152 and 153. Derived from CfT (unbranded) -- re-verify against a real Chrome.app.",
+   "_comment": "macOS Apple Silicon, 153.0.8010.36+ (current stable). Chrome 153 keeps the 152 (un-shifted) Extension field layout, so the four bcond gates are byte-identical to 152-macos-arm64. The FilterSensitivePolicies cbz sig is intentionally trimmed to end at `mov x20,x0`, dropping the trailing `ldrsb w8,[sp,#N]` frame slot: that spill offset is the ONLY unmasked build-variant field (BL/CBZ/B displacements are already masked by the matcher), and it drifts on point-release codegen (moved #0x6f->#0x8f 152->153, and shifted again .36->.37, which stranded the old 24-byte sig on a partial 152 match that missed this off-store gate). The trimmed 20-byte sig is verified UNIQUE in .text on CfT 153.0.8010.36 (mov x0,x20 / bl / cbz w0 / b / mov x20,x0). Derived from CfT (unbranded) -- re-verify against a real Chrome.app.",
    "sites": [
     {
      "name": "StandardManagementPolicyProvider::MustRemainDisabled",
@@ -301,7 +301,7 @@
      "jgRVA": "0x01B19DE0",
      "jgOff": 8,
      "expectedMatches": 1,
-     "sig": "E00314AA1879E99460DFFF340B000014F40300AAE83FC239"
+     "sig": "E00314AA1879E99460DFFF340B000014F40300AA"
     }
    ]
   },
