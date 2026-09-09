@@ -249,14 +249,6 @@
      "sig": "1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"
     },
     {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant)",
-     "kind": "bcond",
-     "jgRVA": "0x026AC410",
-     "jgOff": 8,
-     "expectedMatches": 1,
-     "sig": "C85240B91F0900718C010054C8224839"
-    },
-    {
      "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
      "kind": "cbz",
      "jgRVA": "0x01D16FB4",
@@ -302,14 +294,6 @@
      "jgOff": 4,
      "expectedMatches": 1,
      "sig": "1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant)",
-     "kind": "bcond",
-     "jgRVA": "0x017E3410",
-     "jgOff": 8,
-     "expectedMatches": 1,
-     "sig": "C85240B91F0900718C010054C8224839"
     }
    ]
   },
@@ -463,14 +447,6 @@
      "jgOff": 4,
      "expectedMatches": 1,
      "sig": "837B28020F8F840000008B8B640100008B411880BB54010000007508"
-    },
-    {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant)",
-     "kind": "short",
-     "jgRVA": "0x014E0239",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837928027F268B45D480B8540100000075628B45D48B806401"
     },
     {
      "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
@@ -658,14 +634,6 @@
      "sig": "837B28020F8F840000008B8B640100008B412880BB54010000007508"
     },
     {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant)",
-     "kind": "short",
-     "jgRVA": "0x014BC549",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837928027F268B45D480B8540100000075628B45D48B806401"
-    },
-    {
      "name": "OnExtensionSystemReady startup loop",
      "kind": "short",
      "jgRVA": "0x01AFBEF3",
@@ -728,14 +696,6 @@
      "sig": "837950027F30488B91280200008B425080B90802000000750F"
     },
     {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant)",
-     "kind": "short",
-     "jgRVA": "0x0644CEE2",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50027F324180BC2408020000000F85D6000000498B8424"
-    },
-    {
      "name": "StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)",
      "kind": "near",
      "jgRVA": "0x06835F7D",
@@ -788,14 +748,6 @@
      "jgOff": 4,
      "expectedMatches": 1,
      "sig": "1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071"
-    },
-    {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant)",
-     "kind": "bcond",
-     "jgRVA": "0x026FFEFC",
-     "jgOff": 8,
-     "expectedMatches": 1,
-     "sig": "C85240B91F0900718C010054C8224839"
     },
     {
      "name": "ManifestV2Handler::OnExtensionSystemReady",
@@ -874,14 +826,6 @@
      "jgOff": 4,
      "expectedMatches": 1,
      "sig": "7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071"
-    },
-    {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant)",
-     "kind": "bcond",
-     "jgRVA": "0x0A298B7C",
-     "jgOff": 8,
-     "expectedMatches": 1,
-     "sig": "C85240B91F0900718C010054C8224839"
     }
    ]
   },
@@ -904,14 +848,6 @@
      "jgOff": 4,
      "expectedMatches": 2,
      "sig": "1F0900712C060054891641F98A224839285140B98A000037298940B93F050071"
-    },
-    {
-     "name": "IsExtensionAffected (type!=PLATFORM_APP variant)",
-     "kind": "bcond",
-     "jgRVA": "0x0182F8EC",
-     "jgOff": 8,
-     "expectedMatches": 1,
-     "sig": "C85240B91F0900718C010054C8224839"
     },
     {
      "name": "ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)",

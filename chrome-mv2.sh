@@ -84,7 +84,6 @@ S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x02218740|4|1|0|1F
 S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x0320635C|4|1|0|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
 S|ManifestV2Handler::IsExtensionAffected|bcond|0x03FFBD84|4|1|0|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
 S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x066F0E38|4|2|0|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x026AC410|8|1|0|C85240B91F0900718C010054C8224839
 S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01D16FB4|8|1|0|E00314AA9C28DE94A0EAFF340B000014
 E
 M|154-linux|elf
@@ -104,7 +103,6 @@ S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0
 E
 M|155-linux|elf
 S|IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)|short|0x041AAAE0|4|1|0|837950027F30488B91280200008B425080B90802000000750F
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|short|0x0644CEE2|4|1|0|837F50027F324180BC2408020000000F85D6000000498B8424
 S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x06835F7D|4|1|0|837E50020F8F91000000498B8E280200008B41504180BE0802000000
 S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x099272C4|4|1|0|837E50027F32554889E5488B8E280200008B415080BE080200
 S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x09927408|4|1|0|837B50027F33488B8B280200008B415080BB0802000000750B
@@ -113,7 +111,6 @@ S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpac
 E
 M|155-macos-arm64|macho-arm64
 S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x022BD404|4|1|0|1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x026FFEFC|8|1|0|C85240B91F0900718C010054C8224839
 S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031F4CA4|4|1|0|1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071
 S|ManifestV2Handler::IsExtensionAffected|bcond|0x0403B248|4|1|0|1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071
 S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x068F3880|4|2|0|1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071
@@ -125,7 +122,6 @@ S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared bo
 S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x06096308|4|2|0|1F0900718C010054891641F98A224839285140B98A000037298940B93F050071
 S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06B05764|4|1|0|3F0900718C010054091541F90A214839285140B98A000037298940B93F050071
 S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x0A2934B4|4|1|0|7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071
-S|IsExtensionAffected (type!=PLATFORM_APP variant)|bcond|0x0A298B7C|8|1|0|C85240B91F0900718C010054C8224839
 E
 '
 
