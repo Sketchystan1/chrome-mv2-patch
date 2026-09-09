@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.10.1] - 2026-09-09
+
+- Fix macOS signatures.
+- Fix Windows 154 signatures.
+
 ## [1.10.0] - 2026-09-07
 
 - Drop 151 support, macos-x64.

@@ -17,7 +17,7 @@ Full rationale: [`../mv2-reversing.md`](../mv2-reversing.md) §"Porting to a new
 | Script | What it does | Deps |
 | :--- | :--- | :--- |
 | `port_milestone.py` | **Start here to add a version.** One command: learn the build's Extension field offsets, keep only real gates, fold linker-shared bodies into one `expectedMatches=N` site, pick the shortest signature with no build-specific PC-relative immediate, carry site names from `--prev`, and `--merge`/`--sync`. | stdlib only |
-| `audit_signatures.py` | Audit the table for what silently breaks patching: equal-rank ties (two milestones the runtime can't choose between, so it declines), signatures pinned to one build, weak anchors, malformed sites. With `--binary`, also reports which milestone would be selected and runs a completeness pass that does **not** use the `cmp,2;jg` finder. | stdlib only |
+| `audit_signatures.py` | Audit the table for what silently breaks patching: equal-rank ties (two milestones the runtime can't choose between, so it declines), signatures pinned to one build (`pc_relative_spans` flags arm64 `adrp`/`adr`/`BL`/`B` and x86 `lea rip`/`call`/`jmp rel32`), weak anchors, malformed sites. With `--binary`, also reports which milestone would be selected and runs a completeness pass that does **not** use the `cmp,2;jg` finder. | stdlib only |
 | `sync_embedded.py` | Rewrite both embedded fallback tables from `signatures.json`, per entry (adds, updates **and** removals). `--check` reports drift for CI. | stdlib only |
 | `fetch_chrome_binary.py` | Download the stock, gate-bearing binary itself — a channel's current `chrome.dll` (PE64/PE32), Linux `chrome` (ELF), or the macOS universal framework Mach-O (`mac-arm64`, always via Chrome for Testing) — unwrap it and drop it in `_scratch/`, named after the version the **binary** reports (release feeds have advertised a different one). `--version` falls back to Chrome for Testing. | stdlib + 7-Zip |
 | `fetch_symbols.py` | Download the symbols matching a binary — PDB (PE) from the Chromium symbol server, `chrome.debug` (ELF) streamed from the per-version zip, or the macOS dSYM's symtab streamed from `dl.google.com/…/dsym/` (emits `nm`-style names directly). Verifies build identity and discards a mismatch: Chrome-for-Testing builds have no published symbols, and a version's Linux `debug-info` zip belongs to the *official* build. Saves to `_scratch/` (gitignored). | stdlib only |
@@ -314,11 +314,17 @@ needs no gate). A build whose Gate B does not match now reports partial
   string construction: the function building that 25-byte literal via
   `movups`/`movdqu` is FilterSensitivePolicies; its guarded E8 caller is
   `PolicyLoaderWin::LoadChromePolicy`.)
-- **macho-arm64**: new `cbz` kind — `mov x0,x20 ; bl SFSP ; cbz w0,<skip>`,
+- **macho-arm64**: `cbz` kind — `mov x0,x20 ; bl SFSP ; cbz w0,<skip> ; b`,
   rewritten to the unconditional `B` with the same resolved target (imm26
-  recomputed from the sign-extended imm19). `derive_milestone.py --verify`
-  handles the kind; the locator method is string-anchored (FSP refs
-  `[BLOCKED]`/CWS/`EnterpriseCheck.InvalidPoliciesDetected` via ADRP+ADD).
+  recomputed from the sign-extended imm19). Because the CBZ sits between a
+  relative `bl` and a relative `b`, the matcher **masks embedded `BL`/`B` words**
+  (opcode class still checked) and the signature extends past the `b` to an
+  invariant tail (`mov x20,x0 ; ldrsb w8,[sp,#imm]`) for a unique anchor — so it
+  is build-robust rather than pinned to one build. That tail's frame slot is
+  per-milestone (`#0x6f` on 152, `#0x8f` on 153/155), so mac carries both
+  `152-` and `153-macos-arm64` (153 keeps 152's un-shifted bcond layout).
+  `derive_milestone.py --verify` handles the kind; the locator is string-anchored
+  (FSP refs `[BLOCKED]`/CWS/`EnterpriseCheck.InvalidPoliciesDetected` via ADRP+ADD).
 - **pe-arm64**: plain `bcond` — `ldr w,[x20,#0x18] ; cmp #1 ; b.gt`, flipped
   GT→AL with the existing machinery. The arm64 PE `.pdata` directory holds
   **8-byte (BeginRVA, UnwindRVA)** entries, not the x64 12-byte

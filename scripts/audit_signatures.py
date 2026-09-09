@@ -89,7 +89,7 @@ def site_key(site):
 def unmasked_runs(site):
     """[(start, length)] of the fixed spans the runtime can anchor on."""
     n = len(site["sig"]) // 2
-    masked = _masked_indices(site["jgOff"], site["kind"])
+    masked = _masked_indices(site["jgOff"], site["kind"], bytes.fromhex(site["sig"]))
     runs, i = [], 0
     while i < n:
         if i in masked:
@@ -106,16 +106,25 @@ def unmasked_runs(site):
 def pc_relative_spans(site, container):
     """Byte offsets inside the sig that hold a PC-relative immediate."""
     raw = bytes.fromhex(site["sig"])
-    masked = _masked_indices(site["jgOff"], site["kind"])
+    masked = _masked_indices(site["jgOff"], site["kind"], raw)
     hits = []
     if container in ARM64_CONTAINERS:
         # ADRP/ADR: op bit31 selects adrp; immhi/immlo span the whole word.
+        # BL/B: unconditional branches carry a PC-relative imm26 whose target
+        # shifts on every build, so an anchor that swallows one pins the sig to a
+        # single build (this is exactly what broke the mac Gate-B cbz sigs: a BL
+        # before and a B after the masked CBZ). B.cond/TBZ/CBZ imm fields are far
+        # shorter-range and stay put across point builds, so they are not flagged.
         for pos in range(0, len(raw) - 3, 4):
             if pos in masked:
                 continue
             word = int.from_bytes(raw[pos:pos + 4], "little")
             if (word & 0x1F000000) == 0x10000000:
                 hits.append((pos, 4, "adrp/adr" if word & 0x80000000 else "adr"))
+            elif (word & 0xFC000000) == 0x94000000:
+                hits.append((pos, 4, "bl"))
+            elif (word & 0xFC000000) == 0x14000000:
+                hits.append((pos, 4, "b"))
     else:
         for pos in range(0, len(raw) - 5):
             if pos in masked:
@@ -123,9 +132,9 @@ def pc_relative_spans(site, container):
             # lea r64,[rip+disp32]  (48 8D /r with mod=00 rm=101)
             if raw[pos] in (0x48, 0x4C) and raw[pos + 1] == 0x8D and (raw[pos + 2] & 0xC7) == 0x05:
                 hits.append((pos, 7, "lea rip-relative"))
-            # call rel32 / jmp rel32 reaching outside the window
-            elif raw[pos] == 0xE8 and pos + 5 <= len(raw):
-                hits.append((pos, 5, "call rel32"))
+            # call rel32 (E8) / jmp rel32 (E9): both carry a build-specific disp32.
+            elif raw[pos] in (0xE8, 0xE9) and pos + 5 <= len(raw):
+                hits.append((pos, 5, "call/jmp rel32"))
     return hits
 
 

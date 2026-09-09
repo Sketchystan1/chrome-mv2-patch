@@ -45,7 +45,7 @@
 
 set -euo pipefail
 
-readonly APP_VERSION="1.10.0"
+readonly APP_VERSION="1.10.1"
 
 # ============================================================================
 # Embedded signature tables (pre-tokenized so the default path needs no python3
@@ -84,7 +84,7 @@ S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x02218740|4|1|0|1F
 S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x0320635C|4|1|0|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
 S|ManifestV2Handler::IsExtensionAffected|bcond|0x03FFBD84|4|1|0|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
 S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x066F0E38|4|2|0|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01D16FB4|8|1|0|E00314AA9C28DE94A0EAFF340B000014
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01C9C464|8|1|0|E00314AA9021DE94A0EAFF340B000014F40300AAE8BFC139
 E
 M|154-linux|elf
 S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0991AA29|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
@@ -114,7 +114,7 @@ S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x022BD404|4|1|0|1F
 S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031F4CA4|4|1|0|1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071
 S|ManifestV2Handler::IsExtensionAffected|bcond|0x0403B248|4|1|0|1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071
 S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x068F3880|4|2|0|1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B613F4|8|1|0|E00314AA642EEA9460DFFF340B000014
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B613F4|8|1|0|E00314AA642EEA9460DFFF340B000014F40300AAE83FC239
 E
 M|155-linux-arm64|elf-arm64
 S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05E7E1E4|4|2|0|1F0900712C020054691641F96A224839285140B98A000037298940B93F050071
@@ -122,6 +122,13 @@ S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared bo
 S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x06096308|4|2|0|1F0900718C010054891641F98A224839285140B98A000037298940B93F050071
 S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06B05764|4|1|0|3F0900718C010054091541F90A214839285140B98A000037298940B93F050071
 S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x0A2934B4|4|1|0|7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071
+E
+M|153-macos-arm64|macho-arm64
+S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x0227E868|4|1|0|1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071
+S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031BC304|4|1|0|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
+S|ManifestV2Handler::IsExtensionAffected|bcond|0x0401C690|4|1|0|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
+S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x0682D710|4|2|0|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
+S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B19DE0|8|1|0|E00314AA1879E99460DFFF340B000014F40300AAE83FC239
 E
 '
 
@@ -737,6 +744,7 @@ sig_matches_at() {
     local sig_len=$(( ${#sig_hex} / 2 ))
     local actual; actual=$(read_bytes_hex "$file" "$file_offset" "$sig_len")
     local sig_upper; sig_upper=$(echo "$sig_hex" | tr 'a-f' 'A-F')
+    local cbz_branch_words=""
 
     if [[ "$kind" == "bcond" ]]; then
         # validate the whole branch word first (little-endian)
@@ -775,6 +783,26 @@ sig_matches_at() {
         else
             return 1
         fi
+        # embedded BL/B words carry a build-specific displacement: require the
+        # same opcode class in the candidate, ignore the displacement bytes.
+        local wpos wb0 wb1 wb2 wb3 wsw cwd
+        for (( wpos = 0; wpos + 4 <= sig_len; wpos += 4 )); do
+            if (( wpos == jg_off )); then continue; fi
+            wb0=$(( 16#${sig_upper:$(( wpos*2 )):2} ))
+            wb1=$(( 16#${sig_upper:$(( (wpos+1)*2 )):2} ))
+            wb2=$(( 16#${sig_upper:$(( (wpos+2)*2 )):2} ))
+            wb3=$(( 16#${sig_upper:$(( (wpos+3)*2 )):2} ))
+            wsw=$(( wb0 | (wb1<<8) | (wb2<<16) | (wb3<<24) ))
+            if (( (wsw & 0xFC000000) == 0x14000000 || (wsw & 0xFC000000) == 0x94000000 )); then
+                wb0=$(( 16#${actual:$(( wpos*2 )):2} ))
+                wb1=$(( 16#${actual:$(( (wpos+1)*2 )):2} ))
+                wb2=$(( 16#${actual:$(( (wpos+2)*2 )):2} ))
+                wb3=$(( 16#${actual:$(( (wpos+3)*2 )):2} ))
+                cwd=$(( wb0 | (wb1<<8) | (wb2<<16) | (wb3<<24) ))
+                if (( (cwd & 0xFC000000) != (wsw & 0xFC000000) )); then return 1; fi
+                cbz_branch_words="$cbz_branch_words $wpos"
+            fi
+        done
     fi
 
     local i byte_idx sig_byte act_byte act_pair
@@ -795,6 +823,12 @@ sig_matches_at() {
             elif (( byte_idx >= jg_off + 1 && byte_idx <= jg_off + 5 )); then continue; fi
         else  # bcond / cbz: the 4 word bytes are handled above
             if (( byte_idx >= jg_off && byte_idx <= jg_off + 3 )); then continue; fi
+            # cbz embedded BL/B words: displacement bytes ignored (opcode validated above)
+            if [[ -n "$cbz_branch_words" ]]; then
+                local wstart=$(( byte_idx - (byte_idx % 4) )) bw skip=0
+                for bw in $cbz_branch_words; do if (( bw == wstart )); then skip=1; break; fi; done
+                if (( skip == 1 )); then continue; fi
+            fi
         fi
         if [[ "$sig_byte" != "$act_byte" ]]; then return 1; fi
     done
@@ -809,12 +843,28 @@ build_binary_anchor() {
     local sig_bytes=$(( ${#sig} / 2 )) mask_len
     case "$kind" in short) mask_len=2 ;; near) mask_len=6 ;; bcond|cbz) mask_len=4 ;; esac
     local mask_end=$(( jg_off + mask_len ))
+    # cbz: embedded BL (0x94) / B (0x14) words carry a build-specific displacement,
+    # so they cannot anchor -- treat them as masked (high byte is sig[wpos+3]).
+    local cbz_bw="" wpos hb sigU
+    if [[ "$kind" == "cbz" ]]; then
+        sigU=$(echo "$sig" | tr 'a-f' 'A-F')
+        for (( wpos = 0; wpos + 4 <= sig_bytes; wpos += 4 )); do
+            if (( wpos == jg_off )); then continue; fi
+            hb=$(( 16#${sigU:$(( (wpos+3)*2 )):2} ))
+            if (( (hb & 0xFC) == 0x14 || (hb & 0xFC) == 0x94 )); then cbz_bw="$cbz_bw $wpos"; fi
+        done
+    fi
     BINARY_ANCHOR_HEX=""; BINARY_ANCHOR_OFF=0
     local best_len=0 best_start=0 start end byte run_len
     for (( start = 0; start < sig_bytes; start++ )); do
         run_len=0
         for (( end = start; end < sig_bytes; end++ )); do
             if (( end >= jg_off && end < mask_end )); then break; fi
+            if [[ -n "$cbz_bw" ]]; then
+                local ws=$(( end - (end % 4) )) bw brk=0
+                for bw in $cbz_bw; do if (( bw == ws )); then brk=1; break; fi; done
+                if (( brk == 1 )); then break; fi
+            fi
             byte="${sig:$(( end*2 )):2}"
             if [[ "$byte" == "00" || "$byte" == "0a" || "$byte" == "3a" ]]; then break; fi
             run_len=$(( run_len + 1 ))

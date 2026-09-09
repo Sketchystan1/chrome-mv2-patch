@@ -281,12 +281,26 @@ def open_image(path):
 # bytes.find and only full-check at those few candidate offsets. The result is
 # identical to the naive scan; it just skips the offsets that cannot match.
 # ---------------------------------------------------------------------------
-def _masked_indices(jg_off, kind):
+def _cbz_branch_words(sig, jg_off):
+    """Word offsets of embedded BL/B (0x94../0x14..) in a cbz sig -- their imm26
+    is a build-specific PC-relative displacement (a cbz on a `bl` result has no
+    invariant instruction adjacent to the CBZ), so they are matched by opcode
+    class only. Excludes the CBZ word at jg_off."""
+    return [w for w in range(0, len(sig) - 3, 4)
+            if w != jg_off
+            and (int.from_bytes(bytes(sig[w:w + 4]), "little") & 0xFC000000) in (0x14000000, 0x94000000)]
+
+
+def _masked_indices(jg_off, kind, sig=None):
     if kind == "short":
         return {jg_off, jg_off + 1}
     if kind in ("bcond", "cbz"):
         # the whole 4-byte little-endian branch word is special (bit-masked in full_ok)
-        return {jg_off, jg_off + 1, jg_off + 2, jg_off + 3}
+        m = {jg_off, jg_off + 1, jg_off + 2, jg_off + 3}
+        if kind == "cbz" and sig is not None:
+            for w in _cbz_branch_words(sig, jg_off):
+                m.update((w, w + 1, w + 2, w + 3))
+        return m
     return {jg_off, jg_off + 1, jg_off + 2, jg_off + 3, jg_off + 4, jg_off + 5}
 
 
@@ -328,7 +342,7 @@ def _longest_fixed_run(n, masked):
 def masked_match_count(text, sig, jg_off, kind, cap=None):
     """Offsets in .text where sig matches under per-encoding masking."""
     n = len(sig)
-    masked = _masked_indices(jg_off, kind)
+    masked = _masked_indices(jg_off, kind, sig)
     anchor_off, anchor_len = _longest_fixed_run(n, masked)
     anchor = bytes(sig[anchor_off:anchor_off + anchor_len])
 
@@ -350,6 +364,12 @@ def masked_match_count(text, sig, jg_off, kind, cap=None):
             sig_w = int.from_bytes(bytes(sig[jg_off:jg_off + 4]), "little")
             if not _cbz_word_ok(w, sig_w):
                 return False
+            # embedded BL/B: require the same opcode class, ignore displacement
+            for wpos in _cbz_branch_words(sig, jg_off):
+                klass = int.from_bytes(bytes(sig[wpos:wpos + 4]), "little") & 0xFC000000
+                cand = int.from_bytes(bytes(text[r + wpos:r + wpos + 4]), "little")
+                if (cand & 0xFC000000) != klass:
+                    return False
         for k in range(n):
             if k in masked:
                 b = text[r + k]
