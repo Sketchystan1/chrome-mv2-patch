@@ -116,6 +116,17 @@ INSTALLERS = {
     },
 }
 
+# Branded macOS universal DMG (holds both x86_64 and arm64 framework slices).
+# Chrome for Testing is UNBRANDED and its clang build dead-code-eliminates the
+# InstallVerifier from_webstore inline (ShouldEnforce() folds to false off-brand),
+# so a #if GOOGLE_CHROME_BRANDING gate (the Route A InstallVerifier gate) can ONLY
+# be derived from this branded framework. Off-Mac unwrap needs a recent 7-Zip
+# (>= ~21.x for APFS/DMG; 26.x reads Chrome's DMG directly).
+MAC_DMG = {
+    "stable": "https://dl.google.com/chrome/mac/universal/stable/GGRO/googlechrome.dmg",
+    "beta":   "https://dl.google.com/chrome/mac/universal/beta/GGRO/googlechrome.dmg",
+}
+
 VERSION_API = (
     "https://versionhistory.googleapis.com/v1/chrome/platforms/{platform}"
     "/channels/{channel}/versions/all/releases?filter=endtime=none"
@@ -736,6 +747,110 @@ def fetch(platform, channel, version, out_dir, keep, url_override=None):
     return 0
 
 
+def _macho_arch_slice(data, cputype):
+    """Carve one arch slice out of a fat Mach-O (CAFEBABE/CAFEBABF), or return
+    `data` unchanged when it is already a thin Mach-O. None if the slice is absent."""
+    if len(data) < 8:
+        return None
+    magic = struct.unpack_from(">I", data, 0)[0]
+    if magic in (0xFEEDFACF, 0xFEEDFACE):
+        return data                       # already thin
+    if magic not in (0xCAFEBABE, 0xCAFEBABF):
+        return None
+    wide = magic == 0xCAFEBABF
+    n = struct.unpack_from(">I", data, 4)[0]
+    off = 8
+    for _ in range(n):
+        if wide:
+            cput, _cs, o, size = struct.unpack_from(">IIQQ", data, off)[:4]
+            off += 32
+        else:
+            cput, _cs, o, size, _al = struct.unpack_from(">IIIII", data, off)
+            off += 20
+        if cput == cputype:
+            return data[o:o + size]
+    return None
+
+
+def fetch_branded_mac(platform, channel, out_dir, keep):
+    """Fetch the BRANDED macOS universal DMG and carve this platform's framework
+    slice (arm64). Unlike the default CfT path, the branded framework carries the
+    InstallVerifier ENFORCE inline, so gates behind #if GOOGLE_CHROME_BRANDING can
+    be derived. Needs 7-Zip; the dSYM (fetch_symbols.py --chrome-version) then
+    names the gate functions."""
+    spec = PLATFORMS[platform]
+    cputype = spec.get("cputype")
+    if not cputype:
+        print(f"error: --branded is macOS-only (got {platform}).", file=sys.stderr)
+        return 1
+    seven_zip = find_seven_zip()
+    if not seven_zip:
+        print("error: 7-Zip not found (install it, or put 7z on PATH).", file=sys.stderr)
+        return 1
+    url = MAC_DMG.get(channel)
+    if not url:
+        print(f"error: no branded mac DMG for channel {channel}.", file=sys.stderr)
+        return 1
+    print(f"Source: branded macOS universal DMG ({channel})\n        {url}")
+    print("  note: this is CONSUMER Chrome (branded) - the InstallVerifier ENFORCE")
+    print("        inline is present here but DCE'd out of Chrome for Testing.")
+
+    workdir = os.path.join(out_dir, "_dmg_tmp")
+    shutil.rmtree(workdir, ignore_errors=True)
+    os.makedirs(workdir, exist_ok=True)
+    archive = os.path.join(workdir, "googlechrome.dmg")
+    print(f"\nDownloading into {os.path.relpath(workdir)}/ ...")
+    if not download(url, archive):
+        shutil.rmtree(workdir, ignore_errors=True)
+        return 1
+
+    print("Extracting the DMG (a recent 7-Zip reads Chrome's DMG directly) ...")
+    dest = os.path.join(workdir, "unpacked")
+    os.makedirs(dest, exist_ok=True)
+    subprocess.run([seven_zip, "x", archive, f"-o{dest}", "-y"],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+    # The framework Mach-O is the largest extensionless file named "*Framework".
+    framework, version = None, ""
+    for current_dir, _dirs, files in os.walk(dest):
+        for filename in files:
+            if "framework" not in filename.lower() or os.path.splitext(filename)[1]:
+                continue
+            path = os.path.join(current_dir, filename)
+            if framework is None or os.path.getsize(path) > os.path.getsize(framework):
+                framework = path
+                parts = current_dir.replace("\\", "/").split("/")
+                if "Versions" in parts and parts.index("Versions") + 1 < len(parts):
+                    version = parts[parts.index("Versions") + 1]
+    if not framework:
+        print("error: no 'Google Chrome Framework' Mach-O found in the DMG.", file=sys.stderr)
+        if not keep:
+            shutil.rmtree(workdir, ignore_errors=True)
+        return 1
+
+    sliced = _macho_arch_slice(open(framework, "rb").read(), cputype)
+    if sliced is None:
+        print(f"error: framework has no cputype 0x{cputype:08X} slice.", file=sys.stderr)
+        if not keep:
+            shutil.rmtree(workdir, ignore_errors=True)
+        return 1
+
+    real_version = version or "current"
+    dest_file = os.path.join(out_dir, f"chrome-{real_version}-{spec['tag']}{spec['suffix']}")
+    with open(dest_file, "wb") as handle:
+        handle.write(sliced)
+    size = os.path.getsize(dest_file)
+    if not keep:
+        shutil.rmtree(workdir, ignore_errors=True)
+
+    print(f"\nSaved BRANDED {spec['container']} slice ({human_size(size)}):")
+    print(f"  {os.path.relpath(dest_file)}")
+    print("\nNext (consumer dSYM is UUID-matched to this DMG):")
+    print(f"  python scripts/fetch_symbols.py {os.path.relpath(dest_file)} --chrome-version {real_version}")
+    print(f"  python scripts/derive_milestone.py {os.path.relpath(dest_file)} --symbols _scratch/mac-arm64-syms.txt --name <ver> --json")
+    return 0
+
+
 def fetch_chromium(platform, channel, version, position, milestone, out_dir, keep):
     """Fetch an open-source Chromium snapshot's gate binary for MV2 derivation."""
     if platform not in SNAPSHOT_PLATFORMS:
@@ -866,6 +981,12 @@ def parse_args(argv=None):
              "use it to pin an older win-arm64 build (which has no CfT fallback)",
     )
     parser.add_argument(
+        "--branded", action="store_true",
+        help="macOS only: fetch the BRANDED universal .dmg and carve the framework "
+             "slice (needed for #if GOOGLE_CHROME_BRANDING gates like the Route A "
+             "InstallVerifier gate; Chrome for Testing is unbranded). Needs 7-Zip.",
+    )
+    parser.add_argument(
         "--out", metavar="DIR", default=str(DEFAULT_OUT),
         help="output directory (default: _scratch/)",
     )
@@ -896,6 +1017,11 @@ def main(argv=None):
         list_current()
         return 0
     os.makedirs(args.out, exist_ok=True)
+    if args.branded:
+        if not args.platform or not args.platform.startswith("mac"):
+            print("error: --branded is only for mac platforms.", file=sys.stderr)
+            return 1
+        return fetch_branded_mac(args.platform, args.channel, args.out, args.keep)
     if args.browser == "chromium":
         return fetch_chromium(args.platform, args.channel, args.version,
                               args.position, args.milestone, args.out, args.keep)

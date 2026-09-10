@@ -294,7 +294,7 @@ def _cbz_branch_words(sig, jg_off):
 def _masked_indices(jg_off, kind, sig=None):
     if kind == "short":
         return {jg_off, jg_off + 1}
-    if kind in ("bcond", "cbz"):
+    if kind in ("bcond", "cbz", "tbz"):
         # the whole 4-byte little-endian branch word is special (bit-masked in full_ok)
         m = {jg_off, jg_off + 1, jg_off + 2, jg_off + 3}
         if kind == "cbz" and sig is not None:
@@ -318,6 +318,20 @@ def _cbz_word_ok(cand_word, sig_word):
     if (cand_word & 0xFC000000) == 0x14000000:
         disp_cand = _sign_extend(cand_word & 0x03FFFFFF, 26)
         disp_ref = _sign_extend((sig_word >> 5) & 0x7FFFF, 19)
+        return disp_cand == disp_ref
+    return False
+
+
+def _tb_word_ok(cand_word, sig_word):
+    """True when cand_word is the stock TBZ/TBNZ (family + op + bit-position + Rt
+    pinned to the sig's, imm14 free) or the patched unconditional B whose resolved
+    target equals the sig tbz's. The AArch64 test-bit-and-branch sibling of
+    _cbz_word_ok: same rewrite, but the offset is imm14 (bits 18:5) not imm19."""
+    if (cand_word & 0x7E000000) == 0x36000000:      # TBZ/TBNZ family
+        return (cand_word & 0xFFF8001F) == (sig_word & 0xFFF8001F)
+    if (cand_word & 0xFC000000) == 0x14000000:      # patched unconditional B
+        disp_cand = _sign_extend(cand_word & 0x03FFFFFF, 26)
+        disp_ref = _sign_extend((sig_word >> 5) & 0x3FFF, 14)
         return disp_cand == disp_ref
     return False
 
@@ -370,6 +384,13 @@ def masked_match_count(text, sig, jg_off, kind, cap=None):
                 cand = int.from_bytes(bytes(text[r + wpos:r + wpos + 4]), "little")
                 if (cand & 0xFC000000) != klass:
                     return False
+        # arm64 TBZ/TBNZ->B: stock test-bit-and-branch (bit-position + Rt pinned,
+        # imm14 wild) or the patched unconditional B with the same target.
+        if kind == "tbz":
+            w = int.from_bytes(bytes(text[r + jg_off:r + jg_off + 4]), "little")
+            sig_w = int.from_bytes(bytes(sig[jg_off:jg_off + 4]), "little")
+            if not _tb_word_ok(w, sig_w):
+                return False
         for k in range(n):
             if k in masked:
                 b = text[r + k]
@@ -573,9 +594,9 @@ def find_gates_for(img):
 # Default signature window past the cmp, matching the shipping entries (24-32B).
 # Long enough to span the follow-up type/location check, so the anchor is a
 # distinctive fixed run and the masked count is meaningful.
-SIGLEN = {"short": 25, "near": 28, "bcond": 32, "cbz": 32}
+SIGLEN = {"short": 25, "near": 28, "bcond": 32, "cbz": 32, "tbz": 32}
 # Minimum bytes that must follow jg_off inside the signature (the jump itself).
-NEED = {"short": 2, "near": 6, "bcond": 4, "cbz": 4}
+NEED = {"short": 2, "near": 6, "bcond": 4, "cbz": 4, "tbz": 4}
 
 
 def build_site(img, cmp_pos, jg_pos, kind, name):

@@ -48,89 +48,21 @@ set -euo pipefail
 readonly APP_VERSION="1.10.1"
 
 # ============================================================================
-# Embedded signature tables (pre-tokenized so the default path needs no python3
-# or JSON parser - stock macOS ships neither a usable python3 nor jq).
-#
-# Records, one per line, pipe-delimited:
+# Internal signature-token format. signatures.json (fetched from GitHub, or a
+# local --signatures / beside-script copy) is tokenized by json_to_tokens into
+# these pipe-delimited records, one per line, consumed by populate_from_tokens:
 #   M|<milestone name>|<container>
-#   S|<site name>|<kind>|<jgRVA>|<jgOff>|<expectedMatches>|<sig hex>
-# container: elf | elf-arm64 | macho-arm64
-# kind: short (7F->EB) | near (0F8F->90E9) | bcond (arm64 B.cond GT->AL)
-# jgRVA: hex RVA of the jg/b.cond opcode in the reference build (fast-path probe)
+#   S|<site name>|<kind>|<jgRVA>|<jgOff>|<expectedMatches>|<optional>|<sig hex>
+# container: elf | elf-arm64 | macho-arm64   (this script patches ELF + Mach-O)
+# kind: short (7F->EB) | near (0F8F->90E9) | bcond (arm64 b.gt GT->AL)
+#     | cbz (arm64 CBZ->B) | tbz (arm64 TBZ/TBNZ->B, same resolved target)
+# jgRVA: hex RVA of the jump opcode in the reference build (fast-path probe)
 # jgOff: byte index of the jump opcode within sig
+# optional: 1 = best-effort (applied if found, never blocks the patch)
 # sig: hex bytes, jump opcode included at jgOff
 #
-# Keep in sync with signatures.json (the canonical table). See mv2-reversing.md.
+# signatures.json is the canonical table. See mv2-reversing.md.
 # ============================================================================
-readonly EMBEDDED_SIGNATURES='
-M|152-linux|elf
-S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0985B449|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x0985B0F4|4|1|0|837E50027F2F554889E5488B8E280200008B413080BE080200
-S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x0985B238|4|1|0|837B50027F30488B8B280200008B413080BB08020000007508
-S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A256BAA|4|1|0|837B50020F8FD1000000488B8B280200008B413080BB080200000075
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x0599A69A|4|1|0|837E50020F8F8E000000498B8E280200008B41304180BE0802000000
-E
-M|152-chromium-linux|elf
-S|manifest_v2_util::IsExtensionAffected (free predicate)|short|0x0923C9D9|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-E
-M|152-linux-arm64|elf-arm64
-S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05D64DD8|4|2|0|1F0900712C020054691641F96A224839283140B98A000037296940B93F050071
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05D64F9C|4|1|0|1F0900710C020054091441F90A204839283140B98A000037296940B93F050071
-S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x05F78874|4|2|0|1F0900718C010054891641F98A224839283140B98A000037296940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x0696E3C8|4|2|0|3F090071EC4A0054091541F90A214839283140B98A000037296940B93F050071
-E
-M|152-macos-arm64|macho-arm64
-S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x02218740|4|1|0|1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x0320635C|4|1|0|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
-S|ManifestV2Handler::IsExtensionAffected|bcond|0x03FFBD84|4|1|0|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
-S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x066F0E38|4|2|0|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01C9C464|8|1|0|E00314AA9021DE94A0EAFF340B000014F40300AAE8BFC139
-E
-M|154-linux|elf
-S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x0991AA29|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x0991A6D4|4|1|0|837E50027F2F554889E5488B8E280200008B413080BE080200
-S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x0991A818|4|1|0|837B50027F30488B8B280200008B413080BB08020000007508
-S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A37E1CA|4|1|0|837B50020F8FD1000000488B8B280200008B413080BB080200000075
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x05AB5FFA|4|1|0|837E50020F8F8E000000498B8E280200008B41304180BE0802000000
-S|IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)|short|0x053B0E40|4|1|0|837950027F2D488B91280200008B423080B90802000000750C
-E
-M|154-linux-arm64|elf-arm64
-S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05E87478|4|2|0|1F0900712C020054691641F96A224839283140B98A000037296940B93F050071
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05E8763C|4|1|0|1F0900710C020054091441F90A204839283140B98A000037296940B93F050071
-S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x0609B370|4|2|0|1F0900718C010054891641F98A224839283140B98A000037296940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06AB7470|4|1|0|3F0900718C010054091541F90A214839283140B98A000037296940B93F050071
-S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x09B77244|4|1|0|7F0900718C0100544B1541F94C2148396A3140B98C0000376B6940B97F050071
-E
-M|155-linux|elf
-S|IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)|short|0x041AAAE0|4|1|0|837950027F30488B91280200008B425080B90802000000750F
-S|StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)|near|0x06835F7D|4|1|0|837E50020F8F91000000498B8E280200008B41504180BE0802000000
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtensions calls out to it)|short|0x099272C4|4|1|0|837E50027F32554889E5488B8E280200008B415080BE080200
-S|ManifestV2Handler::MaybeReEnableExtension (inlined)|short|0x09927408|4|1|0|837B50027F33488B8B280200008B415080BB0802000000750B
-S|manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)|short|0x09927619|3|1|0|83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95
-S|StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)|near|0x0A3DC86A|4|1|0|837B50020F8FD4000000488B8B280200008B415080BB080200000075
-E
-M|155-macos-arm64|macho-arm64
-S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x022BD404|4|1|0|1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031F4CA4|4|1|0|1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071
-S|ManifestV2Handler::IsExtensionAffected|bcond|0x0403B248|4|1|0|1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071
-S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x068F3880|4|2|0|1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B613F4|8|1|0|E00314AA642EEA9460DFFF340B000014F40300AAE83FC239
-E
-M|155-linux-arm64|elf-arm64
-S|ManifestV2Handler::MaybeReEnableExtension (shared body)|bcond|0x05E7E1E4|4|2|0|1F0900712C020054691641F96A224839285140B98A000037298940B93F050071
-S|ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)|bcond|0x05E7E3A8|4|1|0|1F0900710C020054091441F90A204839285140B98A000037298940B93F050071
-S|StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)|bcond|0x06096308|4|2|0|1F0900718C010054891641F98A224839285140B98A000037298940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady (shared body)|bcond|0x06B05764|4|1|0|3F0900718C010054091541F90A214839285140B98A000037298940B93F050071
-S|ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)|bcond|0x0A2934B4|4|1|0|7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071
-E
-M|153-macos-arm64|macho-arm64
-S|StandardManagementPolicyProvider::MustRemainDisabled|bcond|0x0227E868|4|1|0|1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071
-S|ManifestV2Handler::OnExtensionSystemReady|bcond|0x031BC304|4|1|0|1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071
-S|ManifestV2Handler::IsExtensionAffected|bcond|0x0401C690|4|1|0|1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071
-S|ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)|bcond|0x0682D710|4|2|0|1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071
-S|LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)|cbz|0x01B19DE0|8|1|0|E00314AA1879E99460DFFF340B000014F40300AA
-E
-'
 
 # Runtime tables (parallel indexed arrays; bash-3.2 safe - no assoc arrays or
 # namerefs). ALL_SITES holds every site prefixed with its milestone index so a
@@ -293,12 +225,26 @@ detect_container_kind() {
 is_macho() { [[ "$(detect_container_kind "$1")" == "macho" ]]; }
 
 # ============================================================================
-# Signature loading. Default: the pre-tokenized EMBEDDED_SIGNATURES (no python3
-# or JSON parser needed). An explicit --signatures FILE, or a signatures.json
-# beside the script, is JSON and is tokenized via python3 into the same records.
+# Signature loading. An explicit --signatures FILE or a signatures.json beside
+# the script wins; otherwise the canonical signatures.json is fetched from
+# GitHub. Either way the JSON is tokenized via python3 into M|/S|/E records, so
+# python3 is now required on the default path (previously it was needed only for
+# --signatures, because a pre-tokenized table used to be embedded here).
 # ============================================================================
 readonly SIGNATURES_FILE="signatures.json"
+readonly SIGNATURES_URL="https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json"
 SIGNATURES_OVERRIDE=""
+
+# Download the canonical signatures.json (curl, else wget). Prints JSON to stdout.
+fetch_signatures_json() {
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL "$SIGNATURES_URL"
+    elif command -v wget >/dev/null 2>&1; then
+        wget -qO- "$SIGNATURES_URL"
+    else
+        return 1
+    fi
+}
 
 get_signatures_path() {
     if [[ -n "$SIGNATURES_OVERRIDE" ]]; then
@@ -346,15 +292,15 @@ for m in ms:
         if snm in sn: raise ValueError("dup site %s in %s" % (snm, name))
         sn.add(snm)
         kind = s.get("kind")
-        if kind not in ("short", "near", "bcond", "cbz"):
+        if kind not in ("short", "near", "bcond", "cbz", "tbz"):
             raise ValueError("bad kind in %s/%s" % (name, snm))
         # x86_64 gates (elf) are cmp/jg (short/near); the arm64 gates (elf-arm64,
-        # macho-arm64) are the bcond flip or the cbz rewrite. Reject a kind that
-        # does not match the container architecture.
-        if kind in ("bcond", "cbz") and container == "elf":
+        # macho-arm64) are the bcond flip, the cbz rewrite, or the tbz rewrite.
+        # Reject a kind that does not match the container architecture.
+        if kind in ("bcond", "cbz", "tbz") and container == "elf":
             raise ValueError("x86_64 milestone %s has an arm64 site %s" % (name, snm))
-        if kind not in ("bcond", "cbz") and container in ("elf-arm64", "macho-arm64"):
-            raise ValueError("arm64 milestone %s has a non-bcond/cbz site %s" % (name, snm))
+        if kind not in ("bcond", "cbz", "tbz") and container in ("elf-arm64", "macho-arm64"):
+            raise ValueError("arm64 milestone %s has a non-arm64 site %s" % (name, snm))
         # Optional stockOpcode field pins the sig stock encoding at load time
         # (e.g. a near JE site carries 0x0F84). The sig bytes at jgOff remain
         # the runtime source of truth.
@@ -375,7 +321,7 @@ for m in ms:
         if not isinstance(sig, str) or not sig or len(sig) % 2 or not re.fullmatch(r"[0-9A-Fa-f]+", sig):
             raise ValueError("bad sig in %s/%s" % (name, snm))
         raw = bytes.fromhex(sig)
-        need = {"short": 2, "near": 6, "bcond": 4, "cbz": 4}[kind]
+        need = {"short": 2, "near": 6, "bcond": 4, "cbz": 4, "tbz": 4}[kind]
         if off + need > len(raw):
             raise ValueError("jump past sig in %s/%s" % (name, snm))
         # Stock-opcode check: the sig bytes at jgOff must be the stock branch
@@ -402,6 +348,12 @@ for m in ms:
             w = int.from_bytes(raw[off:off+4], "little")
             if (w & 0xFF000000) != 0x34000000:
                 raise ValueError("jgOff not a stock 32-bit CBZ in %s/%s" % (name, snm))
+        if kind == "tbz":
+            if off % 4 != 0:
+                raise ValueError("tbz jgOff must be word-aligned in %s/%s" % (name, snm))
+            w = int.from_bytes(raw[off:off+4], "little")
+            if (w & 0x7E000000) != 0x36000000:
+                raise ValueError("jgOff not a stock TBZ/TBNZ in %s/%s" % (name, snm))
         opt = 1 if s.get("optional") else 0
         print("S|%s|%s|%s|%d|%d|%d|%s" % (snm, kind, rva, off, exp, opt, sig.upper()))
     print("E")
@@ -438,8 +390,8 @@ load_milestones() {
     if sig_path=$(get_signatures_path); then
         if [[ ! -r "$sig_path" ]]; then errf "Signature file is not readable: ${sig_path}"; return 1; fi
         if ! command -v python3 >/dev/null 2>&1; then
-            errf "An external signatures.json needs python3, which was not found."
-            echo "    Remove ${sig_path} to use the built-in tables, or install python3."
+            errf "Reading signatures.json needs python3, which was not found."
+            echo "    Install python3 (there is no built-in fallback table anymore)."
             return 1
         fi
         if ! tokens=$(json_to_tokens < "$sig_path"); then
@@ -451,8 +403,21 @@ load_milestones() {
         if (( sig_status == 2 )); then
             errf "Signature file does not exist: ${SIGNATURES_OVERRIDE}"; return 1
         fi
-        tokens="$EMBEDDED_SIGNATURES"
-        src_label="embedded tables"
+        if ! command -v python3 >/dev/null 2>&1; then
+            errf "Fetching the signature table needs python3, which was not found."
+            echo "    Install python3, or pass --signatures with a local signatures.json."
+            return 1
+        fi
+        local sig_json
+        if ! sig_json=$(fetch_signatures_json); then
+            errf "Could not download the signature table (curl/wget failed)."
+            echo "    Check your connection, or pass --signatures with a local signatures.json."
+            return 1
+        fi
+        if ! tokens=$(json_to_tokens <<< "$sig_json"); then
+            errf "Failed to parse the downloaded signature table:"; printf '    %s\n' "$tokens"; return 1
+        fi
+        src_label="$SIGNATURES_URL"
     fi
 
     # Feed tokens via a here-string so populate runs in THIS shell (a pipe would
@@ -804,6 +769,32 @@ sig_matches_at() {
             fi
         done
     fi
+    if [[ "$kind" == "tbz" ]]; then
+        # stock TBZ/TBNZ (0x36 family, bit-position + Rt = the sig's, imm14 wild)
+        # or patched unconditional B (0x14) with the same resolved target
+        local b0 b1 b2 b3 word sw sdisp cdisp
+        b0=$(( 16#${actual:$(( jg_off*2 )):2} ))
+        b1=$(( 16#${actual:$(( (jg_off+1)*2 )):2} ))
+        b2=$(( 16#${actual:$(( (jg_off+2)*2 )):2} ))
+        b3=$(( 16#${actual:$(( (jg_off+3)*2 )):2} ))
+        word=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
+        b0=$(( 16#${sig_upper:$(( jg_off*2 )):2} ))
+        b1=$(( 16#${sig_upper:$(( (jg_off+1)*2 )):2} ))
+        b2=$(( 16#${sig_upper:$(( (jg_off+2)*2 )):2} ))
+        b3=$(( 16#${sig_upper:$(( (jg_off+3)*2 )):2} ))
+        sw=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
+        if (( (word & 0x7E000000) == 0x36000000 )); then
+            if (( (word & 0xFFF8001F) != (sw & 0xFFF8001F) )); then return 1; fi
+        elif (( (word & 0xFC000000) == 0x14000000 )); then
+            cdisp=$(( word & 0x03FFFFFF ))
+            if (( (cdisp & 0x2000000) != 0 )); then cdisp=$(( cdisp - 0x4000000 )); fi
+            sdisp=$(( (sw >> 5) & 0x3FFF ))
+            if (( (sdisp & 0x2000) != 0 )); then sdisp=$(( sdisp - 0x4000 )); fi
+            if (( cdisp != sdisp )); then return 1; fi
+        else
+            return 1
+        fi
+    fi
 
     local i byte_idx sig_byte act_byte act_pair
     for (( i = 0; i < ${#sig_upper}; i += 2 )); do
@@ -841,7 +832,7 @@ build_binary_anchor() {
     local sig; sig=$(echo "$1" | tr 'A-F' 'a-f')
     local kind="$2" jg_off="$3"
     local sig_bytes=$(( ${#sig} / 2 )) mask_len
-    case "$kind" in short) mask_len=2 ;; near) mask_len=6 ;; bcond|cbz) mask_len=4 ;; esac
+    case "$kind" in short) mask_len=2 ;; near) mask_len=6 ;; bcond|cbz|tbz) mask_len=4 ;; esac
     local mask_end=$(( jg_off + mask_len ))
     # cbz: embedded BL (0x94) / B (0x14) words carry a build-specific displacement,
     # so they cannot anchor -- treat them as masked (high byte is sig[wpos+3]).
@@ -944,6 +935,17 @@ try:
                     return False
             elif (w & 0xFC000000) == 0x14000000:
                 if _sx(w & 0x03FFFFFF, 26) != _sx((sw >> 5) & 0x7FFFF, 19):
+                    return False
+            else:
+                return False
+        if kind == "tbz":
+            w = data[s+jg] | (data[s+jg+1] << 8) | (data[s+jg+2] << 16) | (data[s+jg+3] << 24)
+            sw = sig[jg] | (sig[jg+1] << 8) | (sig[jg+2] << 16) | (sig[jg+3] << 24)
+            if (w & 0x7E000000) == 0x36000000:
+                if (w & 0xFFF8001F) != (sw & 0xFFF8001F):
+                    return False
+            elif (w & 0xFC000000) == 0x14000000:
+                if _sx(w & 0x03FFFFFF, 26) != _sx((sw >> 5) & 0x3FFF, 14):
                     return False
             else:
                 return False
@@ -1117,7 +1119,7 @@ probe_slice_pass() {
                 # The sig bytes at jgOff are the stock encoding (7F short,
                 # 0F8F/0F84 near, or the 4-byte CBZ word for cbz); the flip
                 # engine works off arrays without the sig, so carry them along.
-                if [[ "$s_kind" == "cbz" ]]; then
+                if [[ "$s_kind" == "cbz" || "$s_kind" == "tbz" ]]; then
                     stock_hex="${s_sig:$(( s_jgoff*2 )):8}"
                 elif [[ "$s_kind" == "near" ]]; then
                     stock_hex="${s_sig:$(( s_jgoff*2 )):4}"
@@ -1249,6 +1251,33 @@ apply_flips_slice() {
             nb2=$(( (neww >> 16) & 0xFF )); nb3=$(( (neww >> 24) & 0xFF ))
             printf "\x$(printf '%02X' $nb0)\x$(printf '%02X' $nb1)\x$(printf '%02X' $nb2)\x$(printf '%02X' $nb3)" | dd of="$file" bs=1 seek="$offset" count=4 conv=notrunc 2>/dev/null
             applied=$(( applied + 1 ))
+        elif [[ "$kind" == "tbz" ]]; then
+            b0=$(read_byte "$file" "$offset"); b1=$(read_byte "$file" $(( offset + 1 )))
+            b2=$(read_byte "$file" $(( offset + 2 ))); b3=$(read_byte "$file" $(( offset + 3 )))
+            word=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
+            sw=$(( 16#${stock_hex:6:2}${stock_hex:4:2}${stock_hex:2:2}${stock_hex:0:2} ))
+            if (( (word & 0xFC000000) == 0x14000000 )); then
+                # patched form: only ours when the target matches the sig tbz's
+                cdisp=$(( word & 0x03FFFFFF ))
+                if (( (cdisp & 0x2000000) != 0 )); then cdisp=$(( cdisp - 0x4000000 )); fi
+                sdisp=$(( (sw >> 5) & 0x3FFF ))
+                if (( (sdisp & 0x2000) != 0 )); then sdisp=$(( sdisp - 0x4000 )); fi
+                if (( cdisp == sdisp )); then already=$(( already + 1 )); continue; fi
+                warnf "    Skipped one change - it didn't look the way we expected."
+                continue
+            fi
+            if ! (( (word & 0x7E000000) == 0x36000000 && (word & 0xFFF8001F) == (sw & 0xFFF8001F) )); then
+                warnf "    Skipped one change - it didn't look the way we expected."
+                continue
+            fi
+            # TBZ/TBNZ -> B with the same target: recompute imm26 from imm14 (bits 18:5)
+            imm19=$(( (word >> 5) & 0x3FFF ))
+            if (( (imm19 & 0x2000) != 0 )); then imm19=$(( imm19 - 0x4000 )); fi
+            neww=$(( 0x14000000 | (imm19 & 0x3FFFFFF) ))
+            nb0=$(( neww & 0xFF )); nb1=$(( (neww >> 8) & 0xFF ))
+            nb2=$(( (neww >> 16) & 0xFF )); nb3=$(( (neww >> 24) & 0xFF ))
+            printf "\x$(printf '%02X' $nb0)\x$(printf '%02X' $nb1)\x$(printf '%02X' $nb2)\x$(printf '%02X' $nb3)" | dd of="$file" bs=1 seek="$offset" count=4 conv=notrunc 2>/dev/null
+            applied=$(( applied + 1 ))
         else  # bcond
             cur=$(read_byte "$file" "$offset")   # little-endian byte0 holds the condition
             nib=$(( cur & 0x0F ))
@@ -1300,6 +1329,24 @@ classify_flip_states_slice() {
                 if (( (cdisp & 0x2000000) != 0 )); then cdisp=$(( cdisp - 0x4000000 )); fi
                 sdisp=$(( (sw >> 5) & 0x7FFFF ))
                 if (( (sdisp & 0x40000) != 0 )); then sdisp=$(( sdisp - 0x80000 )); fi
+                if (( cdisp != sdisp )); then return 1; fi
+                STATE_PATCHED=$(( STATE_PATCHED + 1 ))
+            else
+                return 1
+            fi
+        elif [[ "$kind" == "tbz" ]]; then
+            b0=$o0; b1=$(read_byte "$file" $(( offset + 1 )))
+            b2=$(read_byte "$file" $(( offset + 2 ))); b3=$(read_byte "$file" $(( offset + 3 )))
+            word=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
+            sw=$(( 16#${stock_hex:6:2}${stock_hex:4:2}${stock_hex:2:2}${stock_hex:0:2} ))
+            if (( (word & 0x7E000000) == 0x36000000 )); then
+                if (( (word & 0xFFF8001F) != (sw & 0xFFF8001F) )); then return 1; fi
+                STATE_STOCK=$(( STATE_STOCK + 1 ))
+            elif (( (word & 0xFC000000) == 0x14000000 )); then
+                cdisp=$(( word & 0x03FFFFFF ))
+                if (( (cdisp & 0x2000000) != 0 )); then cdisp=$(( cdisp - 0x4000000 )); fi
+                sdisp=$(( (sw >> 5) & 0x3FFF ))
+                if (( (sdisp & 0x2000) != 0 )); then sdisp=$(( sdisp - 0x4000 )); fi
                 if (( cdisp != sdisp )); then return 1; fi
                 STATE_PATCHED=$(( STATE_PATCHED + 1 ))
             else

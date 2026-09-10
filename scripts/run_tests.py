@@ -80,8 +80,7 @@ def main():
     #
     # Table audits are seconds and catch defects no per-binary test can see - two
     # milestones with identical signature sets make the patcher decline every
-    # build they match, and an embedded table that drifted from signatures.json
-    # ships a patcher that needs an external file to work. The Windows PE suite
+    # build they match. The Windows PE suite
     # shells to pwsh; the universal Python patcher's black-box suite covers
     # PE + ELF + Mach-O on any OS via the test env toggles (the fast path that
     # exercises ELF/Mach-O without shelling to bash).
@@ -90,8 +89,6 @@ def main():
          py + [str(HERE / "test_derive.py")]),
         ("audit signatures.json",
          py + [str(HERE / "audit_signatures.py"), str(REPO / "signatures.json")]),
-        ("embedded tables match signatures.json",
-         py + [str(HERE / "sync_embedded.py"), "--check"]),
         ("Windows PE (chrome-mv2.ps1)", py + [str(HERE / "test_windows.py")]),
         ("compile chrome-mv2.py", py + ["-m", "py_compile", str(REPO / "chrome-mv2.py")]),
         ("Universal Python (chrome-mv2.py)", py + [str(HERE / "test_pyport.py")]),

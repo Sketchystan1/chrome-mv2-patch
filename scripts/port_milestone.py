@@ -333,8 +333,6 @@ def main():
     parser.add_argument("--signatures", default="signatures.json")
     parser.add_argument("--merge", action="store_true",
                         help="write the entry into signatures.json (replacing a same-named one)")
-    parser.add_argument("--sync", action="store_true",
-                        help="with --merge, also update both embedded tables")
     parser.add_argument("--json", help="write the derived entry to this file")
     parser.add_argument("--rejected", action="store_true", help="list dropped candidates")
     args = parser.parse_args()
@@ -436,10 +434,6 @@ def main():
         with open(args.signatures, "w", encoding="utf-8") as handle:
             json.dump(table, handle, indent=2)
             handle.write("\n")
-        if args.sync:
-            import sync_embedded
-            sys.argv = ["sync_embedded.py", "--signatures", args.signatures]
-            sync_embedded.main()
         print("\nNext: python scripts/audit_signatures.py --binary %s" % args.binary)
     return 0
 

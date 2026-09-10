@@ -182,7 +182,8 @@ static const WORD  kHostMachine   = 0xAA64;  // IMAGE_FILE_MACHINE_ARM64
 
 struct Site {
   int kind = 0;  // 0 = short jg (7F->EB), 1 = near jg (0F8F->90E9),
-                 // 2 = AArch64 b.cond (cond nibble GT 0xC -> AL 0xE)
+                 // 2 = AArch64 b.cond (cond nibble GT 0xC -> AL 0xE),
+                 // 3 = AArch64 tbz/tbnz -> unconditional B (same target)
   std::vector<BYTE> sig;
   int jgOff    = 0;
   int expected = 1;
@@ -363,13 +364,13 @@ static std::vector<Milestone> ParseMilestones(const JV& doc,
       Site s;
       const JV* kd = sd.get("kind");
       std::string ks = kd ? kd->str : "short";
-      s.kind = (ks == "bcond") ? 2 : (ks == "near") ? 1 : 0;
+      s.kind = (ks == "tbz") ? 3 : (ks == "bcond") ? 2 : (ks == "near") ? 1 : 0;
       s.sig  = HexToBytes(sd.get("sig") ? sd.get("sig")->str : "");
       s.jgOff = sd.get("jgOff") ? (int)sd.get("jgOff")->num : 0;
       s.expected =
           sd.get("expectedMatches") ? (int)sd.get("expectedMatches")->num : 1;
-      // Bytes the matcher touches at/after jgOff: short 2, near 6, bcond 4.
-      int need = (s.kind == 2) ? 4 : (s.kind == 1) ? 6 : 2;
+      // Bytes the matcher touches at/after jgOff: short 2, near 6, bcond/tbz 4.
+      int need = (s.kind == 2 || s.kind == 3) ? 4 : (s.kind == 1) ? 6 : 2;
       if (s.sig.size() < 2 || s.jgOff < 0 ||
           (long long)s.jgOff + need > (long long)s.sig.size() ||
           s.expected < 1)
@@ -714,6 +715,27 @@ static Image ParsePe(const BYTE* b, size_t n) {
   return img;
 }
 
+// AArch64 test-bit-and-branch (TBZ/TBNZ) helpers, mirrored from
+// derive_milestone.py's _tb_word_ok: a matched word is either the stock
+// TBZ/TBNZ (family/op/bit-position/Rt pinned, imm14 free) or the already-forced
+// unconditional B whose resolved target equals the stock tbz's. Same rewrite as
+// CBZ->B, but the offset is imm14 (bits 18:5) not imm19.
+static int SignExtend(unsigned v, int bits) {
+  unsigned m = 1u << (bits - 1);
+  return (int)((v ^ m) - m);
+}
+static bool TbWordOk(unsigned w, unsigned sigw) {
+  if ((w & 0x7E000000u) == 0x36000000u)               // stock TBZ/TBNZ family
+    return (w & 0xFFF8001Fu) == (sigw & 0xFFF8001Fu);
+  if ((w & 0xFC000000u) == 0x14000000u)               // patched unconditional B
+    return SignExtend(w & 0x03FFFFFFu, 26) ==
+           SignExtend((sigw >> 5) & 0x3FFFu, 14);
+  return false;
+}
+static unsigned TbPatchWord(unsigned w) {             // TBZ/TBNZ -> B, same target
+  return 0x14000000u | ((unsigned)SignExtend((w >> 5) & 0x3FFFu, 14) & 0x03FFFFFFu);
+}
+
 // Signature match at a .text offset. The gate instruction itself is a
 // wildcard that accepts both stock (jg) and already-patched (jmp) forms.
 static bool SigAt(const BYTE* b, size_t n, long long start,
@@ -723,12 +745,15 @@ static bool SigAt(const BYTE* b, size_t n, long long start,
     BYTE p = b[start + k];
     if ((int)k == jgOff) {
       if (kind == 0) {
-        if (p != 0x7F && p != 0xEB) return false;  // short jg / jmp
+        // stock conditional is the sig's own byte at jgOff (7F jg, 75 jne, ...)
+        // or the already-patched EB jmp -- not a hardcoded 7F.
+        if (p != sig[jgOff] && p != 0xEB) return false;  // short cond / jmp
       } else if (kind == 1) {
         BYTE p1 = b[start + jgOff + 1];
-        if (!((p == 0x0F && p1 == 0x8F) || (p == 0x90 && p1 == 0xE9)))
-          return false;                            // near jg / nop+jmp
-      } else {
+        if (!((p == sig[jgOff] && p1 == sig[jgOff + 1]) ||
+              (p == 0x90 && p1 == 0xE9)))
+          return false;                            // near cond / nop+jmp
+      } else if (kind == 2) {
         // AArch64 B.cond, little-endian [cond+o0][imm19][imm19][0x54]: the 0x54
         // opcode sits at jgOff+3, o0 (bit 4) must be 0, and the condition nibble
         // is GT (0x0C) stock or AL (0x0E) already-patched.
@@ -736,6 +761,12 @@ static bool SigAt(const BYTE* b, size_t n, long long start,
         if ((p & 0x10) != 0) return false;
         BYTE lo = p & 0x0F;
         if (lo != 0x0C && lo != 0x0E) return false;
+      } else {  // kind == 3: AArch64 TBZ/TBNZ -> B; validate the whole 4-byte word
+        unsigned w = (unsigned)b[start + jgOff] | ((unsigned)b[start + jgOff + 1] << 8) |
+                     ((unsigned)b[start + jgOff + 2] << 16) | ((unsigned)b[start + jgOff + 3] << 24);
+        unsigned sw = (unsigned)sig[jgOff] | ((unsigned)sig[jgOff + 1] << 8) |
+                      ((unsigned)sig[jgOff + 2] << 16) | ((unsigned)sig[jgOff + 3] << 24);
+        if (!TbWordOk(w, sw)) return false;
       }
     } else if ((int)k == jgOff + 1 && kind == 0) {
       // wildcard: imm8 of the short branch
@@ -743,6 +774,8 @@ static bool SigAt(const BYTE* b, size_t n, long long start,
       // wildcard: rel32 of the near branch
     } else if (kind == 2 && ((int)k == jgOff + 1 || (int)k == jgOff + 2)) {
       // wildcard: imm19 middle bytes of the B.cond
+    } else if (kind == 3 && (int)k >= jgOff + 1 && (int)k <= jgOff + 3) {
+      // wildcard: rest of the tbz word (validated as a whole at jgOff)
     } else if (p != sig[k]) {
       return false;
     }
@@ -834,34 +867,46 @@ static bool Locate(const BYTE* buf, size_t bufN, const Image& img,
 }
 
 // Decide the write from the 2 current bytes at the branch. len is 1 for
-// short/bcond, 2 for near. stock = still a taken conditional; done = already
-// forced. Mirrors the scripts and the mv2-launcher core.
+// Decide the write from the current bytes at the branch. len is 1 for
+// short/bcond, 2 for near, 4 for tbz. stock = still a taken conditional; done =
+// already forced. Mirrors the scripts and the mv2-launcher core.
 struct ApplyRes {
-  BYTE patch[2];
+  BYTE patch[4];
   int  len;
   bool stock;
   bool done;
 };
 
-static ApplyRes ComputeApply(int kind, const BYTE cur[2]) {
+static ApplyRes ComputeApply(int kind, const BYTE* cur, const BYTE* stock) {
   ApplyRes r{};
-  if (kind == 0) {  // short jg: 7F -> EB
-    r.stock    = cur[0] == 0x7F;
+  if (kind == 0) {  // short cond (stock[0], e.g. 7F jg / 75 jne) -> EB
+    r.stock    = cur[0] == stock[0];
     r.done     = cur[0] == 0xEB;
     r.patch[0] = 0xEB;
     r.len      = 1;
-  } else if (kind == 1) {  // near jg: 0F 8F -> 90 E9
-    r.stock    = cur[0] == 0x0F && cur[1] == 0x8F;
+  } else if (kind == 1) {  // near cond (stock[0..1], e.g. 0F 8F) -> 90 E9
+    r.stock    = cur[0] == stock[0] && cur[1] == stock[1];
     r.done     = cur[0] == 0x90 && cur[1] == 0xE9;
     r.patch[0] = 0x90;
     r.patch[1] = 0xE9;
     r.len      = 2;
-  } else {  // AArch64 b.cond: condition nibble GT(0xC) -> AL(0xE)
+  } else if (kind == 2) {  // AArch64 b.cond: condition nibble GT(0xC) -> AL(0xE)
     BYTE lo    = cur[0] & 0x0F;
     r.stock    = lo == 0x0C;
     r.done     = lo == 0x0E;
     r.patch[0] = (BYTE)((cur[0] & 0xF0) | 0x0E);
     r.len      = 1;
+  } else {  // kind == 3: AArch64 TBZ/TBNZ -> unconditional B (same target)
+    unsigned w = (unsigned)cur[0] | ((unsigned)cur[1] << 8) |
+                 ((unsigned)cur[2] << 16) | ((unsigned)cur[3] << 24);
+    r.stock    = (w & 0x7E000000u) == 0x36000000u;
+    r.done     = (w & 0xFC000000u) == 0x14000000u;
+    unsigned patched = TbPatchWord(w);
+    r.patch[0] = (BYTE)(patched & 0xFF);
+    r.patch[1] = (BYTE)((patched >> 8) & 0xFF);
+    r.patch[2] = (BYTE)((patched >> 16) & 0xFF);
+    r.patch[3] = (BYTE)((patched >> 24) & 0xFF);
+    r.len      = 4;
   }
   return r;
 }
@@ -874,8 +919,14 @@ static void ApplyInProcess(
   for (auto& [site, offs] : hits) {
     for (long long jgFileOff : offs) {
       BYTE* addr = chromeDllBase + img.textRVA + (jgFileOff - img.textRaw);
-      BYTE cur[2] = {addr[0], addr[1]};
-      ApplyRes a = ComputeApply(site.kind, cur);
+      BYTE cur[4] = {addr[0], addr[1], addr[2], addr[3]};
+      // Stock opcode(s) taken from the sig itself (jg 7F, jne 75, near 0F 8F,
+      // ...), so non-jg gates like InstallVerifier flip correctly.
+      BYTE stock[2] = {
+          site.sig[site.jgOff],
+          site.jgOff + 1 < (int)site.sig.size() ? site.sig[site.jgOff + 1]
+                                                : (BYTE)0};
+      ApplyRes a = ComputeApply(site.kind, cur, stock);
       if (!a.stock) {
         if (!a.done) DBG(L"unexpected gate bytes — skipped");
         continue;

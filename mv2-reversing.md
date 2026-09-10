@@ -22,8 +22,9 @@ releases and **decline without writing** on layouts they do not recognize.
   `Google Chrome Framework`, ad-hoc re-signed so it launches. Intel x86_64 was
   dropped in v1.10.0.
 
-`chrome-mv2.py` is a stdlib-only universal port (PE + ELF + Mach-O) with the same
-tables embedded. The in-process launchers (`mv2-mem-patch-win`, `mv2-mem-patch-mac`)
+`chrome-mv2.py` is a stdlib-only universal port (PE + ELF + Mach-O). All three
+scripts fetch `signatures.json` from the GitHub raw URL at runtime (no embedded
+tables — see §4). The in-process launchers (`mv2-mem-patch-win`, `mv2-mem-patch-mac`)
 reuse the same signature model.
 
 ---
@@ -58,13 +59,18 @@ call is removed, no return value synthesized (see §6, CARDINAL RULE).
 
 | Arch | Stock | Flip | `kind` |
 | :--- | :--- | :--- | :--- |
-| x86/x64 short | `7F disp8` (`jg`) | `EB` (`jmp short`), disp kept | `short` |
+| x86/x64 short | `7F disp8` (`jg`; any Jcc via `stockOpcode`) | `EB` (`jmp short`), disp kept | `short` |
 | x86/x64 near | `0F 8F disp32` (`jg`) | `90 E9` (`nop;jmp near`), disp kept | `near` |
 | arm64 | `cmp w,#2 ; b.gt` (`54… cond=0xC`) | cond → AL `0xE`, `imm19` kept | `bcond` |
 
-A fourth kind, **`cbz`**, is used only by the macOS Gate-B site (§8): a `cbz w0`
-on a call result is rewritten to an unconditional `B` to the same resolved target
-(imm26 recomputed from the sign-extended imm19).
+Two more kinds rewrite an AArch64 conditional to an unconditional `B` to its
+existing target: **`cbz`** (a `cbz`/`cbnz`, imm19; still supported but no shipped
+milestone uses it since Gate B was removed — §8) and **`tbz`** (a test-bit
+`tbz`/`tbnz`, `0x36`/`0x37` family, imm14 — the arm64 InstallVerifier gate, §8). For
+both, the `B`'s imm26 is recomputed from the stock branch's sign-extended offset
+(imm19 or imm14). The `short` kind's stock opcode defaults to `7F` (`jg`); a site may
+pin any conditional with a `stockOpcode` field — the InstallVerifier gate flips a
+`75` (`jne`).
 
 ### How each site is located (relocation-tolerant, never guessed)
 
@@ -76,10 +82,12 @@ Each site is pinned by a `.text`-unique signature around the branch:
    folded/shared body). Any other count → declined.
 
 The matcher is exact on every byte **except** masked fields: the branch opcode +
-displacement (`short`/`near`), the `b.cond`/`cbz` word's condition + `imm19`, and —
-for `cbz` — any **embedded `BL`/`B` word**, whose PC-relative `imm26` is
-build-specific (opcode class is still verified). Masking only the volatile fields
-lets a point-release relocate cleanly while a real layout change still misses.
+displacement (`short`/`near`), the `b.cond`/`cbz`/`tbz` word's variable field
+(`b.cond` condition; `cbz` `imm19` + Rt; `tbz` `imm14`, with the `0x36`/`0x37`
+family, op, bit-position and Rt pinned), and — for `cbz` — any **embedded `BL`/`B`
+word**, whose PC-relative `imm26` is build-specific (opcode class is still verified).
+Masking only the volatile fields lets a point-release relocate cleanly while a real
+layout change still misses.
 
 A write happens only if the byte is currently the stock opcode (idempotent on
 re-run). If nothing matches, the engine prints structural candidates and refuses to
@@ -121,13 +129,18 @@ Quit all Chrome processes first (a changed cdhash `SIGBUS`es the live process).
 
 ## 4. Site tables & the field shift
 
-`signatures.json` is canonical; every entry is mirrored into `$EmbeddedSignatures`
-in `chrome-mv2.ps1` (PE only), `EMBEDDED_SIGNATURES` in `chrome-mv2.sh` (ELF + Mach-O,
-pre-tokenized), and `EMBEDDED_SIGNATURES` in `chrome-mv2.py` (all containers) — the
-first two by `scripts/sync_embedded.py`, the `.py` blob by hand (same compact form).
-Each milestone is `container`-tagged so a target only probes its own container, and
-the runtime applies the **best full match** (`satisfied == total`); equal-rank
-partials tie and the engine declines.
+`signatures.json` is canonical and is fetched at runtime from the GitHub raw URL
+(`https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json`).
+Each script's precedence is: an explicit `--signatures`/`-Signatures` path →
+`signatures.json` beside the script → the URL fetch. There are **no embedded tables**
+(the old `$EmbeddedSignatures`/`EMBEDDED_SIGNATURES` blobs and
+`scripts/sync_embedded.py` were removed), so the default path now requires network,
+and `chrome-mv2.sh` now requires `python3` on the default path (it previously used a
+pre-tokenized embed to avoid it). Editing `signatures.json` is the whole job — but it
+must be **pushed** so the raw URL serves the change. Each milestone is
+`container`-tagged so a target only probes its own container, and the runtime applies
+the **best full match** (`satisfied == total`); equal-rank partials tie and the engine
+declines.
 
 Architectural notes that matter more than the raw bytes:
 
@@ -145,13 +158,11 @@ Architectural notes that matter more than the raw bytes:
   that risked a tie. `154-win-arm64` stays because there is no `155-win-arm64`; the
   early-154 `154-x86`/`154-linux` stay because early-154 diverges from 152 on those
   codegens.
-- **macOS Gate-B is per-milestone (→ `153-macos-arm64`).** The 4 MV2 bcond gates are
-  layout-stable, but the Gate-B `cbz` (§8) sits on a call result with no invariant
-  neighbour, and its tail (`ldrsb w8,[sp,#imm]`) frame slot moved between 152
-  (`#0x6f`) and 153/155 (`#0x8f`). 153 keeps 152's un-shifted bcond layout but the
-  153 tail, so it matches neither 152 (tail differs) nor 155 (bcond shifted) fully →
-  it gets its own `153-macos-arm64` (152 bcond + the 153 cbz). This is mac-only:
-  Linux has no Gate-B, Windows uses a stable `short`/`bcond` form.
+- **macOS no longer needs a per-milestone table.** When Gate B existed, its `cbz`
+  tail (`ldrsb w8,[sp,#imm]`) frame slot moved between 152 (`#0x6f`) and 153/155
+  (`#0x8f`), forcing a separate `153-macos-arm64` (152 bcond + the 153 cbz). With Gate
+  B removed (§8) the 4 MV2 bcond gates are layout-stable across 152/153, so
+  `152-macos-arm64` covers both and `153-macos-arm64` was dropped as a redundant tie.
 
 ---
 
@@ -164,7 +175,7 @@ Bounded and cross-platform; the mechanism never changes, only the bytes. Toolkit
    and, where published, symbols (`fetch_symbols.py`): PDB (PE, incl. arm64),
    `chrome.debug` (Linux x64), or the dSYM symtab (mac). No symbols for CfT, arm64
    Linux, or LTO-inlined policy code → locate structurally.
-2. **Derive**: `port_milestone.py <bin> --name <ver> --prev <prev> [--moved old:new] --merge --sync`
+2. **Derive**: `port_milestone.py <bin> --name <ver> --prev <prev> [--moved old:new] --merge`
    learns field offsets, folds shared bodies, and picks the shortest signature with
    **no build-specific PC-relative immediate** (`audit_signatures.py`'s
    `pc_relative_spans` now flags arm64 `BL`/`B` and x86 `jmp rel32`, not just
@@ -180,8 +191,9 @@ Bounded and cross-platform; the mechanism never changes, only the bytes. Toolkit
   `mov imm32`) and converges into a message builder guarded by a downstream `CHECK`.
   Flipping it crash-loops the browser, and it matches exactly once so `matches>2`
   never flags it.
-- **The runtime GUI test MUST have a real MV2 extension force-installed** (via Gate
-  B), not just a fresh profile — the reason-string path only runs then.
+- **The runtime GUI test MUST have a real MV2 extension installed** (off-store via
+  the non-policy external-extensions provider — §8), not just a fresh profile — the
+  reason-string path only runs then.
 
 If the `cmp,2 ; jg` skeleton is gone entirely, re-analyze the gate from source
 before touching bytes.
@@ -226,44 +238,67 @@ a false "success" on a half-patched build is worse than declining).
 - `symbols_from_pdb.py` (dbghelp/ctypes) and `symbols_from_elf.py` (streams `.symtab`,
   faster than `nm -SC` on the multi-GB debug file) name gate functions.
 - `derive_milestone.py` (stdlib, no capstone/pefile): the finder + `--verify`, parses
-  PE/ELF/Mach-O and mirrors the runtime match-count/masking rules for all four kinds.
+  PE/ELF/Mach-O and mirrors the runtime match-count/masking rules for all five kinds
+  (`short`/`near`/`bcond`/`cbz`/`tbz`).
 - `port_milestone.py` wraps it to author a milestone; `audit_signatures.py` catches
-  ties, build-pinned sigs, weak anchors, and (with `--binary`) uncovered gates;
-  `sync_embedded.py` rewrites the `.ps1`/`.sh` embedded tables (the `.py` blob is
-  re-injected by hand). `run_tests.py` drives the PE/ELF/Mach-O suites.
+  ties, build-pinned sigs, weak anchors, and (with `--binary`) uncovered gates.
+  `run_tests.py` drives the PE/ELF/Mach-O suites. (`sync_embedded.py` was removed with
+  the embedded tables — §4.)
 
 ---
 
-## 8. Beyond MV2 — Gate B (honor off-store `ExtensionSettings`)
+## 8. Beyond MV2 — off-store install with no "managed by your organization" banner
 
-MV2 re-enable is one gate; a second capability lets the `ExtensionSettings` /
-`ExtensionInstallForcelist` policy force-install a **self-hosted** extension on an
-*unmanaged* Chrome (which otherwise reports "ignored — not from a trusted source").
-`FilterSensitivePolicies()` `[BLOCKED]`-prefixes such entries, guarded by
-`ShouldFilterSensitivePolicies()` (`platform_management_trustworthiness_ < TRUSTED`).
-Skipping the filter honors the policy regardless of management state. Setting those
-registry/policy keys already requires local admin; the `chrome://policy/test` caller
-is left untouched.
+MV2 re-enable is one gate; a second capability (**Route A**) lets an off-store,
+**self-hosted** extension install and auto-update from its own `update.xml` without
+any enterprise policy — so Chrome never shows the "managed by your organization"
+banner.
 
-`ShouldFilterSensitivePolicies()` is compiled **only on Windows and macOS** (`#if
-IS_WIN || IS_MAC`); on Linux it is `return false`, so there is **no gate to flip**.
-Per container (all **required** as of v1.10.0):
+**Why the banner appears, and how Route A avoids it.** The banner is driven by *any*
+platform policy (`ShouldDisplayManagedUi` → `HasMachineLevelPolicies`), so the old
+`ExtensionSettings`/`ExtensionInstallForcelist` force-install route (formerly "Gate
+B", now **removed**) always flips Chrome to managed. Instead, install via the
+**non-policy external-extensions provider** — the Windows registry key
+`Software\Google\Chrome\Extensions\<id>` with an `update_url` value (write the
+**32-bit view**: `reg add … /reg:32`, since Chrome reads `Extensions` with
+`KEY_WOW64_32KEY` — or HKCU, which needs no admin), or `external_extensions.json` on
+Linux/macOS. That yields ManifestLocation `kExternalPrefDownload`, which is **not** a
+policy location, so the profile stays unmanaged and Chrome still auto-updates the
+extension from its self-hosted `update.xml`.
+
+**The gate: `InstallVerifier::MustRemainDisabled` → force `IsFromStore`.** On official
+Chrome (`#if GOOGLE_CHROME_BRANDING && (IS_WIN || IS_MAC)`,
+`GetExperimentStatus()==ENFORCE`) the `InstallVerifier` disables any non-Web-Store
+extension with a **sticky** `DISABLE_NOT_VERIFIED` (the Enable toggle greys out).
+`MustRemainDisabled` inlines `IsFromStore()`, whose first test is the
+`from_webstore()` creation-flag bit; flipping that test to always take the "from
+store" path makes `MustRemainDisabled` return false, so the extension installs and
+lands in the recoverable `DISABLE_EXTERNAL_EXTENSION` state (one Enable click).
+Unbranded Chromium/CfT is `ENFORCE=NONE`, so the flip is a no-op there.
+
+Enforcement is compiled **only on Windows and macOS** (like the old Gate B); on Linux
+(`elf`/`elf-arm64`) it is `NONE`, so there is **no gate** and off-store installs
+already work. All sites are **`optional`** (additive to MV2 re-enable — a build where
+the site does not match must never fail the core patch).
 
 | container | kind | flip |
 | :--- | :--- | :--- |
-| pe (x64) | `short` | `cmp [rsi+0x18],1 ; jg` → `7F`→`EB` |
-| pe32 (x86) | `short` | `cmp [eax+0x10],1 ; jg` → `7F`→`EB` (operand-free sig, build-robust) |
-| pe-arm64 | `bcond` | `ldr w,[x20,#0x18] ; cmp #1 ; b.gt` → GT→AL |
-| macho-arm64 | `cbz` | `mov x0,x20 ; bl SFSP ; cbz w0 ; b` → CBZ→B, same resolved target |
-| elf / elf-arm64 | — | compiled out (`return false`) |
+| pe (x64) | `short` (`stockOpcode 0x75`) | `test byte[ext+0x254],8 ; jne <verified>` → `jne`→`jmp` |
+| pe32 (x86) | `short` (`stockOpcode 0x75`) | same, `creation_flags` at `ext+0x17c` |
+| pe-arm64 | `tbz` | `ldrb w,[ext,#0x254] ; tbnz w,#3,<verified>` → `tbnz`→`B` (same target) |
+| macho-arm64 | `tbz` | `ldrb w,[ext,#0x24c] ; tbnz w,#3,<verified>` → `tbnz`→`B` (same target); mac `creation_flags` is at `ext+0x24c`, **not** `+0x254` like Windows |
+| elf / elf-arm64 | — | compiled out (`ENFORCE=NONE`) |
 
-The macOS `cbz` form has no field-compare equivalent (the decision is a call result),
-so it is the one build-fragile gate — see §6 for the v1.10.1 masking fix and why
-mac needs a per-milestone table (`153-macos-arm64`). The **mem-patch mac dylib**
-(`mv2-mem-patch-mac`) currently implements only `short`/`near`/`bcond`, so it does
-not apply Gate-B; that is a known limitation, not a regression.
+Verified on branded 153 (win64, win-arm64) and CfT 155.0.8038.0 (win64, x86); the x86
+and arm64 sigs are build-robust and reused across 152/154/155 via signature scan. The
+**`mv2-mem-patch-win`** DLL applies these in-process — its short-flip path was fixed
+to honor `stockOpcode` (use the sig's own byte at `jgOff`, not a hardcoded `0x7F`) so
+the `jne` gate applies, and it gained the `tbz` kind for arm64.
 
-> **`featurebyte` (removed in v1.10.0).** The earlier `.rdata` data-byte patch that
-> granted MV3 `webRequestBlocking` is superseded by Gate B (which grants the same
-> capability on 155). The `featurebyte` kind remains supported by all engines for
-> custom tables but ships in no milestone.
+> **Removed: Gate B and `featurebyte`.** "Gate B" (skip `FilterSensitivePolicies` to
+> honor off-store `ExtensionSettings` on unmanaged Chrome) was removed from every
+> table — it required the policy route that triggers the managed banner, which Route
+> A avoids. The earlier `featurebyte` `.rdata` patch (MV3 `webRequestBlocking`) was
+> already removed in v1.10.0. Both kinds remain supported by the engines for custom
+> tables but ship in no milestone. (The historical Gate-B `cbz` masking lesson in §6
+> still applies to the `cbz` kind generally.)

@@ -195,7 +195,7 @@ def audit_table(table, rep):
                 rep.fail("%s: sig is not hex" % tag)
                 bad += 1
                 continue
-            need = 4 if s["kind"] in ("bcond", "cbz") else (6 if s["kind"] == "near" else 2)
+            need = 4 if s["kind"] in ("bcond", "cbz", "tbz") else (6 if s["kind"] == "near" else 2)
             if s["jgOff"] + need > len(raw):
                 rep.fail("%s: jgOff %d + %d bytes runs past a %d-byte sig"
                          % (tag, s["jgOff"], need, len(raw)))
@@ -215,6 +215,10 @@ def audit_table(table, rep):
             elif s["kind"] == "cbz" and (int.from_bytes(raw[s["jgOff"]:s["jgOff"] + 4], "little")
                                          & 0xFF000000) != 0x34000000:
                 rep.fail("%s: kind cbz but the word at jgOff is not a 32-bit CBZ" % tag)
+                bad += 1
+            elif s["kind"] == "tbz" and (int.from_bytes(raw[s["jgOff"]:s["jgOff"] + 4], "little")
+                                         & 0x7E000000) != 0x36000000:
+                rep.fail("%s: kind tbz but the word at jgOff is not a TBZ/TBNZ" % tag)
                 bad += 1
             elif s.get("stockOpcode") is not None:
                 so = str(s["stockOpcode"])

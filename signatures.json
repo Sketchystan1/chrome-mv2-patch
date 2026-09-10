@@ -1,5 +1,5 @@
 {
- "_comment": "Chrome MV2 gate signatures read at runtime by the patcher from next to the executable (or the current directory) - not embedded, so it can be updated without a rebuild. Each site: sig is hex starting at the cmp, the jg opcode byte sits at index jgOff, and the masked match count must equal expectedMatches. Add a new version's entry with scripts/derive_milestone.py and verify with its --verify mode; see scripts/README.md and mv2-reversing.md.",
+ "_comment": "Byte-patch signatures the patcher reads at runtime (next to the exe, or the current dir). Per site: sig is hex from the cmp, the jump byte is at jgOff, and it must match exactly expectedMatches times. Add builds with scripts/derive_milestone.py; details in mv2-reversing.md.",
  "milestones": [
   {
    "name": "152",
@@ -54,13 +54,15 @@
      "sig": "837F50020F8F8B000000488B8F280200008B413080BF080200000075"
     },
     {
-     "_comment": "Gate B: honor off-store ExtensionSettings/ExtensionInstallForcelist on UNMANAGED Chrome. PolicyLoaderWin::LoadChromePolicy guards its FilterSensitivePolicies(&policy) call with ShouldFilterSensitivePolicies() (inlined to `cmp dword[rsi+0x18],1 ; jg skip`). FilterSensitivePolicies [BLOCKED]-prefixes force-install entries whose update_url != the Chrome Web Store, so on an unmanaged browser a self-hosted extension is dropped (chrome://policy: 'ignored - not from a trusted source'). Flipping the jg to jmp always skips the filter, so platform-source ExtensionSettings is honored. Direction-only flip (same target, no call removed). Blast radius: all sensitive platform policies are honored on unmanaged Chrome (setting those registry keys already requires admin). required: this gate is enforced, so a build where it does not match reports partial rather than enabling MV2 without ExtensionSettings. The other FilterSensitivePolicies caller is the chrome://policy/test local-test loader (not this platform path).",
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
+     "_comment": "Real Chrome blocks off-store extensions ('not from the Web Store') and greys out Enable. Flips the from-webstore check to always-yes, so they install and stay on -- no 'managed by your organization' banner. Branded Chrome only.",
+     "name": "let off-store extensions install (InstallVerifier)",
      "kind": "short",
-     "jgRVA": "0x0205653F",
-     "jgOff": 12,
+     "jgRVA": "0x0337FB00",
+     "jgOff": 7,
      "expectedMatches": 1,
-     "sig": "488BBC2420010000837E18017F0A488D4C2448"
+     "optional": true,
+     "stockOpcode": "0x75",
+     "sig": "F68754020000087545488B5310"
     }
    ]
   },
@@ -202,12 +204,15 @@
      "sig": "837B28020F8F840000008B8B640100008B411880BB54010000007508"
     },
     {
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
+     "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
+     "name": "let off-store extensions install (InstallVerifier)",
      "kind": "short",
-     "jgRVA": "0x018CF394",
+     "jgRVA": "0x032EFE77",
      "jgOff": 7,
      "expectedMatches": 1,
-     "sig": "8B7D10837810017F0953E8"
+     "optional": true,
+     "stockOpcode": "0x75",
+     "sig": "F6867C01000008755A8B47088945D4"
     }
    ]
   },
@@ -249,59 +254,14 @@
      "sig": "1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"
     },
     {
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
-     "kind": "cbz",
-     "jgRVA": "0x01C9C464",
-     "jgOff": 8,
-     "expectedMatches": 1,
-     "sig": "E00314AA9021DE94A0EAFF340B000014F40300AAE8BFC139"
-    }
-   ]
-  },
-  {
-   "name": "153-macos-arm64",
-   "container": "macho-arm64",
-   "_comment": "macOS Apple Silicon, 153.0.8010.36+ (current stable). Chrome 153 keeps the 152 (un-shifted) Extension field layout, so the four bcond gates are byte-identical to 152-macos-arm64. The FilterSensitivePolicies cbz sig is intentionally trimmed to end at `mov x20,x0`, dropping the trailing `ldrsb w8,[sp,#N]` frame slot: that spill offset is the ONLY unmasked build-variant field (BL/CBZ/B displacements are already masked by the matcher), and it drifts on point-release codegen (moved #0x6f->#0x8f 152->153, and shifted again .36->.37, which stranded the old 24-byte sig on a partial 152 match that missed this off-store gate). The trimmed 20-byte sig is verified UNIQUE in .text on CfT 153.0.8010.36 (mov x0,x20 / bl / cbz w0 / b / mov x20,x0). Derived from CfT (unbranded) -- re-verify against a real Chrome.app.",
-   "sites": [
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled",
-     "kind": "bcond",
-     "jgRVA": "0x0227E868",
+     "_comment": "Same as pe, mac arm64 (flag byte at ext+0x24c).",
+     "name": "let off-store extensions install (InstallVerifier)",
+     "kind": "tbz",
+     "jgRVA": "0x0294FDDC",
      "jgOff": 4,
      "expectedMatches": 1,
-     "sig": "1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::OnExtensionSystemReady",
-     "kind": "bcond",
-     "jgRVA": "0x031BC304",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected",
-     "kind": "bcond",
-     "jgRVA": "0x0401C690",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x0682D710",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"
-    },
-    {
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
-     "kind": "cbz",
-     "jgRVA": "0x01B19DE0",
-     "jgOff": 8,
-     "expectedMatches": 1,
-     "sig": "E00314AA1879E99460DFFF340B000014F40300AA"
+     "optional": true,
+     "sig": "0831493948021837E80B40F9010D40F9"
     }
    ]
   },
@@ -341,6 +301,16 @@
      "jgOff": 4,
      "expectedMatches": 1,
      "sig": "1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"
+    },
+    {
+     "_comment": "Same as pe, arm64 (flip the tbnz bit-test to a plain branch).",
+     "name": "let off-store extensions install (InstallVerifier)",
+     "kind": "tbz",
+     "jgRVA": "0x02E82BC8",
+     "jgOff": 4,
+     "expectedMatches": 1,
+     "optional": true,
+     "sig": "085149398801183760E641F9E80F40F9"
     }
    ]
   },
@@ -425,12 +395,15 @@
      "sig": "837B28020F8F840000008B8B640100008B411880BB54010000007508"
     },
     {
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
+     "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
+     "name": "let off-store extensions install (InstallVerifier)",
      "kind": "short",
-     "jgRVA": "0x018B41B4",
+     "jgRVA": "0x032EFE77",
      "jgOff": 7,
      "expectedMatches": 1,
-     "sig": "8B7D10837810017F0953E8"
+     "optional": true,
+     "stockOpcode": "0x75",
+     "sig": "F6867C01000008755A8B47088945D4"
     }
    ]
   },
@@ -587,13 +560,15 @@
      "sig": "837F50027F51488B8F280200008B415080BF0802000000750F"
     },
     {
-     "_comment": "Gate B: honor off-store ExtensionSettings/ExtensionInstallForcelist on UNMANAGED Chrome. PolicyLoaderWin::LoadChromePolicy guards its FilterSensitivePolicies(&policy) call with ShouldFilterSensitivePolicies() (inlined to `cmp dword[rsi+0x18],1 ; jg skip`). FilterSensitivePolicies [BLOCKED]-prefixes force-install entries whose update_url != the Chrome Web Store, so on an unmanaged browser a self-hosted extension is dropped (chrome://policy: 'ignored - not from a trusted source'). Flipping the jg to jmp always skips the filter, so platform-source ExtensionSettings is honored. Direction-only flip (same target, no call removed). Blast radius: all sensitive platform policies are honored on unmanaged Chrome (setting those registry keys already requires admin). required: this gate is enforced, so a build where it does not match reports partial rather than enabling MV2 without ExtensionSettings. The other FilterSensitivePolicies caller is the chrome://policy/test local-test loader (not this platform path).",
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
+     "_comment": "Real Chrome blocks off-store extensions ('not from the Web Store') and greys out Enable. Flips the from-webstore check to always-yes, so they install and stay on -- no 'managed by your organization' banner. Branded Chrome only.",
+     "name": "let off-store extensions install (InstallVerifier)",
      "kind": "short",
-     "jgRVA": "0x01FF3FFF",
-     "jgOff": 12,
+     "jgRVA": "0x03269943",
+     "jgOff": 7,
      "expectedMatches": 1,
-     "sig": "488BBC2420010000837E18017F0A488D4C2448"
+     "optional": true,
+     "stockOpcode": "0x75",
+     "sig": "F68754020000087545488B5310"
     }
    ]
   },
@@ -650,12 +625,15 @@
      "sig": "837F28027F458B8F640100008B412880BF5401000000750C8B"
     },
     {
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
+     "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
+     "name": "let off-store extensions install (InstallVerifier)",
      "kind": "short",
-     "jgRVA": "0x0189B504",
+     "jgRVA": "0x032EFE77",
      "jgOff": 7,
      "expectedMatches": 1,
-     "sig": "8B7D10837810017F0953E8"
+     "optional": true,
+     "stockOpcode": "0x75",
+     "sig": "F6867C01000008755A8B47088945D4"
     }
    ]
   },
@@ -750,12 +728,14 @@
      "sig": "1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071"
     },
     {
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
-     "kind": "cbz",
-     "jgRVA": "0x01B613F4",
-     "jgOff": 8,
+     "_comment": "Same as pe, mac arm64 (flag byte at ext+0x24c).",
+     "name": "let off-store extensions install (InstallVerifier)",
+     "kind": "tbz",
+     "jgRVA": "0x0294FDDC",
+     "jgOff": 4,
      "expectedMatches": 1,
-     "sig": "E00314AA642EEA9460DFFF340B000014F40300AAE83FC239"
+     "optional": true,
+     "sig": "0831493948021837E80B40F9010D40F9"
     }
    ]
   },
@@ -842,12 +822,14 @@
      "sig": "1F0900710C020054691641F96A224839285140B98A000037298940B93F050071"
     },
     {
-     "name": "LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)",
-     "kind": "bcond",
-     "jgRVA": "0x01B0E0E8",
-     "jgOff": 8,
+     "_comment": "Same as pe, arm64 (flip the tbnz bit-test to a plain branch).",
+     "name": "let off-store extensions install (InstallVerifier)",
+     "kind": "tbz",
+     "jgRVA": "0x02E82BC8",
+     "jgOff": 4,
      "expectedMatches": 1,
-     "sig": "881A40B91F0500716C000054E0A30091"
+     "optional": true,
+     "sig": "085149398801183760E641F9E80F40F9"
     }
    ]
   }

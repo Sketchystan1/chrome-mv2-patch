@@ -29,10 +29,10 @@
 # counts as located only when its signature matches EXACTLY expectedMatches
 # times; the milestone with the most located sites wins; ties/partials decline.
 #
-# The Windows signature tables and the Linux/macOS ones both live in the
-# embedded JSON below (verbatim signatures.json), so the script needs no other
-# file. A signatures.json next to the script overrides it; --signatures picks
-# another explicitly.
+# The Windows signature tables and the Linux/macOS ones all live in the canonical
+# signatures.json. A signatures.json next to the script is used if present;
+# --signatures picks another explicitly; otherwise the script fetches the current
+# table from the project's GitHub raw URL (SIGNATURES_URL) at runtime.
 #
 # Usage:
 #   Windows: python chrome-mv2.py [patch|restore|check] [path] [-y] [-q]
@@ -51,36 +51,19 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.error
+import urllib.request
 
 APP_VERSION = "1.10.1"
 SIGNATURES_FILE = "signatures.json"
+# When neither --signatures nor a signatures.json beside the script is present,
+# the current table is fetched from the canonical copy on master at runtime.
+SIGNATURES_URL = "https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json"
 
 IS_WIN = sys.platform.startswith("win")
 IS_MAC = sys.platform == "darwin"
 IS_LINUX = sys.platform.startswith("linux")
 
-# Embedded signature tables (verbatim signatures.json). An external
-# signatures.json beside the script overrides this; --signatures wins over both.
-EMBEDDED_SIGNATURES = r'''{"milestones":[
-{"name":"152","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x082D26F5","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F805"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03348754","jgOff":4,"expectedMatches":2,"sig":"837A50027F34488B8A280200008B413080BA080200000075"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0124109C","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x082D24D6","jgOff":4,"expectedMatches":1,"sig":"837E50027F2D488B8E280200008B413080BE08020000007508"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x08DDC241","jgOff":4,"expectedMatches":1,"sig":"837F50027F4E488B8F280200008B413080BF0802000000750C"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x015A8D31","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8B000000488B8F280200008B413080BF080200000075"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","jgRVA":"0x0205653F","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
-{"name":"152-linux","container":"elf","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)","kind":"short","jgRVA":"0x0985B449","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)","kind":"short","jgRVA":"0x0985B0F4","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::MaybeReEnableExtension (inlined)","kind":"short","jgRVA":"0x0985B238","jgOff":4,"expectedMatches":1,"sig":"837B50027F30488B8B280200008B413080BB08020000007508"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)","kind":"near","jgRVA":"0x0A256BAA","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FD1000000488B8B280200008B413080BB080200000075"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x0599A69A","jgOff":4,"expectedMatches":1,"sig":"837E50020F8F8E000000498B8E280200008B41304180BE0802000000"}]},
-{"name":"152-linux-arm64","container":"elf-arm64","sites":[{"name":"ManifestV2Handler::MaybeReEnableExtension (shared body)","kind":"bcond","jgRVA":"0x05D64DD8","jgOff":4,"expectedMatches":2,"sig":"1F0900712C020054691641F96A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)","kind":"bcond","jgRVA":"0x05D64F9C","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054091441F90A204839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x05F78874","jgOff":4,"expectedMatches":2,"sig":"1F0900718C010054891641F98A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady (shared body)","kind":"bcond","jgRVA":"0x0696E3C8","jgOff":4,"expectedMatches":2,"sig":"3F090071EC4A0054091541F90A214839283140B98A000037296940B93F050071"}]},
-{"name":"152-x86","container":"pe32","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x06FB7547","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x0299ED6A","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x00A580A6","jgOff":4,"expectedMatches":1,"sig":"837928027F2C8B91640100008B421880B95401000000750C8B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x06FB736D","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x0791012F","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B411880BF5401000000750C8B"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x010851A8","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B411880BB54010000007508"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","jgRVA":"0x018CF394","jgOff":7,"expectedMatches":1,"sig":"8B7D10837810017F0953E8"}]},
-{"name":"152-macos-arm64","container":"macho-arm64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x02218740","jgOff":4,"expectedMatches":1,"sig":"1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x0320635C","jgOff":4,"expectedMatches":1,"sig":"1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"bcond","jgRVA":"0x03FFBD84","jgOff":4,"expectedMatches":1,"sig":"1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x066F0E38","jgOff":4,"expectedMatches":2,"sig":"1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"cbz","jgRVA":"0x01C9C464","jgOff":8,"expectedMatches":1,"sig":"E00314AA9021DE94A0EAFF340B000014F40300AAE8BFC139"}]},
-{"name":"153-macos-arm64","container":"macho-arm64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x0227E868","jgOff":4,"expectedMatches":1,"sig":"1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x031BC304","jgOff":4,"expectedMatches":1,"sig":"1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"bcond","jgRVA":"0x0401C690","jgOff":4,"expectedMatches":1,"sig":"1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x0682D710","jgOff":4,"expectedMatches":2,"sig":"1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"cbz","jgRVA":"0x01B19DE0","jgOff":8,"expectedMatches":1,"sig":"E00314AA1879E99460DFFF340B000014F40300AA"}]},
-{"name":"152-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x01014CBC","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x013591BC","jgOff":4,"expectedMatches":2,"sig":"1F090071EC050054891641F98A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)","kind":"bcond","jgRVA":"0x02C1FD9C","jgOff":4,"expectedMatches":2,"sig":"1F0900710C020054291441F92A204839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x07702AEC","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"}]},
-{"name":"152-chromium-linux","container":"elf","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate)","kind":"short","jgRVA":"0x0923C9D9","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"}]},
-{"name":"152-chromium","container":"pe","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate)","kind":"short","jgRVA":"0x04723915","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"}]},
-{"name":"154-x86","container":"pe32","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08BBA217","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x031C47CA","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B411880BA540100000075088B"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01B51743","jgOff":4,"expectedMatches":2,"sig":"837928027F288B91640100008B421880B95401000000750C8B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08BBA108","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B411880BE540100000075088B"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x093997BF","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B411880BF5401000000750C8B"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x01205788","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B411880BB54010000007508"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","jgRVA":"0x018B41B4","jgOff":7,"expectedMatches":1,"sig":"8B7D10837810017F0953E8"}]},
-{"name":"154-linux","container":"elf","sites":[{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)","kind":"short","jgRVA":"0x0991AA29","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)","kind":"short","jgRVA":"0x0991A6D4","jgOff":4,"expectedMatches":1,"sig":"837E50027F2F554889E5488B8E280200008B413080BE080200"},{"name":"ManifestV2Handler::MaybeReEnableExtension (inlined)","kind":"short","jgRVA":"0x0991A818","jgOff":4,"expectedMatches":1,"sig":"837B50027F30488B8B280200008B413080BB08020000007508"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)","kind":"near","jgRVA":"0x0A37E1CA","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FD1000000488B8B280200008B413080BB080200000075"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x05AB5FFA","jgOff":4,"expectedMatches":1,"sig":"837E50020F8F8E000000498B8E280200008B41304180BE0802000000"},{"name":"IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)","kind":"short","jgRVA":"0x053B0E40","jgOff":4,"expectedMatches":1,"sig":"837950027F2D488B91280200008B423080B90802000000750C"}]},
-{"name":"154-linux-arm64","container":"elf-arm64","sites":[{"name":"ManifestV2Handler::MaybeReEnableExtension (shared body)","kind":"bcond","jgRVA":"0x05E87478","jgOff":4,"expectedMatches":2,"sig":"1F0900712C020054691641F96A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)","kind":"bcond","jgRVA":"0x05E8763C","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054091441F90A204839283140B98A000037296940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x0609B370","jgOff":4,"expectedMatches":2,"sig":"1F0900718C010054891641F98A224839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady (shared body)","kind":"bcond","jgRVA":"0x06AB7470","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"},{"name":"ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)","kind":"bcond","jgRVA":"0x09B77244","jgOff":4,"expectedMatches":1,"sig":"7F0900718C0100544B1541F94C2148396A3140B98C0000376B6940B97F050071"}]},
-{"name":"155","container":"pe","sites":[{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x0155EB53","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x016CB234","jgOff":4,"expectedMatches":1,"sig":"837F50020F8F8E000000488B8F280200008B415080BF080200000075"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x03269A44","jgOff":4,"expectedMatches":2,"sig":"837A50027F37488B8A280200008B415080BA0802000000750B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x084DEA66","jgOff":4,"expectedMatches":1,"sig":"837E50027F30488B8E280200008B415080BE0802000000750B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x084DEC85","jgOff":3,"expectedMatches":1,"sig":"83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x090A7931","jgOff":4,"expectedMatches":1,"sig":"837F50027F51488B8F280200008B415080BF0802000000750F"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","jgRVA":"0x01FF3FFF","jgOff":12,"expectedMatches":1,"sig":"488BBC2420010000837E18017F0A488D4C2448"}]},
-{"name":"155-x86","container":"pe32","sites":[{"name":"MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x011D9EB8","jgOff":4,"expectedMatches":1,"sig":"837B28020F8F840000008B8B640100008B412880BB54010000007508"},{"name":"OnExtensionSystemReady startup loop","kind":"short","jgRVA":"0x01AFBEF3","jgOff":4,"expectedMatches":2,"sig":"837928027F288B91640100008B422880B95401000000750C8B"},{"name":"ShouldBlockExtensionEnable / IsExtensionAffected (shared body)","kind":"short","jgRVA":"0x032F125A","jgOff":4,"expectedMatches":2,"sig":"837A28027F368B8A640100008B412880BA540100000075088B"},{"name":"MaybeReEnableExtension","kind":"short","jgRVA":"0x08F66848","jgOff":4,"expectedMatches":1,"sig":"837E28027F248B8E640100008B412880BE540100000075088B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)","kind":"short","jgRVA":"0x08F66957","jgOff":4,"expectedMatches":1,"sig":"837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"},{"name":"UserMayInstall (inlined)","kind":"short","jgRVA":"0x097626DF","jgOff":4,"expectedMatches":1,"sig":"837F28027F458B8F640100008B412880BF5401000000750C8B"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"short","jgRVA":"0x0189B504","jgOff":7,"expectedMatches":1,"sig":"8B7D10837810017F0953E8"}]},
-{"name":"155-linux","container":"elf","sites":[{"name":"IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)","kind":"short","jgRVA":"0x041AAAE0","jgOff":4,"expectedMatches":1,"sig":"837950027F30488B91280200008B425080B90802000000750F"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)","kind":"near","jgRVA":"0x06835F7D","jgOff":4,"expectedMatches":1,"sig":"837E50020F8F91000000498B8E280200008B41504180BE0802000000"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)","kind":"short","jgRVA":"0x099272C4","jgOff":4,"expectedMatches":1,"sig":"837E50027F32554889E5488B8E280200008B415080BE080200"},{"name":"ManifestV2Handler::MaybeReEnableExtension (inlined)","kind":"short","jgRVA":"0x09927408","jgOff":4,"expectedMatches":1,"sig":"837B50027F33488B8B280200008B415080BB0802000000750B"},{"name":"manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)","kind":"short","jgRVA":"0x09927619","jgOff":3,"expectedMatches":1,"sig":"83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"},{"name":"StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)","kind":"near","jgRVA":"0x0A3DC86A","jgOff":4,"expectedMatches":1,"sig":"837B50020F8FD4000000488B8B280200008B415080BB080200000075"}]},
-{"name":"155-macos-arm64","container":"macho-arm64","sites":[{"name":"StandardManagementPolicyProvider::MustRemainDisabled","kind":"bcond","jgRVA":"0x022BD404","jgOff":4,"expectedMatches":1,"sig":"1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x031F4CA4","jgOff":4,"expectedMatches":1,"sig":"1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected","kind":"bcond","jgRVA":"0x0403B248","jgOff":4,"expectedMatches":1,"sig":"1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x068F3880","jgOff":4,"expectedMatches":2,"sig":"1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"cbz","jgRVA":"0x01B613F4","jgOff":8,"expectedMatches":1,"sig":"E00314AA642EEA9460DFFF340B000014F40300AAE83FC239"}]},
-{"name":"155-linux-arm64","container":"elf-arm64","sites":[{"name":"ManifestV2Handler::MaybeReEnableExtension (shared body)","kind":"bcond","jgRVA":"0x05E7E1E4","jgOff":4,"expectedMatches":2,"sig":"1F0900712C020054691641F96A224839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)","kind":"bcond","jgRVA":"0x05E7E3A8","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054091441F90A204839285140B98A000037298940B93F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x06096308","jgOff":4,"expectedMatches":2,"sig":"1F0900718C010054891641F98A224839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::OnExtensionSystemReady (shared body)","kind":"bcond","jgRVA":"0x06B05764","jgOff":4,"expectedMatches":1,"sig":"3F0900718C010054091541F90A214839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)","kind":"bcond","jgRVA":"0x0A2934B4","jgOff":4,"expectedMatches":1,"sig":"7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071"}]},
-{"name":"154-win-arm64","container":"pe-arm64","sites":[{"name":"ManifestV2Handler::OnExtensionSystemReady","kind":"bcond","jgRVA":"0x010B5620","jgOff":4,"expectedMatches":1,"sig":"5F0900718C0100542A1541F92B214839495140B98B0000374A8940B95F050071"},{"name":"StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)","kind":"bcond","jgRVA":"0x01354B40","jgOff":4,"expectedMatches":2,"sig":"1F0900712C060054891641F98A224839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)","kind":"bcond","jgRVA":"0x02C30AD8","jgOff":4,"expectedMatches":2,"sig":"1F0900710C020054291441F92A204839285140B98A000037298940B93F050071"},{"name":"ManifestV2Handler::MaybeReEnableExtension","kind":"bcond","jgRVA":"0x079DBD98","jgOff":4,"expectedMatches":1,"sig":"1F0900710C020054691641F96A224839285140B98A000037298940B93F050071"},{"name":"LoadChromePolicy: skip FilterSensitivePolicies (honor off-store ExtensionSettings on unmanaged Chrome)","kind":"bcond","jgRVA":"0x01B0E0E8","jgOff":8,"expectedMatches":1,"sig":"881A40B91F0500716C000054E0A30091"}]}
-]}'''
 
 KIND_SHORT, KIND_NEAR, KIND_BCOND = 0, 1, 2
 # featurebyte: not a branch flip. Locates a named permission feature's
@@ -94,6 +77,11 @@ KIND_FEATUREBYTE = 3
 # branch keeps its own existing target and only its conditionality is removed.
 # Used by the Gate B "skip FilterSensitivePolicies" sites on mac-arm64.
 KIND_CBZ = 4
+# tbz: arm64 TBZ/TBNZ w?, #bit, target (0x36/0x37) rewritten to the unconditional
+# B (0x14yyyyyy) with the SAME resolved target - the test-bit sibling of cbz
+# (offset is imm14 at bits 18:5, not imm19). Used by the InstallVerifier off-store
+# gate on arm64 (from_webstore compiles to `ldrb w,[ext,#0x254] ; tbnz w,#3,verified`).
+KIND_TBZ = 5
 VALID_CONTAINERS = ("pe", "pe32", "pe-arm64", "elf", "elf-arm64", "macho-arm64")
 ARM64_CONTAINERS = ("pe-arm64", "elf-arm64", "macho-arm64")
 
@@ -270,8 +258,16 @@ def _read_signature_doc(override):
             raise Mv2Error(f"reading {path}: {e}")
         label = path
     else:
-        raw = EMBEDDED_SIGNATURES
-        label = "embedded tables"
+        # No --signatures and no signatures.json beside the script: fetch the
+        # canonical table from GitHub (there is no embedded fallback).
+        try:
+            req = urllib.request.Request(SIGNATURES_URL, headers={"User-Agent": "chrome-mv2"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                raw = resp.read().decode("utf-8")
+        except (urllib.error.URLError, OSError, ValueError) as e:
+            raise Mv2Error(f"could not fetch signatures from {SIGNATURES_URL}: {e}\n"
+                           f"(pass --signatures PATH or put signatures.json beside the script to run offline)")
+        label = SIGNATURES_URL
     try:
         return json.loads(raw), label
     except Exception as e:
@@ -310,7 +306,7 @@ def import_milestones(override):
             optional = bool(rs.get("optional", False))
             kraw = rs.get("kind")
             kind = {"short": KIND_SHORT, "near": KIND_NEAR, "bcond": KIND_BCOND,
-                    "featurebyte": KIND_FEATUREBYTE, "cbz": KIND_CBZ}.get(kraw)
+                    "featurebyte": KIND_FEATUREBYTE, "cbz": KIND_CBZ, "tbz": KIND_TBZ}.get(kraw)
             if kind is None:
                 raise Mv2Error(f"milestone {name} site '{sname}': unknown kind '{kraw}'")
             if kind == KIND_FEATUREBYTE:
@@ -355,10 +351,10 @@ def import_milestones(override):
                                   stock=sb, patched=pb, verify=verify))
                 continue
             is_arm = container in ARM64_CONTAINERS
-            if kind in (KIND_BCOND, KIND_CBZ) and not is_arm:
+            if kind in (KIND_BCOND, KIND_CBZ, KIND_TBZ) and not is_arm:
                 raise Mv2Error(f"milestone {name} site '{sname}': '{kraw}' is only valid in an arm64 milestone")
-            if kind not in (KIND_BCOND, KIND_CBZ) and is_arm:
-                raise Mv2Error(f"milestone {name} site '{sname}': arm64 milestones use the 'bcond'/'cbz' kinds, not '{kraw}'")
+            if kind not in (KIND_BCOND, KIND_CBZ, KIND_TBZ) and is_arm:
+                raise Mv2Error(f"milestone {name} site '{sname}': arm64 milestones use the 'bcond'/'cbz'/'tbz' kinds, not '{kraw}'")
             sig_text = str(rs.get("sig", ""))
             if not sig_text or len(sig_text) % 2 or not re.fullmatch(r"[0-9A-Fa-f]+", sig_text):
                 raise Mv2Error(f"milestone {name} site '{sname}': sig must be non-empty hexadecimal bytes")
@@ -366,7 +362,7 @@ def import_milestones(override):
             jg_off = rs.get("jgOff")
             if not isinstance(jg_off, int) or isinstance(jg_off, bool) or jg_off < 0 or jg_off >= len(sig):
                 raise Mv2Error(f"milestone {name} site '{sname}': jgOff out of range (sig len {len(sig)})")
-            need = {KIND_SHORT: 2, KIND_NEAR: 6, KIND_BCOND: 4, KIND_CBZ: 4}[kind]
+            need = {KIND_SHORT: 2, KIND_NEAR: 6, KIND_BCOND: 4, KIND_CBZ: 4, KIND_TBZ: 4}[kind]
             if jg_off + need > len(sig):
                 raise Mv2Error(f"milestone {name} site '{sname}': jump runs past the sig")
             # Optional stockOpcode field: the sig bytes at jgOff are the real
@@ -392,8 +388,8 @@ def import_milestones(override):
             elif kind == KIND_NEAR:
                 if expected_stock is not None and sig[jg_off:jg_off + 2] != expected_stock:
                     raise Mv2Error(f"milestone {name} site '{sname}': near stock opcode is not {' '.join(f'{b:02X}' for b in expected_stock)}")
-            if kind == KIND_CBZ and jg_off % 4 != 0:
-                raise Mv2Error(f"milestone {name} site '{sname}': cbz jgOff must be word-aligned (4-byte steps)")
+            if kind in (KIND_CBZ, KIND_TBZ) and jg_off % 4 != 0:
+                raise Mv2Error(f"milestone {name} site '{sname}': {kraw} jgOff must be word-aligned (4-byte steps)")
             if kind == KIND_BCOND:
                 w = int.from_bytes(sig[jg_off:jg_off + 4], "little")
                 if (w & 0xFF00001F) != 0x5400000C:
@@ -402,6 +398,10 @@ def import_milestones(override):
                 w = int.from_bytes(sig[jg_off:jg_off + 4], "little")
                 if (w & 0xFF000000) != 0x34000000:
                     raise Mv2Error(f"milestone {name} site '{sname}': jgOff is not a stock 32-bit CBZ word (0x{w:08X})")
+            if kind == KIND_TBZ:
+                w = int.from_bytes(sig[jg_off:jg_off + 4], "little")
+                if (w & 0x7E000000) != 0x36000000:
+                    raise Mv2Error(f"milestone {name} site '{sname}': jgOff is not a stock TBZ/TBNZ word (0x{w:08X})")
             expected = rs.get("expectedMatches")
             if not isinstance(expected, int) or isinstance(expected, bool) or expected < 1:
                 raise Mv2Error(f"milestone {name} site '{sname}': expectedMatches must be >= 1")
@@ -442,6 +442,22 @@ def _cbz_word_ok(cand_word, sig_word):
     if (cand_word & 0xFC000000) == 0x14000000:
         disp_cand = _sign_extend(cand_word & 0x03FFFFFF, 26)
         disp_ref = _sign_extend((sig_word >> 5) & 0x7FFFF, 19)
+        return disp_cand == disp_ref
+    return False
+
+
+def _tb_word_ok(cand_word, sig_word):
+    """True when cand_word is the stock TBZ/TBNZ or the patched B for the tbz
+    recorded in sig_word. Stock: 0x36/0x37 family, imm14 wild (drift-tolerant),
+    b5/op/bit-position/Rt pinned to the sig's. Patched: unconditional B (0x14)
+    whose resolved target equals the sig tbz's (so a foreign B never reads as
+    'ours'). The AArch64 test-bit sibling of _cbz_word_ok: imm14 (bits 18:5), not
+    imm19."""
+    if (cand_word & 0x7E000000) == 0x36000000:
+        return (cand_word & 0xFFF8001F) == (sig_word & 0xFFF8001F)
+    if (cand_word & 0xFC000000) == 0x14000000:
+        disp_cand = _sign_extend(cand_word & 0x03FFFFFF, 26)
+        disp_ref = _sign_extend((sig_word >> 5) & 0x3FFF, 14)
         return disp_cand == disp_ref
     return False
 
@@ -490,6 +506,12 @@ def sig_matches_at(buf, start, sig, jg_off, kind):
             if (cand & 0xFC000000) != klass:
                 return False
             cbz_branch.add(wpos)
+    elif kind == KIND_TBZ:
+        w0 = start + jg_off
+        word = buf[w0] | (buf[w0 + 1] << 8) | (buf[w0 + 2] << 16) | (buf[w0 + 3] << 24)
+        sig_word = int.from_bytes(sig[jg_off:jg_off + 4], "little")
+        if not _tb_word_ok(word, sig_word):
+            return False
     for k in range(n):
         p = buf[start + k]
         if kind == KIND_SHORT:
@@ -525,7 +547,7 @@ def _build_anchor(sig, jg_off, kind):
     """Longest fixed (unmasked) run in the sig -> a raw anchor for bytes.find.
     Masked = the jg branch window, plus (cbz only) any embedded BL/B word, whose
     displacement is build-specific. Returns (anchor_bytes, anchor_off_within_sig)."""
-    mask_len = {KIND_SHORT: 2, KIND_NEAR: 6, KIND_BCOND: 4, KIND_CBZ: 4}[kind]
+    mask_len = {KIND_SHORT: 2, KIND_NEAR: 6, KIND_BCOND: 4, KIND_CBZ: 4, KIND_TBZ: 4}[kind]
     masked = set(range(jg_off, jg_off + mask_len))
     if kind == KIND_CBZ:
         for wpos in _cbz_branch_words(sig, jg_off):
@@ -1180,6 +1202,27 @@ def apply_flips(buf, flips, apply=True, verbose=False):
                 buf[off:off + 4] = new_w.to_bytes(4, "little")
             applied += 1
             written.append((off, new_w.to_bytes(4, "little")))
+        elif k == KIND_TBZ:
+            w = int.from_bytes(bytes(buf[off:off + 4]), "little")
+            sig_w = int.from_bytes(site.sig[site.jg_off:site.jg_off + 4], "little")
+            if _tb_word_ok(w, sig_w) and (w & 0xFC000000) == 0x14000000:
+                already += 1
+                written.append((off, bytes(buf[off:off + 4])))
+                continue
+            if not ((w & 0x7E000000) == 0x36000000 and (w & 0xFFF8001F) == (sig_w & 0xFFF8001F)):
+                if verbose:
+                    print(f"    {TAG['warn']} Skipped one change - it didn't look the way we expected.")
+                continue
+            # Rewrite TBZ/TBNZ -> unconditional B with the SAME resolved target:
+            # recompute imm26 from the sign-extended imm14 (the field layouts
+            # differ, so the raw bits never carry over).
+            imm14 = _sign_extend((w >> 5) & 0x3FFF, 14)
+            new_w = 0x14000000 | (imm14 & 0x3FFFFFF)
+            stock += 1
+            if apply:
+                buf[off:off + 4] = new_w.to_bytes(4, "little")
+            applied += 1
+            written.append((off, new_w.to_bytes(4, "little")))
         else:  # bcond
             cur = buf[off]
             cond = cur & 0x0F
@@ -1241,6 +1284,15 @@ def classify_flip_states(buf, flips):
             if (w & 0xFF000000) == 0x34000000:
                 stock += 1
             else:  # unconditional B with the sig CBZ's target
+                patched += 1
+        elif k == KIND_TBZ:
+            w = int.from_bytes(bytes(buf[off:off + 4]), "little")
+            sig_w = int.from_bytes(site.sig[site.jg_off:site.jg_off + 4], "little")
+            if not _tb_word_ok(w, sig_w):
+                raise Mv2Error("mixed")
+            if (w & 0x7E000000) == 0x36000000:
+                stock += 1
+            else:  # unconditional B with the sig tbz's target
                 patched += 1
         else:
             nib = buf[off] & 0x0F

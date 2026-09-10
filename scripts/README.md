@@ -16,9 +16,8 @@ Full rationale: [`../mv2-reversing.md`](../mv2-reversing.md) §"Porting to a new
 
 | Script | What it does | Deps |
 | :--- | :--- | :--- |
-| `port_milestone.py` | **Start here to add a version.** One command: learn the build's Extension field offsets, keep only real gates, fold linker-shared bodies into one `expectedMatches=N` site, pick the shortest signature with no build-specific PC-relative immediate, carry site names from `--prev`, and `--merge`/`--sync`. | stdlib only |
+| `port_milestone.py` | **Start here to add a version.** One command: learn the build's Extension field offsets, keep only real gates, fold linker-shared bodies into one `expectedMatches=N` site, pick the shortest signature with no build-specific PC-relative immediate, carry site names from `--prev`, and `--merge` into `signatures.json`. | stdlib only |
 | `audit_signatures.py` | Audit the table for what silently breaks patching: equal-rank ties (two milestones the runtime can't choose between, so it declines), signatures pinned to one build (`pc_relative_spans` flags arm64 `adrp`/`adr`/`BL`/`B` and x86 `lea rip`/`call`/`jmp rel32`), weak anchors, malformed sites. With `--binary`, also reports which milestone would be selected and runs a completeness pass that does **not** use the `cmp,2;jg` finder. | stdlib only |
-| `sync_embedded.py` | Rewrite both embedded fallback tables from `signatures.json`, per entry (adds, updates **and** removals). `--check` reports drift for CI. | stdlib only |
 | `fetch_chrome_binary.py` | Download the stock, gate-bearing binary itself — a channel's current `chrome.dll` (PE64/PE32), Linux `chrome` (ELF), or the macOS universal framework Mach-O (`mac-arm64`, always via Chrome for Testing) — unwrap it and drop it in `_scratch/`, named after the version the **binary** reports (release feeds have advertised a different one). `--version` falls back to Chrome for Testing. | stdlib + 7-Zip |
 | `fetch_symbols.py` | Download the symbols matching a binary — PDB (PE) from the Chromium symbol server, `chrome.debug` (ELF) streamed from the per-version zip, or the macOS dSYM's symtab streamed from `dl.google.com/…/dsym/` (emits `nm`-style names directly). Verifies build identity and discards a mismatch: Chrome-for-Testing builds have no published symbols, and a version's Linux `debug-info` zip belongs to the *official* build. Saves to `_scratch/` (gitignored). | stdlib only |
 | `derive_milestone.py` | The low-level finder: gate sites (`cmp <mv>,2 ; jg`, short **and** near, plus arm64 `bcond`), an unfiltered candidate report, and `--verify` for an existing table. `port_milestone.py` wraps it. | stdlib only |
@@ -72,7 +71,7 @@ present in the binary and covered by nothing.
 ```
 python scripts/fetch_chrome_binary.py --platform win64 --version 155.0.8038.0
 python scripts/port_milestone.py _scratch/chrome-155.0.8038.0-win64.dll \
-       --name 155 --prev 154 --moved 0x30:0x50 --merge --sync
+       --name 155 --prev 154 --moved 0x30:0x50 --merge
 python scripts/audit_signatures.py --binary _scratch/chrome-155.0.8038.0-win64.dll
 python scripts/run_tests.py
 ```
@@ -151,14 +150,11 @@ The long form, for when `port_milestone.py` reports something it could not resol
    ```
    Each site should show `matches=1` (or `2` for a byte-identical shared body).
    A `matches>2` site needs a wider signature.
-4. **Add** the emitted entry to the `milestones` array in
-   `../signatures.json`, then copy the platform entry into the matching embedded
-   table: `$EmbeddedSignatures` in `../chrome-mv2.ps1` for `pe`/`pe32`/`pe-arm64`,
-   or the pre-tokenized `EMBEDDED_SIGNATURES` in `../chrome-mv2.sh` for `elf`
-   (Linux) and `macho-arm64` (macOS).
-   The scripts use an explicit signature path first, then `signatures.json`
-   beside the script, then their embedded table. Keep the JSON and embedded copy
-   synchronized.
+4. **Add** the emitted entry to the `milestones` array in `../signatures.json`.
+   That's the only copy — the scripts fetch `signatures.json` from the GitHub raw
+   URL at runtime (precedence: an explicit `--signatures` path → `signatures.json`
+   beside the script → the URL). There are no embedded tables to keep in sync, but
+   **push `signatures.json`** so the raw URL serves the new milestone.
 5. **Re-verify**: `python scripts/derive_milestone.py <binary> --verify` must
    print `ALL SITES VERIFIED: True`.
 6. **Run the script tests**:
@@ -223,10 +219,10 @@ trunk `LAST_CHANGE` also work; there is **no** Linux-arm64 snapshot). Symbols:
   the Google snapshot these tables target.
 
 Name the entry `<ver>-chromium`
-(+`-linux`/`-macos-arm64`/… per container), keep the container tag unchanged, and
-sync it into the embedded tables like any other milestone. Because Chromium and
-Chrome entries share a container, runtime milestone selection prefers the
-**most-specific full match** (most sites), so neither cross-matches the other.
+(+`-linux`/`-macos-arm64`/… per container) and keep the container tag unchanged.
+Because Chromium and Chrome entries share a container, runtime milestone selection
+prefers the **most-specific full match** (most sites), so neither cross-matches the
+other.
 
 Shipped (single-site unless noted, `--verify`ed on disk): `152-chromium-linux`
 (elf, symbol-derived) and `152-chromium` (pe) — located structurally as the only
@@ -285,50 +281,46 @@ It finds the feature's rule-1 struct (extension_types size 2, a set
 `max_manifest_version`, no location/min), and prints the site dict
 (`structRVA`, `patchOff`, `stock`/`patched`, `verify`). Add it to the target
 milestone as an **`optional`** site so a miss never blocks MV2, then
-`--verify` (reports it as `feat opt`) and `audit_signatures.py --binary`.
-`sync_embedded.py` carries the extra fields into the ps1 embedded table (it is
-`pe`, so it never reaches the ELF/Mach-O `sh` table). The representation is new
-in Chrome 155; 154 and earlier do not carry these structs.
+`--verify` (reports it as `feat opt`) and `audit_signatures.py --binary`. The
+representation is new in Chrome 155; 154 and earlier do not carry these structs.
 
 The masking and match-count rules mirror both runtime scripts:
 `Find-AffectedJgSites` / `Invoke-PatchMilestones` in `chrome-mv2.ps1` and
 `find_site_matches` / `probe_slice` in `chrome-mv2.sh`. A table that
-verifies here must still be synchronized into the appropriate embedded table
-and exercised through the script tests.
+verifies here must still be exercised through the script tests.
 
-## Gate B cross-platform notes (v1.10.0)
+## InstallVerifier gate cross-platform notes (Route A — off-store install, no managed banner)
 
-Gate B ("skip FilterSensitivePolicies", honoring off-store `ExtensionSettings`
-on unmanaged Chrome) is a **required** site (v1.10.0) in every supported
-milestone except Linux (the guard is `#if IS_WIN || IS_MAC` — Linux compiles
-`ShouldFilterSensitivePolicies()` to `return false` and never filters, so it
-needs no gate). A build whose Gate B does not match now reports partial
-(fail-closed) rather than enabling MV2 without ExtensionSettings:
+The InstallVerifier gate (`InstallVerifier::MustRemainDisabled` → force `IsFromStore`)
+lets an off-store extension installed via the **non-policy** external-extensions
+provider stay enabled without the "managed by your organization" banner (full
+rationale: [`../mv2-reversing.md`](../mv2-reversing.md) §8). It **replaced Gate B**,
+which was removed — Gate B needed the `ExtensionSettings` policy route that triggers
+the banner. Enforcement is compiled **only on Windows and macOS**; Linux is `NONE`
+(no gate). All sites are `optional`.
 
-- **pe32 (x86)**: plain `short` `cmp dword [reg+0x10],1 ; jg` — the trust
-  field sits at `+0x10` on x86 (vs `+0x18` on x64). Its signature was
-  **re-derived build-robust** (v1.10.0): the operand-free window
-  `8B7D10837810017F0953E8` (`jgOff 7`), which ends at the `call` opcode so the
-  build-specific `call rel32` operand stays outside the sig — verified unique on
-  152/154.8025/154.8037/155. (Derived from the `ExtensionInstallForcelist`
-  string construction: the function building that 25-byte literal via
-  `movups`/`movdqu` is FilterSensitivePolicies; its guarded E8 caller is
-  `PolicyLoaderWin::LoadChromePolicy`.)
-- **macho-arm64**: `cbz` kind — `mov x0,x20 ; bl SFSP ; cbz w0,<skip> ; b`,
-  rewritten to the unconditional `B` with the same resolved target (imm26
-  recomputed from the sign-extended imm19). Because the CBZ sits between a
-  relative `bl` and a relative `b`, the matcher **masks embedded `BL`/`B` words**
-  (opcode class still checked) and the signature extends past the `b` to an
-  invariant tail (`mov x20,x0 ; ldrsb w8,[sp,#imm]`) for a unique anchor — so it
-  is build-robust rather than pinned to one build. That tail's frame slot is
-  per-milestone (`#0x6f` on 152, `#0x8f` on 153/155), so mac carries both
-  `152-` and `153-macos-arm64` (153 keeps 152's un-shifted bcond layout).
-  `derive_milestone.py --verify` handles the kind; the locator is string-anchored
-  (FSP refs `[BLOCKED]`/CWS/`EnterpriseCheck.InvalidPoliciesDetected` via ADRP+ADD).
-- **pe-arm64**: plain `bcond` — `ldr w,[x20,#0x18] ; cmp #1 ; b.gt`, flipped
-  GT→AL with the existing machinery. The arm64 PE `.pdata` directory holds
-  **8-byte (BeginRVA, UnwindRVA)** entries, not the x64 12-byte
-  RUNTIME_FUNCTION triples — parse accordingly when locating functions.
-- The `stockOpcode` field (short/near kinds) pins the sig's stock opcode at
-  load time; the sig bytes at `jgOff` remain the runtime source of truth.
+- **pe (x64)** / **pe32 (x86)**: `short`, `stockOpcode 0x75` — the inlined
+  `IsFromStore` from_webstore test `test byte[ext+OFF],8 ; jne <verified>`, flipped
+  `jne`→`jmp`. `creation_flags` is at `ext+0x254` (x64) / `ext+0x17c` (x86).
+- **pe-arm64 / macho-arm64**: `tbz` — `ldrb w,[ext,#0x254] ; tbnz w,#3,<verified>`,
+  the `tbnz` rewritten to an unconditional `B` to the same target. The `tbz` kind is
+  the sibling of `cbz`: stock detect `(w & 0x7E000000)==0x36000000`, a matched site
+  pins `(w & 0xFFF8001F)` (family/op/bit-position/Rt) with imm14 wild, patched word
+  `0x14000000 | (sign_extend((w>>5)&0x3FFF,14) & 0x03FFFFFF)` (e.g. `0x37180188` →
+  `0x1400000C`).
+- **macho-arm64**: the unbranded CfT framework dead-code-eliminates the inline
+  (ENFORCE folds to false off-brand), so it must be derived from a **branded**
+  `Google Chrome Framework`. Fetch it off-Mac with
+  `fetch_chrome_binary.py --platform mac-arm64 --branded` (downloads the universal
+  `.dmg`, carves the arm64 slice with 7-Zip), then `fetch_symbols.py --chrome-version`
+  (the consumer dSYM is UUID-matched to that `.dmg`). mac `creation_flags` sits at
+  `ext+0x24c` (not `+0x254` like Windows): `ldrb w,[ext,#0x24c] ; tbnz w,#3,<verified>`.
+
+Deriving: locate `InstallVerifier::MustRemainDisabled` (win64/x86 via the vtable off
+the `"InstallVerifier"` provider-name string, or PDB; arm64 via PDB / structurally),
+find the inlined `from_webstore` test, and `build_site` a window trimmed to exclude
+any RIP-relative/`adrp` immediate. The gate must come from a **branded** binary (the
+`ENFORCE` path is `#if GOOGLE_CHROME_BRANDING`); CfT confirms the offset/structure but
+its flip is a no-op. The `stockOpcode` field (short/near) pins the sig's stock opcode
+at load time; the sig bytes at `jgOff` remain the runtime source of truth.
 
