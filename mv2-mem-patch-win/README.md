@@ -16,6 +16,19 @@ build.bat
 
 ## Install
 
+Easiest — the installer script downloads the matching `version.dll` + signatures,
+drops them next to `chrome.exe`, clears leftover Chrome policies, and offers to
+add uBlock Origin (elevates via UAC):
+
+```powershell
+powershell "irm github.com/Sketchystan1/chrome-mv2-patch/raw/master/chrome-mv2.ps1|iex"
+```
+
+`chrome-mv2.ps1 uninstall` removes it again; `chrome-mv2.ps1 update` refreshes
+signatures.
+
+Manual:
+
 1. Close Chrome.
 2. Copy the matching `version.dll` next to `chrome.exe`.
 3. Start Chrome.
@@ -27,23 +40,15 @@ Remove: close Chrome, delete `version.dll`.
 
 ## Install uBlock Origin (MV2)
 
-Re-enabling MV2 doesn't install the extension. Force-install uBO off-store with an
-elevated PowerShell (writes `HKLM`), then restart Chrome:
+The installer script prompts for this. To do it by hand, force-install uBO
+off-store with an elevated PowerShell (writes `HKLM`), then restart Chrome:
 
 ```powershell
-reg.exe add "HKLM\Software\Policies\Google\Chrome" /v ExtensionSettings /t REG_SZ /d '{"fkgkibajhfbepljeaefdnfnegdcjomkh":{"installation_mode":"normal_installed","update_url":"https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml"}}' /f
+reg.exe add "HKLM\Software\Google\Chrome\Extensions\fkgkibajhfbepljeaefdnfnegdcjomkh" /v update_url /t REG_SZ /d "https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml" /f 
 ```
 
 ## Notes
 
-- Optional config file at `%LOCALAPPDATA%\mv2-mem-patch\config.txt`:
-
-  ```toml
-  # where to get patch data — a URL (default, self-updating) or a local file path
-  signatures = "https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json"
-
-  # max wait for the first-launch download, in ms (default 8000)
-  download_timeout_ms = 8000
-  ```
 - Debug: run **DebugView** and watch for `[mv2patch]` lines.
+- The signatures URL is a compile-time constant; the `%LOCALAPPDATA%\mv2-mem-patch\signatures.json` cache and self-heal are unchanged.
 - Not Microsoft-signed, so strict enterprise/AV setups may block it.

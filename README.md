@@ -1,6 +1,10 @@
 # Chrome MV2 Extension Patcher
 
-Re-enables Manifest V2 extensions in Chrome by patching a few bytes. See [`mv2-reversing.md`](mv2-reversing.md) for details.
+Re-enables Manifest V2 extensions in Chrome. On **Windows** it installs a small
+`version.dll` that patches Chrome's MV2 switch *in memory* every launch —
+`chrome.dll` on disk is never touched, so Widevine DRM keeps working. On Linux
+and macOS it byte-patches the binary. See [`mv2-reversing.md`](mv2-reversing.md)
+for details.
 
 ## Supported Versions
 
@@ -26,6 +30,11 @@ Run in Terminal:
 powershell "irm github.com/Sketchystan1/chrome-mv2-patch/raw/master/chrome-mv2.ps1|iex"
 ```
 
+Installs `version.dll` and prompts to add uBlock Origin. Other commands:
+`chrome-mv2.ps1 uninstall` (remove it), `chrome-mv2.ps1 update` (refresh
+signatures), `chrome-mv2.ps1 check` (status). Add `-Ublock` to install uBO
+without prompting.
+
 ### Linux, macOS
 
 ```bash
@@ -40,10 +49,11 @@ python3 chrome-mv2.py
 
 ## Testing
 
-Install uBlock Original mv2 with auto update.
-Powershell (admin):
+The Windows installer offers to add uBlock Origin (MV2). To force-install it by
+hand off-store, elevated PowerShell (then restart Chrome):
+
 ```powershell
-reg.exe add "HKLM\Software\Policies\Google\Chrome" /v ExtensionSettings /t REG_SZ /d '{"fkgkibajhfbepljeaefdnfnegdcjomkh":{"installation_mode":"normal_installed","update_url":"https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml"}}' /f
+reg.exe add "HKLM\Software\Google\Chrome\Extensions\fkgkibajhfbepljeaefdnfnegdcjomkh" /v update_url /t REG_SZ /d "https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml" /f
 ```
 
 

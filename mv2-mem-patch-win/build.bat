@@ -16,6 +16,12 @@ cd /d "%~dp0"
 set "WHAT=%~1"
 if not defined WHAT set "WHAT=all"
 
+rem ---- Version (single source of truth for VERSIONINFO + artifact names) -----
+rem Keep in sync with CHANGELOG.md. MV2_VER is the dotted string; MV2_VERC is the
+rem comma numeric for FILEVERSION/PRODUCTVERSION. Passed to rc.exe via /D defines.
+set "MV2_VER=1.11.1"
+set "MV2_VERC=1,11,1,0"
+
 rem ---- Detours source (fetch only what is missing; folds in get-detours) -----
 set "SRC=detours\src"
 set "REF=main"
@@ -121,15 +127,29 @@ cl /nologo /c /O2 /W3 /EHsc /std:c++20 /FIintrin.h /DUNICODE /D_UNICODE ^
   /I detours\src /Fo%OBJ%\mv2-mem-patch.obj mv2-mem-patch.cpp
 if errorlevel 1 ( echo   [fail] %ARCH%: patch compile failed. & endlocal & exit /b 1 )
 
+rem Version resource. Version comes from MV2_VER / MV2_VERC (single source of
+rem truth above); rc.exe is on PATH after vcvarsall. \" escapes the quotes so the
+rem string defines arrive at rc as quoted literals.
+rc /nologo /fo "%OBJ%\version.res" /DMV2_VER_STR=\"%MV2_VER%.0\" /DMV2_VERC=%MV2_VERC% /DMV2_PROD=\"%MV2_VER%\" version.rc
+if errorlevel 1 ( echo   [fail] %ARCH%: resource compile failed. & endlocal & exit /b 1 )
+
 link /nologo /DLL /OUT:%OBJ%\version.dll /IMPLIB:%OBJ%\version.lib ^
   /DYNAMICBASE /MANIFEST:NO /MACHINE:%MACH% kernel32.lib user32.lib winhttp.lib ^
   %OBJ%\detours.obj %OBJ%\disasm.obj %OBJ%\image.obj %OBJ%\modules.obj ^
-  %OBJ%\%DISOL%.obj %OBJ%\mv2-mem-patch.obj
+  %OBJ%\%DISOL%.obj %OBJ%\mv2-mem-patch.obj %OBJ%\version.res
 if errorlevel 1 ( echo   [fail] %ARCH%: link failed. & endlocal & exit /b 1 )
 
-rem Keep only the final DLL; drop object/import-lib/export temporaries.
-del /q "%OBJ%\*.obj" "%OBJ%\version.lib" "%OBJ%\version.exp" >nul 2>nul
+rem Keep only the final DLL; drop object/import-lib/export/resource temporaries.
+del /q "%OBJ%\*.obj" "%OBJ%\version.lib" "%OBJ%\version.exp" "%OBJ%\version.res" >nul 2>nul
 
 echo   [ok] %OBJ%\version.dll
+
+rem Package this arch's DLL as a version-stamped zip. bsdtar (Windows 10+) infers
+rem the zip format from the .zip suffix; -C keeps version.dll at the archive root.
+set "ZIP=build\mv2-mem-patch-win-v%MV2_VER%-%ARCH%.zip"
+if exist "%ZIP%" del /q "%ZIP%" >nul 2>nul
+tar -a -c -f "%ZIP%" -C "%OBJ%" version.dll
+if errorlevel 1 ( echo   [fail] %ARCH%: packaging failed. & endlocal & exit /b 1 )
+echo   [ok] %ZIP%
 endlocal
 exit /b 0

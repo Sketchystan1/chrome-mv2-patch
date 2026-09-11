@@ -15,12 +15,11 @@
 //    flipped to jmp in the loaded image — synchronously on Chrome's own
 //    loading thread, before any chrome.dll code can execute. Any featurebyte
 //    sites (a .rdata data byte, e.g. webRequestBlocking for MV3) are flipped too.
-// 4. The signatures source can be set by config.txt in
-//    %LOCALAPPDATA%\mv2-mem-patch\ (a TOML file). When it names an https URL and
-//    no local store fully matches this Chrome, a background thread refreshes the
-//    signatures store for the NEXT launch — the fetch never runs under the loader
-//    lock. The store is signatures.json next to chrome.exe, or
-//    %LOCALAPPDATA%\mv2-mem-patch\signatures.json when that Application dir is
+// 4. The signatures source is a compile-time constant (kDefaultSigUrl, a GitHub
+//    raw https URL). When no local store fully matches this Chrome, a background
+//    thread refreshes the signatures store for the NEXT launch — the fetch never
+//    runs under the loader lock. The store is signatures.json next to chrome.exe,
+//    or %LOCALAPPDATA%\mv2-mem-patch\signatures.json when that Application dir is
 //    read-only (a Program Files install running unelevated); both are read at
 //    launch, so a system-wide Chrome self-heals without any elevated step.
 // 5. On a truly fresh machine (no store exists at all) the background refresh
@@ -413,14 +412,9 @@ static std::vector<Milestone> ParseMilestones(const JV& doc,
 }
 
 // ---------------------------------------------------------------------------
-// Config: config.txt in %LOCALAPPDATA%\mv2-mem-patch\ (the same
-// per-user directory as the fallback signatures store). TOML keys:
-//   signatures — an https URL or a local path. See PatchChromeDll for how a URL
-//                is honored off the loader lock.
-//   download_timeout_ms — ms bound on the one-time first-launch download (see below).
-//   browser / args  — accepted for mv2-launcher compatibility, but ignored here
-//                (this DLL is already inside the chosen Chrome, and cannot safely
-//                rewrite its command line; use the launcher for flags).
+// Config: compile-time only — no file is read. signatures is kDefaultSigUrl (a
+// GitHub raw https URL); see PatchChromeDll for how a URL is honored off the
+// loader lock. downloadTimeoutMs bounds the one-time first-launch download.
 // ---------------------------------------------------------------------------
 
 static const wchar_t* kDefaultSigUrl =
@@ -432,18 +426,13 @@ struct Config {
 };
 
 // Per-user, always-writable data directory: %LOCALAPPDATA%\mv2-mem-patch. Holds
-// the config file and the fallback signatures store — used because a Program
-// Files install's Application dir is read-only to unelevated Chrome.
+// the fallback signatures store — used because a Program Files install's
+// Application dir is read-only to unelevated Chrome.
 static std::wstring UserStoreDir() {
   wchar_t buf[MAX_PATH];
   DWORD n = GetEnvironmentVariableW(L"LOCALAPPDATA", buf, MAX_PATH);
   if (n == 0 || n >= MAX_PATH) return std::wstring();
   return std::wstring(buf) + L"\\mv2-mem-patch";
-}
-
-static std::wstring ConfigPath() {
-  std::wstring d = UserStoreDir();
-  return d.empty() ? std::wstring() : d + L"\\config.txt";
 }
 
 static std::wstring Utf8ToWide(const std::string& s) {
@@ -473,71 +462,6 @@ static std::vector<BYTE> ReadFileBytes(const wchar_t* path) {
   }
   CloseHandle(f);
   return out;
-}
-
-// TOML basic ("...", with \\ \" \n \t \r escapes) or literal ('...') string.
-static bool TomlStr(const std::string& in, std::string& out) {
-  if (in.size() < 2) return false;
-  char q = in[0];
-  if (q != '"' && q != '\'') return false;
-  out.clear();
-  for (size_t i = 1; i < in.size(); i++) {
-    char ch = in[i];
-    if (q == '"' && ch == '\\' && i + 1 < in.size()) {
-      char nx = in[++i];
-      switch (nx) {
-        case 'n': out += '\n'; break;
-        case 't': out += '\t'; break;
-        case 'r': out += '\r'; break;
-        default:  out += nx;  // \\ and \" land here
-      }
-      continue;
-    }
-    if (ch == q) return true;
-    out += ch;
-  }
-  return false;
-}
-
-// Read %LOCALAPPDATA%\mv2-mem-patch\config.txt. "signatures"
-// (source) and "download_timeout_ms" (first-launch curl bound, 1000–60000) are
-// honored; "browser" and "args" are accepted (launcher compatibility) and ignored.
-static Config LoadConfig() {
-  Config c;
-  std::wstring cfgPath = ConfigPath();
-  if (cfgPath.empty()) return c;
-  std::vector<BYTE> raw = ReadFileBytes(cfgPath.c_str());
-  if (raw.empty()) return c;
-  std::string text((const char*)raw.data(), raw.size());
-  auto trim = [](std::string& s) {
-    size_t a = s.find_first_not_of(" \t\r");
-    if (a == std::string::npos) { s.clear(); return; }
-    size_t b = s.find_last_not_of(" \t\r");
-    s = s.substr(a, b - a + 1);
-  };
-  for (size_t i = 0; i < text.size();) {
-    size_t nl = text.find('\n', i);
-    std::string line =
-        text.substr(i, (nl == std::string::npos ? text.size() : nl) - i);
-    i = (nl == std::string::npos) ? text.size() : nl + 1;
-    trim(line);
-    if (line.empty() || line[0] == '#') continue;
-    size_t eq = line.find('=');
-    if (eq == std::string::npos) continue;
-    std::string key = line.substr(0, eq), val = line.substr(eq + 1);
-    trim(key);
-    trim(val);
-    std::string s;
-    if (key == "signatures" && TomlStr(val, s) && !s.empty())
-      c.signatures = Utf8ToWide(s);
-    else if (key == "download_timeout_ms") {
-      // Bare TOML integer, ms. Clamp to a sane range so a bad value can never
-      // stall Chrome startup for long, nor make the seed give up instantly.
-      long v = strtol(val.c_str(), nullptr, 10);
-      if (v >= 1000 && v <= 60000) c.downloadTimeoutMs = (int)v;
-    }
-  }
-  return c;
 }
 
 // Fetch a file over https into memory. Refuses plain http; hard size cap. Only
@@ -1178,7 +1102,7 @@ static void PatchChromeDll(HMODULE chromeDll) {
 
     std::wstring appDir    = AppDir();
     std::wstring localStore = appDir + L"\\signatures.json";
-    Config cfg = LoadConfig();
+    Config cfg;
     bool isUrl = _wcsnicmp(cfg.signatures.c_str(), L"https://", 8) == 0;
 
     // Where to read the gate table for THIS run. A URL source always reads the

@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.12.0] - 2026-09-11
+
+- Windows: `chrome-mv2.ps1` now installs the `version.dll` proxy (in-memory
+  patch, DRM-safe) instead of byte-patching `chrome.dll`.
+- New commands: `uninstall`, `update`; uBlock Origin (MV2) opt-in during install.
+
 ## [1.11.1] - 2026-09-11
 
 - Fix 154 

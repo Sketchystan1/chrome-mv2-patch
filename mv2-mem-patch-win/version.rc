@@ -1,0 +1,50 @@
+// version.rc - Windows VERSIONINFO for the mv2-mem-patch version.dll proxy.
+//
+// SINGLE SOURCE OF TRUTH for the version is build.bat (MV2_VER / MV2_VERC),
+// which passes it here via rc.exe /D defines:
+//   /DMV2_VER_STR=\"1.11.1.0\"  /DMV2_VERC=1,11,1,0  /DMV2_PROD=\"1.11.1\"
+// The #ifndef fallbacks below mirror the current release so that a bare
+// `rc version.rc` (no /D defines) still compiles.
+//
+// Branding is HONEST and deliberately does NOT impersonate Microsoft: an
+// unsigned DLL claiming Microsoft identity is both deceptive and an AV red flag.
+#include <windows.h>
+
+#ifndef MV2_VERC
+#define MV2_VERC 1,11,1,0
+#endif
+#ifndef MV2_VER_STR
+#define MV2_VER_STR "1.11.1.0"
+#endif
+#ifndef MV2_PROD
+#define MV2_PROD "1.11.1"
+#endif
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    MV2_VERC
+ PRODUCTVERSION MV2_VERC
+ FILEFLAGSMASK  VS_FFI_FILEFLAGSMASK
+ FILEFLAGS      0x0L
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_DLL
+ FILESUBTYPE    VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904B0"
+        BEGIN
+            VALUE "CompanyName",      "chrome-mv2-patch"
+            VALUE "FileDescription",  "Chrome MV2 compatibility shim (version.dll proxy)"
+            VALUE "FileVersion",      MV2_VER_STR
+            VALUE "InternalName",     "version.dll"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 chrome-mv2-patch. MIT-licensed. Not affiliated with Microsoft or Google."
+            VALUE "OriginalFilename", "version.dll"
+            VALUE "ProductName",      "chrome-mv2-patch mem-patch"
+            VALUE "ProductVersion",   MV2_PROD
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

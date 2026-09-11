@@ -1,100 +1,97 @@
 <#
 .SYNOPSIS
-    Chrome Manifest V2 Patcher - single-file, self-contained PowerShell
-    port for Windows (chrome.dll only; x64, x86, and arm64).
+    Chrome Manifest V2 installer - single-file, self-contained PowerShell for
+    Windows (x64, x86, and arm64).
 
 .DESCRIPTION
-    Re-enables Manifest V2 extension support in Google Chrome (chrome.dll) by
-    flipping the inlined IsExtensionAffected manifest-version
-    checks. Same milestone engine, same match/decline semantics, same .bak
-    handling. Handles x64/x86 (PE, PE32) and Windows-on-ARM (PE32+ arm64, machine
-    0xAA64).
+    Re-enables Manifest V2 extension support in Google Chrome by installing the
+    version.dll proxy (see mv2-mem-patch-win/). Chrome statically imports
+    version.dll and loads it before chrome.dll; version.dll patches the MV2 gate
+    IN MEMORY every launch, so chrome.dll on disk is never modified and Widevine
+    DRM keeps working. The DLL self-refreshes its signatures for new Chrome
+    versions, so a single install survives Chrome updates.
 
-    The Windows signature tables live in the project's signatures.json on GitHub
-    and are fetched (raw) at runtime, so the script text alone is enough to run
-    straight from a URL (see the irm|iex example). A signatures.json installed
-    next to the script takes precedence; another file may be selected with
-    -Signatures.
+    WHAT 'install' DOES:
+      1. If Chrome was patched by the old on-disk byte-patcher (a chrome.dll.bak
+         is present), restore chrome.dll to stock first - the version.dll method
+         needs an unmodified chrome.dll for DRM.
+      2. Download the matching version.dll (x64/x86/arm64) from the project's
+         GitHub Releases, plus signatures.json.
+      3. Place version.dll next to chrome.exe, and signatures.json beside it (and
+         in the per-user store the DLL falls back to).
+      4. Clear any HKLM Chrome policies (removes the "managed by your
+         organization" banner left by the old policy route).
+      5. Optionally force-install uBlock Origin (MV2) off-store via the
+         Extensions registry key.
 
-    HOW IT PATCHES: for each gate, first probe the RVA recorded in the table -
-    cheap, and exact for the build the table was derived from. On a miss, scan
-    the whole .text section for the gate's byte signature; that is what relocates
-    a gate cleanly across point releases. A site counts as located only when its
-    signature matches EXACTLY expectedMatches times: a different count means the
-    layout moved, so the site is declined rather than guessed at. The milestone
-    with the most located sites wins; one that locates none is declined outright.
-    Then flip the gates, clear the Authenticode directory and recompute the PE
-    checksum.
+    Other commands: 'uninstall' removes version.dll and the uBO key (and restores
+    chrome.dll if an old .bak is present); 'update' force-refreshes
+    signatures.json; 'check' is a read-only status report and never elevates.
 
-    CARDINAL RULE: never delete or blank a call and never invent control flow -
-    only flip the direction of an existing branch to its EXISTING target.
+    The signature table lives in the project's signatures.json on GitHub and is
+    fetched (raw) at runtime, so the script text alone is enough to run straight
+    from a URL (see the irm|iex example). A signatures.json installed next to the
+    script takes precedence; another file may be selected with -Signatures.
 
-      JG_SHORT  0x7F disp8       -> 0xEB disp8        (jmp short, same disp8)
-      JG_NEAR   0x0F 0x8F disp32 -> 0x90 0xE9 disp32  (nop ; jmp near, same disp32)
-      BCOND     arm64 b.gt (cond GT 0xC) -> b.al (cond AL 0xE), imm19 preserved
-                (the low nibble of the B.cond word's byte0; one byte changes)
+    RESTORE OF THE OLD METHOD: an old-style on-disk patch is undone from the
+    chrome.dll.bak snapshot the old patcher saved. The backup is accepted only
+    when it validates as clean stock (via the signatures table) for the installed
+    build, then written back atomically - the same conservative .bak handling as
+    before. This script no longer byte-patches chrome.dll itself.
 
-    PERFORMANCE NOTE - why this file is shaped the way it is:
-    chrome.dll is ~285 MB. A per-byte loop in PowerShell is ~1000x slower than a
-    compiled scan, so every hot loop lives in inline C# compiled via Add-Type.
-    That compile is lazy - paid once per run, by the first operation that needs
-    it (a full .text scan or a checksum pass). Trying to beat the scan with
-    [Array]::IndexOf as a native memchr does NOT work: the signatures' first byte
-    0x83 occurs ~3,000,000 times in .text (once per 84 bytes) and each candidate
-    costs a ~36 us PowerShell-to-.NET round trip - ~109 s per signature versus a
-    ~4.5 s compiled full-section scan. The remaining cost is the ~285 MB file
-    being read/copied/written a few times; see the README for which passes are
-    structural and which could be traded against safety.
-
-    FILE MAP, top to bottom: parameters -> embedded signature tables -> console
-    output -> inline C# hot loops -> signature loading + validation -> PE image
-    layer -> patching engine -> Windows host glue (file locks, elevation) ->
-    install discovery -> interactive prompts -> orchestration -> entry point.
-
-    .PARAMETER Command
-    patch (default), restore, or check. Check is read-only and never elevates.
+.PARAMETER Command
+    install (default), uninstall, update, or check. patch/restore are accepted as
+    aliases for install/uninstall. check is read-only and never elevates.
 
 .PARAMETER Path
-    Target chrome.dll. Omitted: installed channels are listed to pick from.
+    Target chrome.dll (or its Application dir). Omitted: installed channels are
+    listed to pick from.
 
 .PARAMETER Yes
     Allow closing a running Chrome under -Quiet. An interactive run needs no
-    permission: it closes the selected browser and reopens it with the same tabs.
+    permission: it closes the selected browser and reopens it when done.
 
-    .PARAMETER Quiet
-    Do not pause on error ('Press any key to exit') (for scripting).
+.PARAMETER Quiet
+    Do not prompt or pause (for scripting). Without -Ublock, uBO is not installed.
 
-    .PARAMETER NoReopen
-    Leave the browser closed after the change instead of reopening it with the
-    tabs it had.
+.PARAMETER NoReopen
+    Leave the browser closed afterwards instead of reopening it with its tabs.
 
-    .PARAMETER AllowPartial
-    Developer-only override which permits writing a milestone when only some of
-    its sites were located. The safe default is to decline partial layouts.
+.PARAMETER Ublock
+    Install uBlock Origin (MV2) without prompting.
 
-    .PARAMETER ForceRestore
+.PARAMETER NoUblock
+    Skip the uBlock Origin prompt (do not install it).
+
+.PARAMETER Arch
+    Force the version.dll architecture (x64, x86, or arm64) instead of detecting
+    it from chrome.exe.
+
+.PARAMETER ForceRestore
     Restore even when the backup identity does not match the installed binary.
 
-    .PARAMETER Signatures
-    Explicit external signatures.json path. External data is never loaded from
-    the current directory implicitly.
+.PARAMETER Signatures
+    Explicit external signatures.json path or URL. External data is never loaded
+    from the current directory implicitly.
 
 .EXAMPLE
     .\chrome-mv2.ps1
 .EXAMPLE
-    .\chrome-mv2.ps1 patch "C:\Program Files\Google\Chrome\Application\151.0.7922.109\chrome.dll" -Yes
+    .\chrome-mv2.ps1 install -Ublock
 .EXAMPLE
-    .\chrome-mv2.ps1 restore
+    .\chrome-mv2.ps1 uninstall
+.EXAMPLE
+    .\chrome-mv2.ps1 update
 .EXAMPLE
     # Run directly from a URL (self-elevates via UAC; keep the window open):
-    powershell -ExecutionPolicy Bypass -c "irm https://example.com/chrome-mv2.ps1 | iex"
+    powershell -ExecutionPolicy Bypass -c "irm https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/chrome-mv2.ps1 | iex"
 #>
 
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('patch', 'restore', 'check')]
-    [string]$Command = 'patch',
+    [ValidateSet('install', 'uninstall', 'update', 'check', 'patch', 'restore')]
+    [string]$Command = 'install',
 
     [Parameter(Position = 1)]
     [string]$Path,
@@ -104,6 +101,15 @@ param(
 
     [Alias('q')]
     [switch]$Quiet,
+
+    # Install uBlock Origin (MV2) without prompting; -NoUblock skips it. Neither:
+    # ask interactively (and default to no under -Quiet).
+    [switch]$Ublock,
+    [switch]$NoUblock,
+
+    # Force the version.dll architecture instead of detecting it from chrome.exe.
+    [ValidateSet('x64', 'x86', 'arm64')]
+    [string]$Arch,
 
     [switch]$AllowPartial,
 
@@ -123,10 +129,23 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$AppVersion      = '1.10.1'
+$AppVersion      = '1.12.0'
 $SignaturesFile  = 'signatures.json'
 $SignaturesUrl   = 'https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json'
+# version.dll release assets: <base>/version-<arch>.dll (x64|x86|arm64).
+$DllReleaseBase  = 'https://github.com/Sketchystan1/chrome-mv2-patch/releases/latest/download'
+# Off-store uBlock Origin (MV2) force-install.
+$UboId           = 'fkgkibajhfbepljeaefdnfnegdcjomkh'
+$UboUpdateUrl    = 'https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml'
+# The DLL's per-user data dir: config + the fallback signatures store it reads
+# when chrome.exe sits in a read-only Application dir.
+$Mv2DataDir      = Join-Path $env:LOCALAPPDATA 'mv2-mem-patch'
 $script:CsLoaded = $false
+
+# Whether a command was typed (vs the default): the interactive menu only asks
+# what to do on a bare run. Captured at script scope where $PSBoundParameters
+# reflects the script's own arguments.
+$script:CommandExplicit = $PSBoundParameters.ContainsKey('Command')
 
 # Embedded Windows signature tables - see the .DESCRIPTION note. An external
 # signatures.json next to the script overrides this if present.
@@ -1834,10 +1853,16 @@ function Invoke-SelfElevate {
         if ($ResolvedTargetPath)  { $argv += (Get-QuotedArg $ResolvedTargetPath) }
         if ($Yes)   { $argv += '-Yes' }
         if ($Quiet) { $argv += '-Quiet' }
+        if ($Ublock)   { $argv += '-Ublock' }
+        if ($NoUblock) { $argv += '-NoUblock' }
+        if ($Arch)  { $argv += '-Arch'; $argv += $Arch }
         if ($AllowPartial) { $argv += '-AllowPartial' }
         if ($ForceRestore) { $argv += '-ForceRestore' }
         if ($NoReopen) { $argv += '-NoReopen' }
-        if ($Signatures) { $argv += '-Signatures'; $argv += (Get-QuotedArg ([IO.Path]::GetFullPath($Signatures))) }
+        if ($Signatures) {
+            $sigArg = if (Test-Path -LiteralPath $Signatures -PathType Leaf) { [IO.Path]::GetFullPath($Signatures) } else { $Signatures }
+            $argv += '-Signatures'; $argv += (Get-QuotedArg $sigArg)
+        }
         $argv += '-Relaunched'
 
         Write-Info 'Asking for admin access...'
@@ -2358,9 +2383,16 @@ function Get-InstallDetails {
 
     if (-not $Channel) { $Channel = Get-ChannelFromPath $TargetPath }
 
+    # version.dll + signatures.json live next to chrome.exe (the Application dir),
+    # one level up from the versioned chrome.dll. Empty for a bare/offline dll.
+    $exePath = Get-BrowserExePath $TargetPath
+    $appDir  = if ($exePath) { Split-Path -Parent $exePath } else { '' }
+
     return [pscustomobject]@{
         Channel   = $Channel
         Path      = $TargetPath
+        ExePath   = $exePath
+        AppDir    = $appDir
         Version   = $version
         Running   = $running
         Holders   = $holders.Count
@@ -2463,57 +2495,54 @@ function Select-Install {
     Write-Info ("Found {0} browser{1}." -f $count, $(if ($count -ne 1) { 's' }))
     Show-InstallTable $Installs
 
-    # 'check' is read-only and must never turn into a write, so it neither offers
-    # nor honors the restore switch; only 'patch' may divert to restore. The verb
-    # keeps the menu honest for whichever command is actually running.
-    $verb = switch ($script:Command) { 'check' { 'Check' } 'restore' { 'Restore' } default { 'Patch' } }
-    $allowRestore = ($script:Command -eq 'patch')
+    # Pick the browser first. An explicitly-typed command (or the elevated
+    # relaunch, which forwards one) skips the action menu below.
     $range = if ($count -eq 1) { '1' } else { "1-$count" }
 
     Write-Host ''
-    Write-Host "$($C.Bold)Select command:$($C.Reset)"
+    Write-Host "$($C.Bold)Select browser:$($C.Reset)"
     Write-Host ''
-    Write-Host "  [$range]  $verb browser"
-    if ($allowRestore) { Write-Host '  [r]    Restore patched' }
-    Write-Host '  [c]    Use custom path'
+    Write-Host "  [$range]  Choose the numbered browser above"
+    Write-Host '  [c]    Use a custom path'
     Write-Host '  [q]    Quit'
 
+    $sel = $null
     while ($true) {
         $line = (Read-Host "`nChoice").Trim()
-
         if ($line -in 'q', 'Q') { return $null }
-        if ($allowRestore -and $line -in 'r', 'R') {
-            $script:Command = 'restore'
-            if ($count -eq 1) { return $Installs[0] }
-            # Restore targets a specific browser, so ask which one.
-            while ($true) {
-                $restoreLine = (Read-Host "`nRestore which browser? [1-$count, q=cancel]").Trim()
-                if ($restoreLine -in 'q', 'Q') {
-                    Write-Info 'Restore cancelled.'
-                    return $null
-                }
-                $rn = 0
-                if ([int]::TryParse($restoreLine, [ref]$rn) -and $rn -ge 1 -and $rn -le $count) {
-                    return $Installs[$rn - 1]
-                }
-                Write-Err "Enter a number between 1 and $count, or q to cancel."
-            }
-        }
         if ($line -in 'c', 'C') {
-            $pick = Read-CustomPath
-            if ($pick) { return $pick }
+            $sel = Read-CustomPath
+            if ($sel) { break }
             continue
         }
-        if ($count -eq 1 -and $line -eq '') { return $Installs[0] }
+        if ($count -eq 1 -and $line -eq '') { $sel = $Installs[0]; break }
         $n = 0
-        if ([int]::TryParse($line, [ref]$n) -and $n -ge 1 -and $n -le $count) {
-            return $Installs[$n - 1]
-        }
-        $restoreHint = if ($allowRestore) { 'r to restore, ' } else { '' }
-        if ($count -eq 1) {
-            Write-Err "Press Enter to accept, ${restoreHint}c for a custom path, or q to quit."
-        } else {
-            Write-Err "Enter a number between 1 and $count, ${restoreHint}c for a custom path, or q to quit."
+        if ([int]::TryParse($line, [ref]$n) -and $n -ge 1 -and $n -le $count) { $sel = $Installs[$n - 1]; break }
+        if ($count -eq 1) { Write-Err 'Press Enter to accept, c for a custom path, or q to quit.' }
+        else { Write-Err "Enter a number between 1 and $count, c for a custom path, or q to quit." }
+    }
+
+    # A command given on the command line wins; only a bare run asks what to do.
+    if ($script:CommandExplicit) { return $sel }
+
+    Write-Host ''
+    Write-Host "$($C.Bold)What would you like to do?$($C.Reset)"
+    Write-Host ''
+    Write-Host '  [i]  Install / repair MV2         (default)'
+    Write-Host '  [u]  Uninstall (remove version.dll + uBlock Origin)'
+    Write-Host '  [s]  Update signatures'
+    Write-Host '  [k]  Check status'
+    Write-Host '  [q]  Quit'
+    while ($true) {
+        $act = (Read-Host "`nChoice").Trim().ToLower()
+        switch ($act) {
+            ''  { $script:Command = 'install';   return $sel }
+            'i' { $script:Command = 'install';   return $sel }
+            'u' { $script:Command = 'uninstall'; return $sel }
+            's' { $script:Command = 'update';    return $sel }
+            'k' { $script:Command = 'check';     return $sel }
+            'q' { return $null }
+            default { Write-Err 'Enter i, u, s, k, or q.' }
         }
     }
 }
@@ -2567,142 +2596,291 @@ function Resolve-Target {
     return $picked
 }
 
-# patch: consent -> unlock -> read -> backup policy -> flip gates -> finalize ->
-# write. Returns a process exit code (0 = patched, 1 = nothing written).
-function Invoke-Patch {
+# ============================================================================
+# version.dll installer. The old on-disk byte-patcher is gone; 'install' drops
+# the version.dll proxy next to chrome.exe (chrome.dll stays stock, so DRM
+# works), clears leftover machine policies, and optionally force-installs uBO.
+# ============================================================================
+
+# PE machine -> arch label, read from the file header only (no full read).
+function Get-PeArch {
+    param([string]$Path)
+    try {
+        $hdr = [byte[]]::new(4096)
+        $fs = [IO.File]::OpenRead($Path)
+        try { $n = $fs.Read($hdr, 0, $hdr.Length) } finally { $fs.Dispose() }
+        if ($n -lt 64 -or $hdr[0] -ne 0x4D -or $hdr[1] -ne 0x5A) { return '' }
+        $e = [int][BitConverter]::ToUInt32($hdr, 0x3C)
+        if ($e + 6 -gt $n) { return '' }
+        if ($hdr[$e] -ne 0x50 -or $hdr[$e + 1] -ne 0x45) { return '' }
+        switch ([BitConverter]::ToUInt16($hdr, $e + 4)) {
+            0x8664  { return 'x64' }
+            0x014C  { return 'x86' }
+            0xAA64  { return 'arm64' }
+            default { return '' }
+        }
+    } catch { return '' }
+}
+
+# The arch of the version.dll to install: -Arch wins, else chrome.exe's machine
+# (falling back to chrome.dll for a bare copy).
+function Get-ChromeArch {
+    param($Target, [string]$Override)
+    if ($Override) { return $Override }
+    $probe = if ($Target.PSObject.Properties['ExePath'] -and $Target.ExePath) { $Target.ExePath } else { $Target.Path }
+    return (Get-PeArch $probe)
+}
+
+# The Application dir (next to chrome.exe) where version.dll + signatures.json
+# go. Empty for a bare/offline chrome.dll with no chrome.exe beside it.
+function Get-AppDir {
+    param($Target)
+    if ($Target.PSObject.Properties['AppDir'] -and $Target.AppDir) { return $Target.AppDir }
+    $exe = Get-BrowserExePath $Target.Path
+    if ($exe) { return (Split-Path -Parent $exe) }
+    return ''
+}
+
+function Get-RemoteFile {
+    param([string]$Uri, [string]$OutFile)
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    $old = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'
+    try   { Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $OutFile -ErrorAction Stop }
+    catch { throw "Download failed for ${Uri}: $_" }
+    finally { $ProgressPreference = $old }
+}
+
+# Fetch + validate signatures.json and write it where the DLL looks: next to
+# chrome.exe, and the per-user fallback store. -Signatures (path or URL) wins.
+function Save-Signatures {
+    param([string]$AppDir)
+    Write-Info 'Fetching signatures...'
+    if ($Signatures -and (Test-Path -LiteralPath $Signatures -PathType Leaf)) {
+        $raw = Get-Content -LiteralPath $Signatures -Raw
+        $src = $Signatures
+    } else {
+        $src = if ($Signatures) { $Signatures } else { $SignaturesUrl }
+        try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+        try   { $resp = Invoke-WebRequest -UseBasicParsing -Uri $src }
+        catch { throw "Couldn't fetch signatures from ${src}: $_" }
+        $raw = $resp.Content
+        if ($raw -is [byte[]]) { $raw = [Text.Encoding]::UTF8.GetString($raw) }
+    }
+    try   { $doc = $raw | ConvertFrom-Json }
+    catch { throw "Signatures data from ${src} is not valid JSON." }
+    $peCount = 0
+    if ($doc.PSObject.Properties['milestones']) {
+        foreach ($m in @($doc.milestones)) { if ([string]$m.container -in 'pe', 'pe32', 'pe-arm64') { $peCount++ } }
+    }
+    if ($peCount -eq 0) { throw "Signatures from ${src} have no Windows (pe) tables." }
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes([string]$raw)
+    Write-AtomicFile -TargetPath (Join-Path $AppDir 'signatures.json') -Buf $bytes
+    try {
+        if (-not (Test-Path -LiteralPath $Mv2DataDir -PathType Container)) {
+            New-Item -ItemType Directory -Path $Mv2DataDir -Force | Out-Null
+        }
+        Write-AtomicFile -TargetPath (Join-Path $Mv2DataDir 'signatures.json') -Buf $bytes
+    } catch { Write-Warn "Couldn't write the per-user signatures copy: $_" }
+    Write-Ok ("Signatures saved ({0} Windows table(s))." -f $peCount)
+}
+
+# Wipe the Chrome machine-policy subtree in BOTH registry views. This clears the
+# old ExtensionSettings policy route and the "managed by your organization"
+# banner it left. reg.exe /reg:64|/reg:32 forces the view regardless of the
+# host's own bitness.
+function Remove-ChromePolicies {
+    $key = 'HKLM\Software\Policies\Google\Chrome'
+    $removed = $false
+    foreach ($view in '64', '32') {
+        & reg.exe query $key "/reg:$view" *>$null
+        if ($LASTEXITCODE -eq 0) {
+            & reg.exe delete $key /f "/reg:$view" *>$null
+            if ($LASTEXITCODE -eq 0) { $removed = $true }
+            else { Write-Warn "Couldn't remove Chrome policies ($view-bit view)." }
+        }
+    }
+    if ($removed) { Write-Ok 'Removed Chrome machine policies (clears the managed-UI banner).' }
+    else { Write-Info 'No Chrome machine policies to remove.' }
+}
+
+# Off-store uBlock Origin (MV2). Written to BOTH the native and 32-bit views so
+# 64-bit Chrome (which reads external extensions through the 32-bit view) and any
+# 32-bit build both see it.
+function Add-UboExtension {
+    $key = "HKLM\Software\Google\Chrome\Extensions\$UboId"
+    $ok = $true
+    foreach ($view in '64', '32') {
+        & reg.exe add $key /v update_url /t REG_SZ /d $UboUpdateUrl /f "/reg:$view" *>$null
+        if ($LASTEXITCODE -ne 0) { $ok = $false; Write-Warn "reg add for uBlock Origin failed ($view-bit view)." }
+    }
+    if ($ok) { Write-Ok 'uBlock Origin (MV2) will install on the next launch.' }
+}
+
+function Remove-UboExtension {
+    $key = "HKLM\Software\Google\Chrome\Extensions\$UboId"
+    $removed = $false
+    foreach ($view in '64', '32') {
+        & reg.exe query $key "/reg:$view" *>$null
+        if ($LASTEXITCODE -eq 0) {
+            & reg.exe delete $key /f "/reg:$view" *>$null
+            if ($LASTEXITCODE -eq 0) { $removed = $true }
+        }
+    }
+    if ($removed) { Write-Ok 'Removed the uBlock Origin registry entry.' }
+}
+
+# y/n prompt honoring a default. Callers must not reach this under -Quiet.
+function Read-YesNo {
+    param([string]$Question, [bool]$Default = $false)
+    $suffix = if ($Default) { '[Y/n]' } else { '[y/N]' }
+    while ($true) {
+        $ans = (Read-Host "$Question $suffix").Trim().ToLower()
+        if ($ans -eq '')            { return $Default }
+        if ($ans -in 'y', 'yes')    { return $true }
+        if ($ans -in 'n', 'no')     { return $false }
+        Write-Err 'Please answer y or n.'
+    }
+}
+
+# install: undo any old on-disk patch -> download version.dll (+ signatures) ->
+# place next to chrome.exe -> clear policies -> optional uBO. Returns 0 on
+# success, 1 if nothing was installed.
+function Invoke-Install {
     param($Target, [bool]$AssumeYes)
 
-    Write-Info 'Checking chrome.dll...'
-    $buf = [IO.File]::ReadAllBytes($Target.Path)
-    if ($buf.Length -eq 0) { Write-Err 'That file is empty.'; return 1 }
-
-    $img = Open-Image $buf
-    $chromeVer = Get-ChromeVersion -Target $Target
-    $targetIdentity = Get-PeIdentity -Buf $buf -Img $img
-    $targetHash = $targetIdentity.SHA256
-
-    $milestones = @(Import-Milestones | Where-Object { $_.Container -eq $img.Format })
-    if ($milestones.Count -eq 0) {
-        Write-Warn "This kind of Chrome isn't supported yet - nothing was changed."
-        Show-LayoutCandidates -Buf $buf -Img $img
+    $appDir = Get-AppDir $Target
+    if (-not $appDir) {
+        Write-Err "Couldn't find chrome.exe next to this Chrome - nowhere to install version.dll."
         return 1
     }
 
-    # Recognize the build up front so the signature table it uses is reported
-    # before the backup policy runs. The matcher accepts stock and already-
-    # patched bytes alike, so this works whether or not the target is patched.
-    # Declines (unrecognized / tied / partial without -AllowPartial) stay silent
-    # here - the backup policy and the apply pass below print their own reasons.
-    Write-Info 'Searching for MV2 signatures...'
-    $recognized = Invoke-PatchMilestones -Buf $buf -Img $img -Milestones $milestones `
-        -AllowPartial $AllowPartial.IsPresent -Apply $false 6>$null
-    if ($recognized.Status -ne 0 -and -not $recognized.Reason) {
-        Write-Ok ("Found matching signatures ({0}, {1} gates)." -f $recognized.Milestone, $recognized.Located)
-    }
-
-    # Backups are accepted only when they parse as clean stock and describe the
-    # same PE build. A patched/unsigned target can never become a new baseline.
+    # (1) A stock chrome.dll is required for DRM, so undo an old byte-patch first.
     $backupPath = Get-BackupPath $Target.Path
-    if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
-        if (-not (Test-LikelyStock -Img $img -Buf $buf)) {
-            Write-Err "There's no backup yet, and this Chrome has already been changed."
-            Write-Host '    Reinstall Chrome first so we can save a clean backup.'
+    if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
+        Write-Info 'An old-style on-disk patch was found - restoring the original chrome.dll first...'
+        $rc = Invoke-Restore -Target $Target -AssumeYes $AssumeYes
+        if ($rc -ne 0) { Write-Err 'Could not restore the original chrome.dll - stopping so DRM is not left broken.'; return 1 }
+    } elseif ((Get-PatchStateQuick $Target.Path) -eq 'patched') {
+        Write-Warn "chrome.dll looks modified, but there's no backup to restore it."
+        Write-Host '    MV2 will still work; reinstall Chrome if Widevine DRM (Netflix, etc.) misbehaves.'
+    }
+
+    # (2) Download the matching version.dll + signatures.
+    $arch = Get-ChromeArch -Target $Target -Override $Arch
+    if (-not $arch) {
+        Write-Err "Couldn't detect Chrome's architecture. Re-run with -Arch x64, x86, or arm64."
+        return 1
+    }
+    $url = "$DllReleaseBase/version-$arch.dll"
+    $tmpDll = Join-Path ([IO.Path]::GetTempPath()) ('version-' + $arch + '-' + [Guid]::NewGuid().ToString('N') + '.dll')
+    try {
+        Write-Info "Downloading version.dll ($arch)..."
+        Get-RemoteFile -Uri $url -OutFile $tmpDll
+        $gotArch = Get-PeArch $tmpDll
+        if ($gotArch -ne $arch) {
+            Write-Err "The downloaded version.dll is '$gotArch', not '$arch' - not installing it."
             return 1
         }
-        $stockLayout = Get-CleanStockLayout -Buf $buf -Img $img -Milestones $milestones `
-            -AllowPartialLayout $AllowPartial.IsPresent
-        if (-not $stockLayout.Clean) {
-            Write-Err "There's no backup yet, and this doesn't look like an untouched Chrome."
+        $dllBytes = [IO.File]::ReadAllBytes($tmpDll)
+        if ($dllBytes.Length -eq 0) { Write-Err 'The downloaded version.dll is empty.'; return 1 }
+
+        # (3) Close Chrome so version.dll is unlocked, then place it + signatures.
+        if (-not (Request-TargetUnlock -Target $Target -AssumeYes $AssumeYes)) {
+            Write-Err 'Chrome is still open - close it and try again.'
             return 1
         }
-        Write-Info 'Creating backup...'
-        Save-BackupSnapshot -TargetPath $Target.Path -BackupPath $backupPath -Buf $buf -Identity $targetIdentity
-        $backup = Read-ValidatedBackup $backupPath
+        Write-Info 'Installing version.dll...'
+        Write-AtomicFile -TargetPath (Join-Path $appDir 'version.dll') -Buf $dllBytes
+        # Signatures are a prefetch convenience - the DLL fetches them itself on
+        # first launch, so a hiccup here must not fail an otherwise-good install.
+        try   { Save-Signatures -AppDir $appDir }
+        catch { Write-Warn ("Couldn't prefetch signatures (" + $_.Exception.Message + "); Chrome fetches them on first launch.") }
+        Write-Ok "Installed version.dll ($arch) next to chrome.exe."
+    } catch {
+        Write-Err ("Install failed: " + $_.Exception.Message)
+        if ("$($_.Exception.Message)" -match '404|Not Found') {
+            Write-Host '    No published build for this architecture yet. Try again later.'
+        }
+        return 1
+    } finally {
+        if (Test-Path -LiteralPath $tmpDll -PathType Leaf) { Remove-Item -LiteralPath $tmpDll -Force -ErrorAction SilentlyContinue }
+    }
+
+    # (4) Clear machine policies (managed banner + old policy route).
+    Remove-ChromePolicies
+
+    # (5) Optional off-store uBlock Origin (MV2).
+    $doUbo = if ($Ublock) { $true }
+             elseif ($NoUblock) { $false }
+             elseif ($Quiet) { $false }
+             else { Read-YesNo 'Also install uBlock Origin (MV2)?' $false }
+    if ($doUbo) { Add-UboExtension } else { Write-Info 'Skipping uBlock Origin.' }
+
+    Write-Host ''
+    Write-Success 'Manifest V2 is enabled. Chrome re-applies the fix in memory every launch.'
+    return 0
+}
+
+# uninstall: remove version.dll + the uBO key + the per-user store, and restore
+# chrome.dll from an old-style backup if one is present.
+function Invoke-Uninstall {
+    param($Target, [bool]$AssumeYes)
+
+    $appDir = Get-AppDir $Target
+    $dllPath = if ($appDir) { Join-Path $appDir 'version.dll' } else { '' }
+    $hasDll = ($dllPath -and (Test-Path -LiteralPath $dllPath -PathType Leaf))
+    $backupPath = Get-BackupPath $Target.Path
+    $hasBak = (Test-Path -LiteralPath $backupPath -PathType Leaf)
+
+    if ($hasDll) {
+        if (-not (Request-TargetUnlock -Target $Target -AssumeYes $AssumeYes)) {
+            Write-Err 'Chrome is still open - close it and try again.'
+            return 1
+        }
+        Write-Info 'Removing version.dll...'
+        try   { Remove-Item -LiteralPath $dllPath -Force -ErrorAction Stop; Write-Ok 'version.dll removed.' }
+        catch { Write-Err "Couldn't delete version.dll: $_"; return 1 }
     } else {
-        try {
-            $backup = Read-ValidatedBackup $backupPath
-        } catch {
-            Write-Err "The backup couldn't be verified: $_"
-            return 1
-        }
-        if (-not (Test-LikelyStock -Img $backup.Img -Buf $backup.Buf)) {
-            Write-Err "The backup doesn't look like an original Chrome, so I won't use it."
-            return 1
-        }
-        $backupLayout = Get-CleanStockLayout -Buf $backup.Buf -Img $backup.Img -Milestones $milestones `
-            -AllowPartialLayout $AllowPartial.IsPresent
-        if (-not $backupLayout.Clean) {
-            Write-Err "The backup doesn't look like an untouched Chrome."
-            return 1
-        }
-
-        if (-not (Test-SameBuildIdentity -A $targetIdentity -B $backup.Identity)) {
-            if (-not (Test-LikelyStock -Img $img -Buf $buf)) {
-                Write-Err "Chrome was updated, but this copy has already been changed."
-                Write-Host '    Reinstall or update Chrome so we can start from a clean copy.'
-                return 1
-            }
-            $newStockLayout = Get-CleanStockLayout -Buf $buf -Img $img -Milestones $milestones `
-                -AllowPartialLayout $AllowPartial.IsPresent
-            if (-not $newStockLayout.Clean) {
-                Write-Err "This updated Chrome isn't fully supported yet."
-                return 1
-            }
-            Write-Info 'Chrome was updated - saving a fresh backup...'
-            Save-BackupSnapshot -TargetPath $Target.Path -BackupPath $backupPath -Buf $buf -Identity $targetIdentity
-            $backup = Read-ValidatedBackup $backupPath
-        } elseif ($backup.Legacy) {
-            Save-BackupSnapshot -TargetPath $Target.Path -BackupPath $backupPath -Buf $backup.Buf -Identity $backup.Identity
-        }
+        Write-Info 'No version.dll to remove.'
     }
 
-    $buf = [byte[]]$backup.Buf.Clone()
-    $img = Open-Image $buf
+    Remove-UboExtension
 
-    Write-Info 'Applying patch...'
-    $patch = Invoke-PatchMilestones -Buf $buf -Img $img -Milestones $milestones `
-        -AllowPartial $AllowPartial.IsPresent -Apply $true -Version $chromeVer 6>$null
-    if ($patch.Status -eq 0) {
-        Write-Err 'Something went wrong while preparing the change - nothing was changed.'
+    if (Test-Path -LiteralPath $Mv2DataDir -PathType Container) {
+        try   { Remove-Item -LiteralPath $Mv2DataDir -Recurse -Force -ErrorAction Stop; Write-Ok 'Removed the per-user data folder.' }
+        catch { Write-Warn "Couldn't remove ${Mv2DataDir}: $_" }
+    }
+    if ($appDir) {
+        $sig = Join-Path $appDir 'signatures.json'
+        if (Test-Path -LiteralPath $sig -PathType Leaf) { Remove-Item -LiteralPath $sig -Force -ErrorAction SilentlyContinue }
+    }
+
+    # Leave the machine fully clean: undo an old on-disk patch too.
+    if ($hasBak) {
+        Write-Info 'Restoring chrome.dll from the old-style backup...'
+        $rc = Invoke-Restore -Target $Target -AssumeYes $AssumeYes
+        if ($rc -ne 0) { return $rc }
+    }
+
+    Write-Host ''
+    Write-Success 'Removed. Chrome is back to normal.'
+    return 0
+}
+
+# update: force-refresh signatures.json in both stores (next-launch effect).
+function Invoke-Update {
+    param($Target)
+    $appDir = Get-AppDir $Target
+    if (-not $appDir) {
+        Write-Err "Couldn't find chrome.exe next to this Chrome - nowhere to save signatures."
         return 1
     }
-
-    $msg = if ($patch.Status -eq 1) { 'Patch applied successfully.' } else { 'Chrome was already patched (no change needed).' }
-    Write-Ok $msg
-
-    Complete-Image -Img $img -Buf $buf
-    if (-not (Test-PatchOutput -Buf $buf -Img $img -Patch $patch)) {
-        Write-Err 'Something went wrong while preparing the change - nothing was changed.'
-        return 1
-    }
-
-    $preparedHash = Get-ByteHash $buf
-    if ($preparedHash -eq $targetHash) {
-        Write-Success 'Already done - no change was needed.'
-        return 0
-    }
-    if ($targetHash -ne $backup.Identity.SHA256) {
-        Write-Err "This Chrome has other changes we didn't make, so we won't overwrite it."
-        Write-Host '    Reinstall Chrome, or check the file yourself, then try again.'
-        return 1
-    }
-
-    if (-not (Request-TargetUnlock -Target $Target -AssumeYes $AssumeYes)) {
-        Write-Err 'Chrome is still open - close it and try again.'
-        return 1
-    }
-    # Write-AtomicFile reads the written bytes back and verifies them against
-    # $preparedHash before the atomic Replace, so the target already equals the
-    # prepared image on success - no post-write re-read/re-hash is needed.
-    Write-Target -TargetPath $Target.Path -Buf $buf -ExpectedCurrentHash $targetHash -KnownBufHash $preparedHash
-
-    if ($patch.Full) {
-        Write-Ok 'Manifest V2 is enabled.'
-    } else {
-        Write-Host "$script:TagWarning Only part of the change was applied ($($patch.Located)/$($patch.Total))."
-        Write-Host "          $($patch.Total - $patch.Located) part(s) couldn't be found, so this may not fully work."
-        Write-Host '          Please report your Chrome version. To undo: .\chrome-mv2.ps1 restore'
-    }
+    try { Save-Signatures -AppDir $appDir }
+    catch { Write-Err ("Update failed: " + $_.Exception.Message); return 1 }
+    Write-Host ''
+    Write-Success 'Signatures updated. They take effect the next time Chrome starts.'
     return 0
 }
 
@@ -2765,38 +2943,49 @@ function Invoke-Restore {
     return 0
 }
 
+# Read-only status: what's installed and any old-method leftovers. Never writes,
+# never elevates. Returns 0 when version.dll is installed, else 1.
 function Invoke-Check {
     param($Target)
-    $buf = [IO.File]::ReadAllBytes($Target.Path)
-    if ($buf.Length -eq 0) { Write-Err 'That file is empty.'; return 1 }
-    $img = Open-Image $buf
-    $chromeVer = Get-ChromeVersion -Target $Target
-    $identity = Get-PeIdentity -Buf $buf -Img $img
 
-    $milestones = @(Import-Milestones | Where-Object { $_.Container -eq $img.Format })
-    $probe = Invoke-PatchMilestones -Buf $buf -Img $img -Milestones $milestones -AllowPartial $true -Apply $false -Version $chromeVer 6>$null
-    if ($probe.Status -eq 0) {
-        if ($probe.Reason -match 'tied') { Write-Warn "Couldn't tell which Chrome version this is." }
-        else { Write-Warn "This Chrome version isn't recognized yet." }
+    $appDir = Get-AppDir $Target
+    $installed = $false
+    if ($appDir) {
+        $dll = Join-Path $appDir 'version.dll'
+        if (Test-Path -LiteralPath $dll -PathType Leaf) {
+            $installed = $true
+            $a = Get-PeArch $dll
+            Write-Ok ("version.dll is installed ({0})." -f $(if ($a) { $a } else { 'unknown arch' }))
+        } else {
+            Write-Info 'version.dll is not installed.'
+        }
+        if (Test-Path -LiteralPath (Join-Path $appDir 'signatures.json') -PathType Leaf) {
+            Write-Ok 'signatures.json is present next to chrome.exe.'
+        } elseif (Test-Path -LiteralPath (Join-Path $Mv2DataDir 'signatures.json') -PathType Leaf) {
+            Write-Info 'signatures.json is in the per-user store (the DLL refreshes it on launch).'
+        } else {
+            Write-Info 'No signatures.json yet (the DLL fetches it on first launch).'
+        }
     } else {
-        $state = if ($probe.Stock -gt 0 -and $probe.Already -gt 0) { 'partly patched' } elseif ($probe.Stock -gt 0) { 'not patched yet' } else { 'already patched' }
-        Write-Ok ("This is Chrome {0} - {1}." -f (Get-ChromeLabel -Version $chromeVer -Milestone $probe.Milestone), $state)
+        Write-Warn "Couldn't find chrome.exe next to this Chrome."
     }
 
-    $backupPath = Get-BackupPath $Target.Path
-    if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
-        try {
-            $backup = Read-ValidatedBackup $backupPath
-            Write-Ok 'A backup is saved.'
-        } catch { Write-Warn 'A backup exists but looks damaged.' }
-    } else { Write-Info 'No backup saved yet.' }
+    $uboKey = "HKLM\Software\Google\Chrome\Extensions\$UboId"
+    $uboFound = $false
+    foreach ($view in '64', '32') { & reg.exe query $uboKey "/reg:$view" *>$null; if ($LASTEXITCODE -eq 0) { $uboFound = $true } }
+    if ($uboFound) { Write-Ok 'uBlock Origin (MV2) is registered to auto-install.' } else { Write-Info 'uBlock Origin is not registered.' }
 
-    # Exit-code contract (kept in step with chrome-mv2.sh): 0 = a complete,
-    # internally consistent layout was recognized, whether stock or patched;
-    # non-zero = no complete layout matched, or it was mixed/partial. This is
-    # deliberately NOT a patched-vs-stock detector - read the printed
-    # state=stock|patched|mixed line for that distinction.
-    return $(if ($probe.Full) { 0 } else { 1 })
+    $polFound = $false
+    foreach ($view in '64', '32') { & reg.exe query 'HKLM\Software\Policies\Google\Chrome' "/reg:$view" *>$null; if ($LASTEXITCODE -eq 0) { $polFound = $true } }
+    if ($polFound) { Write-Warn 'Chrome machine policies are set (may show a "managed by your organization" banner).' }
+
+    if (Test-Path -LiteralPath (Get-BackupPath $Target.Path) -PathType Leaf) {
+        Write-Warn 'An old-style chrome.dll backup is present (install/uninstall will restore it).'
+    } elseif ((Get-PatchStateQuick $Target.Path) -eq 'patched') {
+        Write-Warn 'chrome.dll appears modified by the old byte-patcher (no backup found).'
+    }
+
+    return $(if ($installed) { 0 } else { 1 })
 }
 
 # ============================================================================
@@ -2831,6 +3020,10 @@ function Invoke-Main {
 
     Write-Banner
 
+    # patch/restore are accepted as aliases for install/uninstall.
+    if ($Command -eq 'patch')      { $script:Command = 'install' }
+    elseif ($Command -eq 'restore') { $script:Command = 'uninstall' }
+
     # Resolve before elevation. Read-only checks never need admin, and an
     # offline/user-owned copy should not cause a UAC prompt merely because the
     # normal Program Files installation does.
@@ -2844,7 +3037,12 @@ function Invoke-Main {
 
     if ($Command -eq 'check') { return (Invoke-Check -Target $target) }
 
-    $needsElevation = -not (Test-TargetDirectoryWritable -TargetPath $target.Path)
+    # install/uninstall write HKLM (policies + uBO), so they always need admin;
+    # update only writes files, so it needs admin only when the Application dir
+    # is read-only. The probe is where version.dll / signatures.json will go.
+    $appDirForElev = Get-AppDir $target
+    $elevProbe = if ($appDirForElev) { Join-Path $appDirForElev 'version.dll' } else { $target.Path }
+    $needsElevation = ($Command -in 'install', 'uninstall') -or (-not (Test-TargetDirectoryWritable -TargetPath $elevProbe))
     if ($needsElevation -and -not (Test-Elevated) -and -not $env:MV2_TEST_NO_ELEVATION) {
         # Loop guard: -Relaunched means we ALREADY tried to elevate. If we are
         # still not admin, report and stop instead of spawning again.
@@ -2866,7 +3064,7 @@ function Invoke-Main {
         return 1
     }
 
-    # Patch and restore close the browser themselves, right before the write.
+    # install and uninstall close the browser themselves, right before the write.
     # What it takes to put it back has to be read BEFORE that: the launcher next
     # to the target, and the flags the running browser was started with. Done
     # here rather than in the parent of an elevated run, so the reopen happens in
@@ -2882,8 +3080,11 @@ function Invoke-Main {
         }
     }
 
-    $code = if ($Command -eq 'restore') { Invoke-Restore -Target $target -AssumeYes $Yes.IsPresent }
-            else { Invoke-Patch -Target $target -AssumeYes $Yes.IsPresent }
+    $code = switch ($Command) {
+        'uninstall' { Invoke-Uninstall -Target $target -AssumeYes $Yes.IsPresent }
+        'update'    { Invoke-Update -Target $target }
+        default     { Invoke-Install -Target $target -AssumeYes $Yes.IsPresent }
+    }
 
     # Reopen only what this run actually closed. A browser still holding the file
     # was never closed (nothing needed writing, or the close was refused), and a

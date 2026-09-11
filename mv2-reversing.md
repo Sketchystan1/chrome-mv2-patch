@@ -310,14 +310,21 @@ from the 152 family.
 Verified/derived against branded builds: 152 pe / pe-arm64 / macho-arm64 on branded 153
 (win64, win-arm64, mac-arm64); `154-x86` on branded 153 win32 (`jgRVA 0x0319D797`);
 `155-x86` on branded beta `154.0.8037.17` win32 (`jgRVA 0x032F4E47`); `154-win-arm64` on
-branded beta `154.0.8037.17` win-arm64. **Corrections (this pass):** `154-x86` and
-`155-x86` had `jgRVA` mistakenly copied from `152-x86` (`0x032EFE77`, which matched no
-real build — scan-fallback had been masking it); `154-win-arm64`'s whole **sig** was
-copied from `152-win-arm64` and matched **nothing** on real late-154 arm64 (the
-`ldr x0,[x19,#0x3c8]` after the `tbnz` shifted to `[x19,#8]`) — re-derived to
-`0851493988011837600640F9E80F40F9` @ `0x02CCF568`. `152-x86`, `155` pe and
-`155-macos-arm64` keep their recorded hints (no branded build of those exact
-layouts was fetchable to re-verify; all resolve via scan). The
+branded beta `154.0.8037.17` win-arm64; `155` pe on branded beta `154.0.8037.17` win64
+(`jgRVA 0x032F4553`); `155-macos-arm64` on branded **Canary 155.0.8052.0** mac framework
+(`jgRVA 0x029206F8`). **Corrections (this pass):** `154-x86` and `155-x86` had `jgRVA`
+mistakenly copied from `152-x86` (`0x032EFE77`, which matched no real build — scan-fallback
+had been masking it); `155-macos-arm64` had `jgRVA` copied from `152-macos-arm64`
+(`0x0294FDDC`) though its **sig was correct** (matches uniquely, just relocated to
+`0x029206F8`); `154-win-arm64`'s whole **sig** was copied from `152-win-arm64` and matched
+**nothing** on real late-154 arm64 (the `ldr x0,[x19,#0x3c8]` after the `tbnz` shifted to
+`[x19,#8]`) — re-derived to `0851493988011837600640F9E80F40F9` @ `0x02CCF568`. Only
+**`152-x86`** keeps its unverified hint (`0x032EFE77`) — no branded 152.x win-x86 is
+fetchable (the stable installer auto-serves 153; CfT is unbranded), and the value is a
+distinct one that the others copied *from*, so it is plausibly the correct 152.x original;
+it resolves via scan regardless. **Branded-mac sourcing:** the beta universal DMG 404s, but
+the **Canary** DMG works (`dl.google.com/chrome/mac/universal/canary/GoogleChromeCanary.dmg`)
+and is a shifted (155-family) branded build. The
 **`mv2-mem-patch-win`** DLL applies these in-process — its short-flip path was fixed
 to honor `stockOpcode` (use the sig's own byte at `jgOff`, not a hardcoded `0x7F`) so
 the `jne` gate applies, and it gained the `tbz` kind for arm64.
