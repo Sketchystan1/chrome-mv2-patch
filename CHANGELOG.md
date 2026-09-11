@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.11.1] - 2026-09-11
+
+- Fix 154 
+
 ## [1.11.0] - 2026-09-11
 
 - Enable webRequestBlocking MV3.

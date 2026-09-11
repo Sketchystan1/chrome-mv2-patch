@@ -149,15 +149,23 @@ Architectural notes that matter more than the raw bytes:
   to byte-identical bodies (`expectedMatches=2`) or ICF to one address
   (`expectedMatches=1`). Always sweep **both** `jg` encodings — `MustRemainDisabled`
   went `near`.
-- **The +0x20 field shift at 154.0.8037.** The inlined manifest-version member moved
-  (arm64 `[Xn,#0x30]→#0x50`; x64 inner `MOV EAX,[RCX+0x30]→+0x50`; outer `+0x228`
-  unchanged). So per platform: **152/153** = un-shifted, **154.0.8037+/155** =
-  shifted. Every 154 build is therefore bracketed — early-154 matches the 152-family
-  table, late-154 matches the 155-family — so **no standalone `154` table is needed**
-  on x64/x86/linux/mac; the win64 `154` table was removed in v1.10.1 as dead weight
-  that risked a tie. `154-win-arm64` stays because there is no `155-win-arm64`; the
-  early-154 `154-x86`/`154-linux` stay because early-154 diverges from 152 on those
-  codegens.
+- **The +0x20 field shift within 154 (between 154.0.8011 and ~154.0.8030).** The
+  inlined manifest-version member moved (arm64 `[Xn,#0x30]→#0x50`; x64 inner
+  `MOV EAX,[RCX+0x30]→+0x50`; outer `+0x228` unchanged). So per platform: **152/153 +
+  early-154** = un-shifted, **late-154/155** = shifted. Empirically (win64):
+  `154.0.8011.0` is un-shifted, `154.0.8030.0`/`.8035.0` are shifted — the boundary is
+  well before 8037 (8037 is merely the branded-beta build used to derive the shifted
+  tables). Late-154 and 155 share the `155`-family table; **early-154 needs its own
+  table** where it diverges from 152. `154-x86`/`154-linux` cover early-154 there.
+  **The win64 `154` table (removed in v1.10.1) was re-added**: early-154 win64 is
+  un-shifted but its `ShouldBlockExtensionEnable` body splits into two diverged-register
+  copies (`rdx 837A50…` + `rcx 837950…`, each `expectedMatches=1`) that the 152 table's
+  folded `expectedMatches=2` site cannot match — so early-154 win64 scored only 5/6 on
+  `152` and **declined**. The re-added `154` table (7 core sites, verified full-match on
+  `154.0.8011.0`, 5/7 partial on 153 and 1/7 on late-154 so no tie) fixes it; it carries
+  core gates only (no branded InstallVerifier — no branded un-shifted-154 build exists —
+  and no 155-era webRequestBlocking). `154-win-arm64` stays because there is no
+  `155-win-arm64`.
 - **macOS no longer needs a per-milestone table.** When Gate B existed, its `cbz`
   tail (`ldrsb w8,[sp,#imm]`) frame slot moved between 152 (`#0x6f`) and 153/155
   (`#0x8f`), forcing a separate `153-macos-arm64` (152 bcond + the 153 cbz). With Gate
@@ -289,8 +297,27 @@ the site does not match must never fail the core patch).
 | macho-arm64 | `tbz` | `ldrb w,[ext,#0x24c] ; tbnz w,#3,<verified>` → `tbnz`→`B` (same target); mac `creation_flags` is at `ext+0x24c`, **not** `+0x254` like Windows |
 | elf / elf-arm64 | — | compiled out (`ENFORCE=NONE`) |
 
-Verified on branded 153 (win64, win-arm64) and CfT 155.0.8038.0 (win64, x86); the x86
-and arm64 sigs are build-robust and reused across 152/154/155 via signature scan. The
+Because enforcement is `#if GOOGLE_CHROME_BRANDING`, **Chrome for Testing (unbranded)
+dead-code-eliminates the gate** (`ShouldEnforce()` folds to false), so each site can
+only be derived/verified against a **branded** build — current stable/beta (the
+version-less installer/MSI) or the branded mac DMG; CfT `--version` cannot see it. Each
+`jgRVA` is a per-build fast-path hint; the **signature scan is authoritative** and finds
+the gate on any build where the sig is present. The sigs are **not shift-stable** — a
+sig word that encodes a manifest member offset changes across the +0x20 shift — so the
+shifted-layout tables must be derived from a shifted-layout branded build, not copied
+from the 152 family.
+
+Verified/derived against branded builds: 152 pe / pe-arm64 / macho-arm64 on branded 153
+(win64, win-arm64, mac-arm64); `154-x86` on branded 153 win32 (`jgRVA 0x0319D797`);
+`155-x86` on branded beta `154.0.8037.17` win32 (`jgRVA 0x032F4E47`); `154-win-arm64` on
+branded beta `154.0.8037.17` win-arm64. **Corrections (this pass):** `154-x86` and
+`155-x86` had `jgRVA` mistakenly copied from `152-x86` (`0x032EFE77`, which matched no
+real build — scan-fallback had been masking it); `154-win-arm64`'s whole **sig** was
+copied from `152-win-arm64` and matched **nothing** on real late-154 arm64 (the
+`ldr x0,[x19,#0x3c8]` after the `tbnz` shifted to `[x19,#8]`) — re-derived to
+`0851493988011837600640F9E80F40F9` @ `0x02CCF568`. `152-x86`, `155` pe and
+`155-macos-arm64` keep their recorded hints (no branded build of those exact
+layouts was fetchable to re-verify; all resolve via scan). The
 **`mv2-mem-patch-win`** DLL applies these in-process — its short-flip path was fixed
 to honor `stockOpcode` (use the sig's own byte at `jgOff`, not a hardcoded `0x7F`) so
 the `jne` gate applies, and it gained the `tbz` kind for arm64.

@@ -67,6 +67,69 @@
    ]
   },
   {
+   "name": "154",
+   "container": "pe",
+   "_comment": "Early 154 (unshifted, ~8011..8029) before the +0x20 manifest field shift; verified against 154.0.8011.0. Late-154 (>=~8030) and 155 use the shifted '155' table. Core gates only: the branded-only InstallVerifier gate and 155-era webRequestBlocking are absent here.",
+   "sites": [
+    {
+     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+     "kind": "short",
+     "jgRVA": "0x08D19B45",
+     "jgOff": 3,
+     "expectedMatches": 1,
+     "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F805"
+    },
+    {
+     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+     "kind": "short",
+     "jgRVA": "0x0356AFA4",
+     "jgOff": 4,
+     "expectedMatches": 1,
+     "sig": "837A50027F34488B8A280200008B413080BA080200000075"
+    },
+    {
+     "name": "OnExtensionSystemReady startup loop",
+     "kind": "short",
+     "jgRVA": "0x0285D443",
+     "jgOff": 4,
+     "expectedMatches": 1,
+     "sig": "837950027F2D488B91280200008B423080B90802000000750C"
+    },
+    {
+     "name": "MaybeReEnableExtension",
+     "kind": "short",
+     "jgRVA": "0x08D19926",
+     "jgOff": 4,
+     "expectedMatches": 1,
+     "sig": "837E50027F2D488B8E280200008B413080BE08020000007508"
+    },
+    {
+     "name": "UserMayInstall (inlined)",
+     "kind": "short",
+     "jgRVA": "0x097E4AB1",
+     "jgOff": 4,
+     "expectedMatches": 1,
+     "sig": "837F50027F4E488B8F280200008B413080BF0802000000750C"
+    },
+    {
+     "name": "MustRemainDisabled (inlined, near jg)",
+     "kind": "near",
+     "jgRVA": "0x01625CD1",
+     "jgOff": 4,
+     "expectedMatches": 1,
+     "sig": "837F50020F8F8B000000488B8F280200008B413080BF080200000075"
+    },
+    {
+     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body, 2nd copy, diverged reg)",
+     "kind": "short",
+     "jgRVA": "0x0356B024",
+     "jgOff": 4,
+     "expectedMatches": 1,
+     "sig": "837950027F34488B91280200008B423080B908020000007508"
+    }
+   ]
+  },
+  {
    "name": "152-linux",
    "container": "elf",
    "sites": [
@@ -370,7 +433,7 @@
      "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
      "name": "let off-store extensions install (InstallVerifier)",
      "kind": "short",
-     "jgRVA": "0x032EFE77",
+     "jgRVA": "0x0319D797",
      "jgOff": 7,
      "expectedMatches": 1,
      "optional": true,
@@ -618,7 +681,7 @@
      "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
      "name": "let off-store extensions install (InstallVerifier)",
      "kind": "short",
-     "jgRVA": "0x032EFE77",
+     "jgRVA": "0x032F4E47",
      "jgOff": 7,
      "expectedMatches": 1,
      "optional": true,
@@ -887,11 +950,11 @@
      "_comment": "Same as pe, arm64 (flip the tbnz bit-test to a plain branch).",
      "name": "let off-store extensions install (InstallVerifier)",
      "kind": "tbz",
-     "jgRVA": "0x02E82BC8",
+     "jgRVA": "0x02CCF568",
      "jgOff": 4,
      "expectedMatches": 1,
      "optional": true,
-     "sig": "085149398801183760E641F9E80F40F9"
+     "sig": "0851493988011837600640F9E80F40F9"
     }
    ]
   }
