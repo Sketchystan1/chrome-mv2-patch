@@ -15,8 +15,9 @@
       1. If Chrome was patched by the old on-disk byte-patcher (a chrome.dll.bak
          is present), restore chrome.dll to stock first - the version.dll method
          needs an unmodified chrome.dll for DRM.
-      2. Download the matching version.dll (x64/x86/arm64) from the project's
-         GitHub Releases, plus signatures.json.
+      2. Download version.dll.zip from the project's GitHub Releases and take
+         the matching version.dll (x64/x86/arm64) out of it, plus
+         signatures.json.
       3. Place version.dll next to chrome.exe, and signatures.json beside it (and
          in the per-user store the DLL falls back to).
       4. Clear any HKLM Chrome policies (removes the "managed by your
@@ -132,7 +133,8 @@ $ErrorActionPreference = 'Stop'
 $AppVersion      = '1.12.0'
 $SignaturesFile  = 'signatures.json'
 $SignaturesUrl   = 'https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json'
-# version.dll release assets: <base>/version-<arch>.dll (x64|x86|arm64).
+# version.dll release asset: <base>/version.dll.zip, with x64/, x86/, and
+# arm64/ folders (each holding version.dll) inside. Built by win-build.yml.
 $DllReleaseBase  = 'https://github.com/Sketchystan1/chrome-mv2-patch/releases/latest/download'
 # Off-store uBlock Origin (MV2) force-install.
 $UboId           = 'fkgkibajhfbepljeaefdnfnegdcjomkh'
@@ -2651,6 +2653,28 @@ function Get-RemoteFile {
     finally { $ProgressPreference = $old }
 }
 
+# Pull <arch>/version.dll out of the downloaded version.dll.zip. Entry names are
+# matched case-insensitively with either path separator, so zips made by bsdtar
+# ('/') and Compress-Archive ('\') both work. Throws when the arch is missing.
+function Get-DllFromReleaseZip {
+    param([string]$ZipPath, [string]$Arch)
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $zip = [IO.Compression.ZipFile]::OpenRead($ZipPath)
+    try {
+        $want = ($Arch + '/version.dll')
+        foreach ($entry in $zip.Entries) {
+            if ((($entry.FullName -replace '\\', '/').TrimStart('/')) -ieq $want) {
+                $ms = New-Object IO.MemoryStream
+                $s = $entry.Open()
+                try   { $s.CopyTo($ms) }
+                finally { $s.Dispose() }
+                return ,$ms.ToArray()
+            }
+        }
+        throw "The published version.dll.zip has no $Arch build."
+    } finally { $zip.Dispose() }
+}
+
 # Fetch + validate signatures.json and write it where the DLL looks: next to
 # chrome.exe, and the per-user fallback store. -Signatures (path or URL) wins.
 function Save-Signatures {
@@ -2767,23 +2791,25 @@ function Invoke-Install {
         Write-Host '    MV2 will still work; reinstall Chrome if Widevine DRM (Netflix, etc.) misbehaves.'
     }
 
-    # (2) Download the matching version.dll + signatures.
+    # (2) Download version.dll.zip + signatures, and take the matching DLL out.
     $arch = Get-ChromeArch -Target $Target -Override $Arch
     if (-not $arch) {
         Write-Err "Couldn't detect Chrome's architecture. Re-run with -Arch x64, x86, or arm64."
         return 1
     }
-    $url = "$DllReleaseBase/version-$arch.dll"
+    $url    = "$DllReleaseBase/version.dll.zip"
+    $tmpZip = Join-Path ([IO.Path]::GetTempPath()) ('version.dll-' + [Guid]::NewGuid().ToString('N') + '.zip')
     $tmpDll = Join-Path ([IO.Path]::GetTempPath()) ('version-' + $arch + '-' + [Guid]::NewGuid().ToString('N') + '.dll')
     try {
         Write-Info "Downloading version.dll ($arch)..."
-        Get-RemoteFile -Uri $url -OutFile $tmpDll
+        Get-RemoteFile -Uri $url -OutFile $tmpZip
+        $dllBytes = Get-DllFromReleaseZip -ZipPath $tmpZip -Arch $arch
+        [IO.File]::WriteAllBytes($tmpDll, $dllBytes)
         $gotArch = Get-PeArch $tmpDll
         if ($gotArch -ne $arch) {
             Write-Err "The downloaded version.dll is '$gotArch', not '$arch' - not installing it."
             return 1
         }
-        $dllBytes = [IO.File]::ReadAllBytes($tmpDll)
         if ($dllBytes.Length -eq 0) { Write-Err 'The downloaded version.dll is empty.'; return 1 }
 
         # (3) Close Chrome so version.dll is unlocked, then place it + signatures.
@@ -2801,11 +2827,13 @@ function Invoke-Install {
     } catch {
         Write-Err ("Install failed: " + $_.Exception.Message)
         if ("$($_.Exception.Message)" -match '404|Not Found') {
-            Write-Host '    No published build for this architecture yet. Try again later.'
+            Write-Host '    No published build yet. Run the "Build Windows version.dll" workflow on GitHub, then try again.'
         }
         return 1
     } finally {
-        if (Test-Path -LiteralPath $tmpDll -PathType Leaf) { Remove-Item -LiteralPath $tmpDll -Force -ErrorAction SilentlyContinue }
+        foreach ($t in @($tmpZip, $tmpDll)) {
+            if (Test-Path -LiteralPath $t -PathType Leaf) { Remove-Item -LiteralPath $t -Force -ErrorAction SilentlyContinue }
+        }
     }
 
     # (4) Clear machine policies (managed banner + old policy route).

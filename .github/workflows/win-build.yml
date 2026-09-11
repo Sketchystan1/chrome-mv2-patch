@@ -1,0 +1,72 @@
+# Manually builds the Windows version.dll proxy (x64/x86/arm64) and publishes a
+# single version.dll.zip to the rolling "win-latest" GitHub Release, which is
+# where chrome-mv2.ps1 downloads it from:
+#   releases/latest/download/version.dll.zip   (x64/ x86/ arm64/ inside)
+#
+# Manual runs only: Actions tab -> "Build Windows version.dll" -> Run workflow.
+# The file must exist on the default branch for the button to appear.
+#
+# Requires mv2-mem-patch-win/version.rc to be committed (build.bat compiles it).
+name: Build Windows version.dll
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # windows-latest ships VS 2022 with the C++ workload; build.bat finds it
+      # via vswhere and calls vcvarsall itself. arm64 is skipped cleanly if the
+      # ARM64 cross tools are not on the image.
+      - name: Build version.dll (x64/x86/arm64)
+        shell: cmd
+        run: |
+          call mv2-mem-patch-win\build.bat all
+          if not exist mv2-mem-patch-win\build\x64\version.dll (
+            if not exist mv2-mem-patch-win\build\x86\version.dll (
+              echo No version.dll was built. & exit /b 1
+            )
+          )
+
+      # Stage the arch dirs, then zip them with bsdtar (Compress-Archive writes
+      # backslash entry separators, which non-Windows unzip tools mishandle).
+      # An arch whose toolchain is missing is skipped with a warning, but x64
+      # must be present to release.
+      - name: Package version.dll.zip (x64/ x86/ arm64/)
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE 'zip-root'
+          New-Item -ItemType Directory -Force -Path $root | Out-Null
+          $built = @()
+          foreach ($a in 'x64', 'x86', 'arm64') {
+            $src = "mv2-mem-patch-win/build/$a/version.dll"
+            if (Test-Path $src) {
+              New-Item -ItemType Directory -Force -Path (Join-Path $root $a) | Out-Null
+              Copy-Item $src (Join-Path $root $a) -Force
+              $built += $a
+            } else {
+              Write-Host "::warning::no version.dll for $a (toolchain missing?)"
+            }
+          }
+          if ($built -notcontains 'x64') { throw 'no x64 version.dll - refusing to release' }
+          Write-Host "packaging: $($built -join ', ')"
+          New-Item -ItemType Directory -Force -Path (Join-Path $env:GITHUB_WORKSPACE 'release-assets') | Out-Null
+          tar -a -cf (Join-Path $env:GITHUB_WORKSPACE 'release-assets\version.dll.zip') -C $root @built
+
+      # A FULL release (not a pre-release) so the script's /releases/latest/
+      # URL resolves to it. No body / release notes: the release carries only
+      # version.dll.zip. (GitHub auto-attaches "Source code" links to every
+      # release; those cannot be turned off.)
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: win-latest
+          name: Windows version.dll
+          files: release-assets/version.dll.zip
+          fail_on_unmatched_files: true
