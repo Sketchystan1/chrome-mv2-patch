@@ -89,8 +89,8 @@ def main():
 
     # milestone selection prefers the MOST-SPECIFIC full match. Two gates present;
     # a 1-site milestone AND a 2-site superset both fully match (same container).
-    # The 2-site one must win (so a Chrome multi-site table beats a coexisting
-    # single-site Chromium table on a real Chrome binary, and vice-versa). "small"
+    # The 2-site one must win (so a fuller multi-site table beats a smaller
+    # single-site table that also fits, and vice-versa). "small"
     # is listed first to prove the choice is by specificity, not table order.
     two = tmp / "two gate fixture"
     tsig = tmp / "two gate signatures.json"

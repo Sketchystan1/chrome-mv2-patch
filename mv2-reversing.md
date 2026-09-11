@@ -274,7 +274,7 @@ extension with a **sticky** `DISABLE_NOT_VERIFIED` (the Enable toggle greys out)
 `from_webstore()` creation-flag bit; flipping that test to always take the "from
 store" path makes `MustRemainDisabled` return false, so the extension installs and
 lands in the recoverable `DISABLE_EXTERNAL_EXTENSION` state (one Enable click).
-Unbranded Chromium/CfT is `ENFORCE=NONE`, so the flip is a no-op there.
+Unbranded CfT is `ENFORCE=NONE`, so the flip is a no-op there.
 
 Enforcement is compiled **only on Windows and macOS** (like the old Gate B); on Linux
 (`elf`/`elf-arm64`) it is `NONE`, so there is **no gate** and off-store installs
@@ -295,10 +295,12 @@ and arm64 sigs are build-robust and reused across 152/154/155 via signature scan
 to honor `stockOpcode` (use the sig's own byte at `jgOff`, not a hardcoded `0x7F`) so
 the `jne` gate applies, and it gained the `tbz` kind for arm64.
 
-> **Removed: Gate B and `featurebyte`.** "Gate B" (skip `FilterSensitivePolicies` to
+> **Removed: Gate B.** "Gate B" (skip `FilterSensitivePolicies` to
 > honor off-store `ExtensionSettings` on unmanaged Chrome) was removed from every
 > table — it required the policy route that triggers the managed banner, which Route
-> A avoids. The earlier `featurebyte` `.rdata` patch (MV3 `webRequestBlocking`) was
-> already removed in v1.10.0. Both kinds remain supported by the engines for custom
-> tables but ship in no milestone. (The historical Gate-B `cbz` masking lesson in §6
-> still applies to the `cbz` kind generally.)
+> A avoids. It remains supported by the engines for custom tables but ships in no
+> milestone. (The historical Gate-B `cbz` masking lesson in §6 still applies to the
+> `cbz` kind generally.) The `featurebyte` `.rdata` patch (Gate A, MV3
+> `webRequestBlocking`) was dropped in v1.10.0's table rework and re-added to the
+> `155` table only — the 152/154 feature layout differs, so the current
+> `SimpleFeatureData` offsets find no rule-1 struct there.

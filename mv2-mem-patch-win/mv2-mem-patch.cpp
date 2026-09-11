@@ -13,7 +13,8 @@
 // 3. ntdll!LdrLoadDll is hooked. When chrome.dll is mapped, its on-disk
 //    .text is scanned against signatures.json and every MV2 gate (jg) is
 //    flipped to jmp in the loaded image — synchronously on Chrome's own
-//    loading thread, before any chrome.dll code can execute.
+//    loading thread, before any chrome.dll code can execute. Any featurebyte
+//    sites (a .rdata data byte, e.g. webRequestBlocking for MV3) are flipped too.
 // 4. The signatures source can be set by config.txt in
 //    %LOCALAPPDATA%\mv2-mem-patch\ (a TOML file). When it names an https URL and
 //    no local store fully matches this Chrome, a background thread refreshes the
@@ -183,14 +184,22 @@ static const WORD  kHostMachine   = 0xAA64;  // IMAGE_FILE_MACHINE_ARM64
 struct Site {
   int kind = 0;  // 0 = short jg (7F->EB), 1 = near jg (0F8F->90E9),
                  // 2 = AArch64 b.cond (cond nibble GT 0xC -> AL 0xE),
-                 // 3 = AArch64 tbz/tbnz -> unconditional B (same target)
+                 // 3 = AArch64 tbz/tbnz -> unconditional B (same target),
+                 // 4 = featurebyte: flip one .rdata data byte (not a branch)
   std::vector<BYTE> sig;
   int jgOff    = 0;
   int expected = 1;
+  // kind 4 only: find a named feature's struct in .rdata and flip stock->patched.
+  std::string feature;
+  long long structRVA = 0;  // fast-path hint; the name scan is the real locator
+  int patchOff = 0;
+  BYTE fbStock = 0, fbPatched = 0;
+  std::vector<std::pair<int, BYTE>> verify;  // struct-relative offset -> byte
 };
 
 struct Milestone {
   std::vector<Site> sites;
+  std::vector<Site> featureSites;  // kind 4; live in .rdata, not scanned in .text
 };
 
 // Tiny JSON parser (signatures.json subset) — from mv2-launcher.
@@ -364,11 +373,31 @@ static std::vector<Milestone> ParseMilestones(const JV& doc,
       Site s;
       const JV* kd = sd.get("kind");
       std::string ks = kd ? kd->str : "short";
+      s.expected =
+          sd.get("expectedMatches") ? (int)sd.get("expectedMatches")->num : 1;
+      if (ks == "featurebyte") {  // .rdata data byte, not a code branch
+        const JV *ft = sd.get("feature"), *po = sd.get("patchOff"),
+                 *st = sd.get("stock"), *pa = sd.get("patched");
+        if (!ft || ft->str.empty() || !po || !st || !pa || s.expected < 1)
+          continue;
+        s.kind = 4;
+        s.feature = ft->str;
+        s.patchOff = (int)po->num;
+        s.fbStock = (BYTE)st->num;
+        s.fbPatched = (BYTE)pa->num;
+        if (const JV* sr = sd.get("structRVA"))
+          s.structRVA = strtoll(sr->str.c_str(), nullptr, 16);
+        if (const JV* vf = sd.get("verify"))
+          for (auto& kv : vf->obj)
+            s.verify.emplace_back((int)strtol(kv.first.c_str(), nullptr, 10),
+                                  (BYTE)kv.second.num);
+        if (s.patchOff < 0) continue;
+        mo.featureSites.push_back(std::move(s));
+        continue;
+      }
       s.kind = (ks == "tbz") ? 3 : (ks == "bcond") ? 2 : (ks == "near") ? 1 : 0;
       s.sig  = HexToBytes(sd.get("sig") ? sd.get("sig")->str : "");
       s.jgOff = sd.get("jgOff") ? (int)sd.get("jgOff")->num : 0;
-      s.expected =
-          sd.get("expectedMatches") ? (int)sd.get("expectedMatches")->num : 1;
       // Bytes the matcher touches at/after jgOff: short 2, near 6, bcond/tbz 4.
       int need = (s.kind == 2 || s.kind == 3) ? 4 : (s.kind == 1) ? 6 : 2;
       if (s.sig.size() < 2 || s.jgOff < 0 ||
@@ -377,7 +406,8 @@ static std::vector<Milestone> ParseMilestones(const JV& doc,
         continue;
       mo.sites.push_back(std::move(s));
     }
-    if (!mo.sites.empty()) out.push_back(std::move(mo));
+    if (!mo.sites.empty() || !mo.featureSites.empty())
+      out.push_back(std::move(mo));
   }
   return out;
 }
@@ -691,6 +721,9 @@ struct Image {
   long long textRaw  = 0;  // file offset of .text data
   long long textSize = 0;
   long long textRVA  = 0;  // RVA of .text in the loaded image
+  long long rdataRaw = 0, rdataSize = 0, rdataRVA = 0;  // .rdata (featurebyte)
+  unsigned long long imageBase = 0;  // for the featurebyte pointer scan
+  bool ptr64 = true;
   WORD machine       = 0;
 };
 
@@ -702,7 +735,16 @@ static Image ParsePe(const BYTE* b, size_t n) {
   img.machine = *(const WORD*)&b[e + 4];
   int nsec = *(const WORD*)&b[e + 6];
   int opt  = *(const WORD*)&b[e + 20];
-  long long sec = (long long)e + 24 + opt;
+  long long oh = (long long)e + 24;  // optional header
+  WORD magic = (oh + 2 <= (long long)n) ? *(const WORD*)&b[oh] : 0;
+  img.ptr64 = (magic != 0x10B);  // 0x20B = PE32+, 0x10B = PE32
+  if (img.ptr64) {
+    if (oh + 24 + 8 <= (long long)n)
+      img.imageBase = *(const unsigned long long*)&b[oh + 24];
+  } else if (oh + 28 + 4 <= (long long)n) {
+    img.imageBase = *(const DWORD*)&b[oh + 28];
+  }
+  long long sec = oh + opt;
   if (sec + (long long)nsec * 40LL > (long long)n) return img;
   for (int i = 0; i < nsec; i++) {
     long long sh = sec + (long long)i * 40LL;
@@ -710,6 +752,10 @@ static Image ParsePe(const BYTE* b, size_t n) {
       img.textRVA  = *(const DWORD*)&b[sh + 12];
       img.textSize = *(const DWORD*)&b[sh + 16];
       img.textRaw  = *(const DWORD*)&b[sh + 20];
+    } else if (memcmp(&b[sh], ".rdata\0", 7) == 0) {
+      img.rdataRVA  = *(const DWORD*)&b[sh + 12];
+      img.rdataSize = *(const DWORD*)&b[sh + 16];
+      img.rdataRaw  = *(const DWORD*)&b[sh + 20];
     }
   }
   return img;
@@ -783,9 +829,65 @@ static bool SigAt(const BYTE* b, size_t n, long long start,
   return true;
 }
 
-// Scan .text once for all sites of all milestones. A full match (every site
-// at its expected count) beats a partial one; the milestone with more sites
-// wins among fulls; an exact tie between two fulls declines.
+// Find a featurebyte site's data byte in .rdata (mirrors derive_milestone.py's
+// locate_featurebyte). We look up the feature's name string, find pointers to it
+// (each is a struct start), then check the struct matches the rule and return the
+// patch byte's file offset. structRVA is a fast path; the name scan is the truth.
+static std::vector<long long> FindFeatureByte(const BYTE* buf, size_t bufN,
+                                              const Image& img, const Site& s) {
+  std::vector<long long> found;
+  if (img.rdataSize == 0 || img.imageBase == 0 || s.feature.empty())
+    return found;
+  long long lo = img.rdataRaw;
+  long long hi = img.rdataRaw + img.rdataSize;
+  if (hi > (long long)bufN) hi = (long long)bufN;
+  int psz = img.ptr64 ? 8 : 4;
+
+  auto decode = [&](long long base) -> long long {
+    long long poff = base + s.patchOff;
+    if (poff < lo || poff >= hi) return -1;
+    if (buf[poff] != s.fbStock && buf[poff] != s.fbPatched) return -1;
+    for (auto& v : s.verify) {
+      long long vo = base + v.first;
+      if (vo < lo || vo >= hi || buf[vo] != v.second) return -1;
+    }
+    return poff;
+  };
+
+  // Fast path: the recorded struct RVA (skipped when it points elsewhere).
+  if (s.structRVA >= img.rdataRVA &&
+      s.structRVA < img.rdataRVA + img.rdataSize) {
+    long long p = decode(img.rdataRaw + (s.structRVA - img.rdataRVA));
+    if (p >= 0) { found.push_back(p); return found; }
+  }
+
+  // Slow path: anchor on the "<feature>\0" literal, scan for pointers to it.
+  std::string nd = s.feature;
+  nd.push_back('\0');
+  long long nl = (long long)nd.size();
+  for (long long i = lo; i + nl <= hi; i++) {
+    if (buf[i] != (BYTE)nd[0] || memcmp(buf + i, nd.data(), (size_t)nl) != 0)
+      continue;
+    unsigned long long va = img.imageBase + img.rdataRVA + (i - img.rdataRaw);
+    BYTE pb[8];
+    for (int k = 0; k < psz; k++) pb[k] = (BYTE)((va >> (8 * k)) & 0xFF);
+    for (long long j = lo; j + psz <= hi; j++) {
+      if (buf[j] != pb[0] || memcmp(buf + j, pb, (size_t)psz) != 0) continue;
+      long long po = decode(j);
+      if (po < 0) continue;
+      bool dup = false;
+      for (long long f : found)
+        if (f == po) { dup = true; break; }
+      if (!dup) {
+        found.push_back(po);
+        if ((int)found.size() > s.expected) return found;  // too many — reject
+      }
+    }
+  }
+  return found;
+}
+
+
 static bool Locate(const BYTE* buf, size_t bufN, const Image& img,
                    const std::vector<Milestone>& milestones,
                    std::vector<std::pair<Site, std::vector<long long>>>* out,
@@ -823,6 +925,7 @@ static bool Locate(const BYTE* buf, size_t bufN, const Image& img,
       };
 
   int fullSites = 0, partOk = 0, fullCount = 0;
+  int winFullM = -1, winPartM = -1;  // winning milestone, for its featureSites
   std::vector<std::pair<Site, std::vector<long long>>> fullPer, partPer;
   std::vector<long long> fullOffs;
   for (int m = 0; m < (int)milestones.size(); m++) {
@@ -834,12 +937,13 @@ static bool Locate(const BYTE* buf, size_t bufN, const Image& img,
       if ((int)h.size() == ms.sites[si].expected) ok++;
       per.emplace_back(ms.sites[si], std::move(h));
     }
-    if (ok == (int)ms.sites.size()) {
+    if (!ms.sites.empty() && ok == (int)ms.sites.size()) {
       if (fullSites == 0 || (int)ms.sites.size() > fullSites) {
         fullSites = (int)ms.sites.size();
         fullPer   = per;
         fullCount = 1;
         fullOffs  = flatOffs(per);
+        winFullM  = m;
       } else if ((int)ms.sites.size() == fullSites) {
         // Two equal-size full matches are only ambiguous if they target
         // DIFFERENT bytes. Tables reused verbatim across version labels resolve
@@ -847,18 +951,34 @@ static bool Locate(const BYTE* buf, size_t bufN, const Image& img,
         if (flatOffs(per) != fullOffs) fullCount++;
       }
     } else if (ok > 0 && fullSites == 0 && ok > partOk) {
-      partOk  = ok;
-      partPer = per;
+      partOk   = ok;
+      partPer  = per;
+      winPartM = m;
     }
   }
 
+  // Best-effort .rdata featurebyte sites (e.g. webRequestBlocking for MV3): scan
+  // for the winning milestone only, and drop them in with the branch hits so
+  // ApplyInProcess flips them too. A miss adds nothing; an AMBIGUOUS match
+  // (FindFeatureByte returns more than expected) is rejected, not patched.
+  auto addFeatures =
+      [&](std::vector<std::pair<Site, std::vector<long long>>>& per, int mi) {
+        if (mi < 0) return;
+        for (const Site& fs : milestones[mi].featureSites) {
+          std::vector<long long> offs = FindFeatureByte(buf, bufN, img, fs);
+          if ((int)offs.size() == fs.expected) per.emplace_back(fs, std::move(offs));
+        }
+      };
+
   if (fullCount > 1) return false;  // ambiguous — decline
   if (fullSites > 0) {
+    addFeatures(fullPer, winFullM);
     if (fullMatch) *fullMatch = true;
     *out = std::move(fullPer);
     return true;
   }
   if (partOk > 0) {
+    addFeatures(partPer, winPartM);
     if (fullMatch) *fullMatch = false;
     *out = std::move(partPer);
     return true;
@@ -918,6 +1038,21 @@ static void ApplyInProcess(
     const std::vector<std::pair<Site, std::vector<long long>>>& hits) {
   for (auto& [site, offs] : hits) {
     for (long long jgFileOff : offs) {
+      if (site.kind == 4) {  // featurebyte: one .rdata data byte, stock->patched
+        BYTE* addr = chromeDllBase + img.rdataRVA + (jgFileOff - img.rdataRaw);
+        if (*addr == site.fbPatched) continue;  // already done
+        if (*addr != site.fbStock) {
+          DBG(L"unexpected featurebyte — skipped");
+          continue;
+        }
+        BYTE* page = (BYTE*)((ULONG_PTR)addr & ~(ULONG_PTR)0xFFF);
+        DWORD old = 0;
+        if (!VirtualProtect(page, 0x1000, PAGE_READWRITE, &old)) continue;
+        *addr = site.fbPatched;
+        DWORD tmp = 0;
+        VirtualProtect(page, 0x1000, old, &tmp);
+        continue;
+      }
       BYTE* addr = chromeDllBase + img.textRVA + (jgFileOff - img.textRaw);
       BYTE cur[4] = {addr[0], addr[1], addr[2], addr[3]};
       // Stock opcode(s) taken from the sig itself (jg 7F, jne 75, near 0F 8F,
@@ -1125,12 +1260,21 @@ static void PatchChromeDll(HMODULE chromeDll) {
     else
       DBG(L"no milestone matched this chrome.dll build");
 
-    // URL source + not a full match → refresh the signatures store for the next
-    // launch. The thread is created here, but Chrome's loader thread cannot run
-    // it until the current load finishes, so WinHTTP never runs inline. It only
-    // rewrites the on-disk store; the current run is already patched. When the
-    // Application dir is read-only it writes the per-user fallback store above.
-    if (isUrl && !full) {
+    // URL source → refresh the signatures store for the next launch. The thread
+    // is created here, but Chrome's loader thread cannot run it until the current
+    // load finishes, so WinHTTP never runs inline. It only rewrites the on-disk
+    // store; the current run is already patched. When the Application dir is
+    // read-only it writes the per-user fallback store above.
+    //
+    // Refresh even on a FULL match: "full" counts only the required branch gates,
+    // so a stale local table that fully re-enables MV2 but lacks a newer OPTIONAL
+    // site (e.g. the webRequestBlocking featurebyte, added after that table was
+    // cached) would otherwise never be replaced — the user would be stranded with
+    // MV2 working but webRequestBlocking never flipped. Always fetching lets new
+    // optional sites propagate on the next launch. (The fetch is a cheap off-loader
+    // -lock background GET; a future ETag/If-Modified-Since guard could skip the
+    // rewrite when unchanged.)
+    if (isUrl) {
       RefreshArg* a = new (std::nothrow)
           RefreshArg{cfg.signatures, localStore, userStore};
       if (a) {

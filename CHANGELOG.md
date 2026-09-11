@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.11.0] - 2026-09-11
+
+- Enable webRequestBlocking MV3.
+- Drop Chromium support.
+
 ## [1.10.1] - 2026-09-09
 
 - Fix macOS signatures.

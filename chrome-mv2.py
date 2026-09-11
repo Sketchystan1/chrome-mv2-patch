@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # ============================================================================
-# Google Chrome / Chromium Manifest V2 Patcher - one universal Python port.
+# Google Chrome Manifest V2 Patcher - one universal Python port.
 #
 # A single self-contained script that replaces both chrome-mv2.ps1 (Windows PE)
 # and chrome-mv2.sh (Linux ELF + macOS Mach-O). It runs anywhere a bundled
@@ -67,9 +67,11 @@ IS_LINUX = sys.platform.startswith("linux")
 
 KIND_SHORT, KIND_NEAR, KIND_BCOND = 0, 1, 2
 # featurebyte: not a branch flip. Locates a named permission feature's
-# SimpleFeatureData POD struct in .rdata (name-anchored) and overwrites one data
-# byte (e.g. webRequestBlocking's max_manifest_version 2 -> 3, granting the
-# permission to MV3). See mv2-reversing.md.
+# SimpleFeatureData POD struct (name-anchored) and overwrites one data byte
+# (e.g. webRequestBlocking's max_manifest_version 2 -> 3, granting the permission
+# to MV3). The struct is found by the container's own reference to the feature-name
+# literal: a pointer VALUE in PE .rdata, a .rela.dyn RELATIVE reloc addend in ELF,
+# or a chained-fixup rebase target in Mach-O. See mv2-reversing.md.
 KIND_FEATUREBYTE = 3
 # cbz: arm64 CBZ w?, target (32-bit, 0x34xxxxxx) rewritten to the unconditional
 # B (0x14yyyyyy) with the SAME resolved target: imm26 is recomputed from the
@@ -310,8 +312,8 @@ def import_milestones(override):
             if kind is None:
                 raise Mv2Error(f"milestone {name} site '{sname}': unknown kind '{kraw}'")
             if kind == KIND_FEATUREBYTE:
-                if container != "pe":
-                    raise Mv2Error(f"milestone {name} site '{sname}': featurebyte is only supported for the 'pe' container")
+                if container not in ("pe", "pe32", "pe-arm64", "elf", "elf-arm64", "macho-arm64"):
+                    raise Mv2Error(f"milestone {name} site '{sname}': featurebyte is not supported for container '{container}'")
                 feature = str(rs.get("feature", ""))
                 if not feature or re.search(r"[\r\n\x00]", feature):
                     raise Mv2Error(f"milestone {name} site '{sname}': featurebyte needs a non-empty 'feature' name")
@@ -1012,32 +1014,30 @@ def _decode_feature_struct(buf, base_off, site, lo, hi):
     return poff
 
 
-def find_feature_site(buf, sl, site, fast_only):
-    """Name-anchored .rdata data locator (KIND_FEATUREBYTE, 'pe' x64 only).
-    Fast path: the recorded structRVA. Else: find the feature name literal, find
-    8-byte pointers to it (a struct's .name field), decode + verify each struct.
-    Returns (patch_byte_offsets, relocated)."""
+_R_X86_64_RELATIVE = 8
+_R_AARCH64_RELATIVE = 0x403
+
+
+def _find_fb_pe(buf, sl, site):
+    """PE: scan .rdata for pointer VALUES to the feature-name literal (a struct's
+    .name field). Pointer width is 8 (pe/pe-arm64) or 4 (pe32)."""
     if sl.rdata_size <= 0 or not sl.imagebase:
         return [], False
+    width = 4 if sl.container == "pe32" else 8
     lo, hi = sl.rdata_raw, sl.rdata_raw + sl.rdata_size
     if site.struct_rva and sl.rdata_vaddr <= site.struct_rva < sl.rdata_vaddr + sl.rdata_size:
-        base_off = sl.rdata_raw + (site.struct_rva - sl.rdata_vaddr)
-        poff = _decode_feature_struct(buf, base_off, site, lo, hi)
+        poff = _decode_feature_struct(buf, sl.rdata_raw + (site.struct_rva - sl.rdata_vaddr), site, lo, hi)
         if poff is not None:
             return [poff], False
-    # The .rdata name scan is cheap (a few C-level bytes.find calls), so run it
-    # even in the fast pass - an optional site must not be missed just because
-    # the required branch sites happened to match on their recorded RVAs.
     needle = site.feature.encode("latin1") + b"\x00"
-    found = []
-    lit = lo
+    found, lit = [], lo
     while True:
         i = buf.find(needle, lit, hi)
         if i < 0:
             break
         lit = i + 1
         lit_rva = sl.rdata_vaddr + (i - sl.rdata_raw)
-        ptr = (sl.imagebase + lit_rva).to_bytes(8, "little")
+        ptr = (sl.imagebase + lit_rva).to_bytes(width, "little")
         p = lo
         while True:
             j = buf.find(ptr, p, hi)
@@ -1050,6 +1050,174 @@ def find_feature_site(buf, sl, site, fast_only):
                 if len(found) > site.expected:
                     return found, True
     return found, True
+
+
+def _elf_fb_layout(buf):
+    """(progbits [(vaddr, off, size)], (rela_off, rela_size)) — or (None, (None, None))."""
+    st = _elf_section_table(buf)
+    if not st:
+        return None, (None, None)
+    shoff, shentsize, shnum, shstrndx, stroff, strsize = st
+    progbits, rela = [], (None, None)
+    for i in range(shnum):
+        sh = shoff + i * shentsize
+        name_off = int.from_bytes(buf[sh:sh + 4], "little")
+        sh_type = int.from_bytes(buf[sh + 4:sh + 8], "little")
+        addr = int.from_bytes(buf[sh + 0x10:sh + 0x18], "little")
+        off = int.from_bytes(buf[sh + 0x18:sh + 0x20], "little")
+        size = int.from_bytes(buf[sh + 0x20:sh + 0x28], "little")
+        if sh_type == 1 and addr:                     # SHT_PROGBITS with a load address
+            progbits.append((addr, off, size))
+        elif name_off < strsize:
+            if buf[stroff + name_off:stroff + name_off + 10].split(b"\x00", 1)[0] == b".rela.dyn":
+                rela = (off, size)
+    return progbits, rela
+
+
+def _find_fb_elf(buf, sl, site):
+    """ELF: the .name slot is 0 on disk (a RELATIVE reloc). Anchor on a .rela.dyn
+    R_*_RELATIVE reloc whose addend is the feature-name literal's VA; its r_offset
+    is the struct base."""
+    progbits, (rela_off, rela_size) = _elf_fb_layout(buf)
+    if progbits is None:
+        return [], False
+    fsize = len(buf)
+
+    def va_to_off(va):
+        for (a, o, s) in progbits:
+            if a <= va < a + s:
+                return o + (va - a)
+        return None
+
+    def off_to_va(o):
+        for (a, fo, s) in progbits:
+            if fo <= o < fo + s:
+                return a + (o - fo)
+        return None
+
+    if site.struct_rva:
+        bo = va_to_off(site.struct_rva)
+        if bo is not None:
+            poff = _decode_feature_struct(buf, bo, site, 0, fsize)
+            if poff is not None:
+                return [poff], False
+    if rela_off is None:
+        return [], True
+    needle = site.feature.encode("latin1") + b"\x00"
+    litvas, pos = set(), 0
+    while True:
+        i = buf.find(needle, pos)
+        if i < 0:
+            break
+        pos = i + 1
+        va = off_to_va(i)
+        if va is not None:
+            litvas.add(va)
+    found = []
+    for k in range(rela_size // 24):
+        base = rela_off + k * 24
+        r_off = int.from_bytes(buf[base:base + 8], "little")
+        r_info = int.from_bytes(buf[base + 8:base + 16], "little")
+        r_add = int.from_bytes(buf[base + 16:base + 24], "little", signed=True)
+        if (r_info & 0xffffffff) in (_R_X86_64_RELATIVE, _R_AARCH64_RELATIVE) and r_add in litvas:
+            bo = va_to_off(r_off)
+            if bo is not None:
+                poff = _decode_feature_struct(buf, bo, site, 0, fsize)
+                if poff is not None and poff not in found:
+                    found.append(poff)
+                    if len(found) > site.expected:
+                        return found, True
+    return found, True
+
+
+def _macho_segments(buf, base):
+    """[(segname, vmaddr, fileoff_abs, filesize)], text_base."""
+    if not within(base, 32, len(buf)):
+        return [], 0
+    ncmds = int.from_bytes(buf[base + 16:base + 20], "little")
+    segs, p = [], base + 32
+    for _ in range(ncmds):
+        if not within(p, 8, len(buf)):
+            break
+        cmd = int.from_bytes(buf[p:p + 4], "little")
+        cmdsize = int.from_bytes(buf[p + 4:p + 8], "little")
+        if cmdsize < 8 or not within(p, cmdsize, len(buf)):
+            break
+        if cmd == 0x19:  # LC_SEGMENT_64
+            segname = buf[p + 8:p + 24].split(b"\x00", 1)[0]
+            vmaddr = int.from_bytes(buf[p + 24:p + 32], "little")
+            fileoff = int.from_bytes(buf[p + 40:p + 48], "little")
+            filesize = int.from_bytes(buf[p + 48:p + 56], "little")
+            segs.append((segname, vmaddr, base + fileoff, filesize))
+        p += cmdsize
+    return segs, (segs[0][1] if segs else 0)
+
+
+def _find_fb_macho(buf, sl, site):
+    """Mach-O: the .name slot is a chained-fixup rebase. Decode DATA qwords and
+    match the rebase TARGET (low 36 bits) == literal VA - __TEXT base; that slot is
+    the struct base."""
+    base = sl.base
+    segs, text_base = _macho_segments(buf, base)
+    fsize = len(buf)
+
+    def va_to_off(va):
+        for (_nm, vm, fo, fs) in segs:
+            if vm <= va < vm + fs:
+                return fo + (va - vm)
+        return None
+
+    if site.struct_rva:
+        bo = va_to_off(site.struct_rva)
+        if bo is not None:
+            poff = _decode_feature_struct(buf, bo, site, 0, fsize)
+            if poff is not None:
+                return [poff], False
+    needle = site.feature.encode("latin1") + b"\x00"
+    litvas, pos = [], base
+    while True:
+        i = buf.find(needle, pos)
+        if i < 0:
+            break
+        pos = i + 1
+        for (_nm, vm, fo, fs) in segs:
+            if fo <= i < fo + fs:
+                litvas.append(vm + (i - fo))
+                break
+    mask36 = (1 << 36) - 1
+    wants = set((lv - text_base) & mask36 for lv in litvas)
+    found = []
+    for (nm, vm, fo, fs) in segs:
+        if not nm.startswith(b"__DATA"):
+            continue
+        end = min(fo + fs, fsize)
+        off = fo
+        while off + 8 <= end:
+            q = int.from_bytes(buf[off:off + 8], "little")
+            if q and not (q >> 63) & 1 and (q & mask36) in wants:
+                poff = _decode_feature_struct(buf, off, site, 0, fsize)
+                if poff is not None and poff not in found:
+                    found.append(poff)
+                    if len(found) > site.expected:
+                        return found, True
+            off += 8
+    return found, True
+
+
+def find_feature_site(buf, sl, site, fast_only):
+    """Locate a featurebyte struct's patch byte and return (offsets, relocated).
+    Dispatches by container: PE .rdata pointer scan / ELF .rela.dyn addend anchor /
+    Mach-O chained-fixup rebase anchor. The name scan is cheap, so (like the branch
+    locator's optional sites) it runs even in the fast pass so an optional
+    featurebyte site is never missed just because the required sites matched."""
+    c = sl.container
+    if c in ("pe", "pe32", "pe-arm64"):
+        return _find_fb_pe(buf, sl, site)
+    if c in ("elf", "elf-arm64"):
+        return _find_fb_elf(buf, sl, site)
+    if c == "macho-arm64":
+        return _find_fb_macho(buf, sl, site)
+    return [], False
 
 
 def find_site_matches(buf, sl, site, fast_only):
@@ -1869,7 +2037,7 @@ if IS_WIN:
         found = {}
         if exe:
             for pid, name in _win_process_list():
-                if name not in ("chrome.exe", "chromium.exe"):
+                if name not in ("chrome.exe",):
                     continue
                 p = _win_proc_path(pid)
                 if p and os.path.normcase(p) == exe_l:
@@ -1881,7 +2049,7 @@ if IS_WIN:
             if not p:
                 continue
             base = os.path.basename(p).lower()
-            if base not in ("chrome.exe", "chromium.exe"):
+            if base not in ("chrome.exe",):
                 continue
             if start_ft and _win_proc_start_ft(pid) and _win_proc_start_ft(pid) != start_ft:
                 continue
@@ -2465,18 +2633,13 @@ def support_base():
 # Install discovery + interactive selection.
 # ============================================================================
 WIN_CHANNELS = [("Stable", r"Google\Chrome"), ("Beta", r"Google\Chrome Beta"),
-                ("Dev", r"Google\Chrome Dev"), ("Canary", r"Google\Chrome SxS"),
-                ("Chromium", "Chromium")]
+                ("Dev", r"Google\Chrome Dev"), ("Canary", r"Google\Chrome SxS")]
 
 LINUX_CHANNELS = ["Stable", "Beta", "Dev"]
 LINUX_DIRS = ["/opt/google/chrome", "/opt/google/chrome-beta", "/opt/google/chrome-unstable"]
-CHROMIUM_BINS = ["/usr/lib/chromium/chromium", "/usr/lib/chromium/chrome",
-                 "/usr/lib/chromium-browser/chromium-browser", "/usr/lib/chromium-browser/chrome",
-                 "/usr/lib64/chromium/chromium", "/usr/lib64/chromium-browser/chromium-browser",
-                 "/opt/chromium.org/chromium/chrome", "/opt/chromium/chrome"]
 MAC_APPS = ["Google Chrome.app", "Google Chrome Beta.app", "Google Chrome Dev.app",
-            "Google Chrome Canary.app", "Chromium.app"]
-MAC_LABELS = ["Stable", "Beta", "Dev", "Canary", "Chromium"]
+            "Google Chrome Canary.app"]
+MAC_LABELS = ["Stable", "Beta", "Dev", "Canary"]
 
 
 def display_name(channel):
@@ -2617,13 +2780,6 @@ def linux_chrome_version(binary):
         v = first(r.stdout)
         if v:
             return v
-    for tool, args in (("dpkg-query", ["-W", "-f=${Version}\n"]), ("rpm", ["-q", "--qf", "%{VERSION}\n"])):
-        if shutil.which(tool):
-            for p in ("chromium", "chromium-browser"):
-                r = subprocess.run([tool] + args + [p], capture_output=True, text=True)
-                v = first(r.stdout)
-                if v:
-                    return v
     if os.access(binary, os.X_OK):
         try:
             r = subprocess.run([binary, "--version"], capture_output=True, text=True)
@@ -2637,7 +2793,6 @@ def linux_installs(milestones):
     found = []
     seen = set()
     entries = [(lbl, os.path.join(d, "chrome")) for lbl, d in zip(LINUX_CHANNELS, LINUX_DIRS)]
-    entries += [("Chromium", b) for b in CHROMIUM_BINS]
     for label, binary in entries:
         if not os.path.isfile(binary):
             continue
@@ -3470,7 +3625,7 @@ def cmd_check_macho(target, milestones):
 # ============================================================================
 USAGE = """Usage: python chrome-mv2.py [command] [path] [options]
 
-Turns Manifest V2 extension support back on in Google Chrome or Chromium. One
+Turns Manifest V2 extension support back on in Google Chrome. One
 script for Windows (chrome.dll), Linux (the chrome binary), and macOS (Google
 Chrome.app). On macOS it also re-signs the app so it opens normally.
 
@@ -3480,7 +3635,7 @@ Commands:
   check                  Show the current status. Changes nothing.
 
 Arguments:
-  path                   Path to Chrome/Chromium (chrome.dll / chrome / a .app).
+  path                   Path to Chrome (chrome.dll / chrome / a .app).
                          If left out, an installed browser is found automatically.
 
 Options:

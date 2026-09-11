@@ -1,11 +1,11 @@
 <#
 .SYNOPSIS
-    Chrome / Chromium Manifest V2 Patcher - single-file, self-contained PowerShell
+    Chrome Manifest V2 Patcher - single-file, self-contained PowerShell
     port for Windows (chrome.dll only; x64, x86, and arm64).
 
 .DESCRIPTION
-    Re-enables Manifest V2 extension support in Google Chrome or Chromium (both
-    ship chrome.dll) by flipping the inlined IsExtensionAffected manifest-version
+    Re-enables Manifest V2 extension support in Google Chrome (chrome.dll) by
+    flipping the inlined IsExtensionAffected manifest-version
     checks. Same milestone engine, same match/decline semantics, same .bak
     handling. Handles x64/x86 (PE, PE32) and Windows-on-ARM (PE32+ arm64, machine
     0xAA64).
@@ -620,8 +620,12 @@ function Import-Milestones {
                 default { throw "milestone $($rm.name) site '$($rs.name)': unknown kind '$($rs.kind)'" }
             }
             if ($kind -eq 3) {
-                if ($container -ne 'pe') {
-                    throw "milestone $msName site '$siteName': featurebyte is only supported for the 'pe' container"
+                # featurebyte works for every PE container; the .rdata locator only
+                # needs the right pointer width (4 bytes on pe32, 8 on pe/pe-arm64).
+                # Non-PE containers were already skipped above, so this never fires
+                # in practice - it just mirrors chrome-mv2.py's guard.
+                if ($container -notin 'pe', 'pe32', 'pe-arm64') {
+                    throw "milestone $msName site '$siteName': featurebyte is not supported for container '$container'"
                 }
                 $feature = [string]$rs.feature
                 if ([string]::IsNullOrWhiteSpace($feature) -or $feature -match '[\r\n\x00]') {
@@ -1128,10 +1132,11 @@ function Test-FeatureStruct {
 }
 
 # featurebyte (.rdata data-byte) locator. Fast path: the recorded StructRVA. Else
-# name-anchored: find the feature name literal, find 8-byte pointers to it (a
-# struct's .name field), decode + verify each struct. Returns Found (patch-byte
-# file offsets) and Relocated. The .rdata scan is a handful of compiled IndexOf
-# calls, so it is cheap enough to run on every pass.
+# name-anchored: find the feature name literal, find pointers to it (8 bytes on
+# pe/pe-arm64, 4 on pe32 - PE32 has 32-bit pointers), i.e. a struct's .name
+# field, decode + verify each struct. Returns Found (patch-byte file offsets) and
+# Relocated. The .rdata scan is a handful of compiled IndexOf calls, so it is
+# cheap enough to run on every pass.
 function Find-FeatureByteSite {
     param([byte[]]$Buf, $Img, $Site)
     $lo = [int64]$Img.RdataRaw; $hi = $lo + [int64]$Img.RdataSize
@@ -1145,6 +1150,8 @@ function Find-FeatureByteSite {
         if ($poff -ge 0) { return [pscustomobject]@{ Found = @([int64]$poff); Relocated = $false } }
     }
     Initialize-NativeHelpers
+    # PE32 (x86) stores 32-bit pointers; PE32+ (x64/arm64) stores 64-bit ones.
+    $ptrWidth = if ($Img.Format -eq 'pe32') { 4 } else { 8 }
     $needle = [byte[]](@([Text.Encoding]::ASCII.GetBytes($Site.Feature)) + [byte]0)
     $found = New-Object System.Collections.Generic.List[int64]
     $litPos = $lo
@@ -1154,7 +1161,8 @@ function Find-FeatureByteSite {
         $litPos = $i + 1
         $litRva = [uint64]$Img.RdataRVA + [uint64]($i - $lo)
         $va = [uint64]$Img.ImageBase + $litRva
-        $ptr = [BitConverter]::GetBytes([uint64]$va)
+        $ptr = if ($ptrWidth -eq 4) { [BitConverter]::GetBytes([uint32]$va) } `
+               else                 { [BitConverter]::GetBytes([uint64]$va) }
         $p = $lo
         while ($true) {
             $j = [Mv2Native]::IndexOf($Buf, $ptr, $p, $hi)
@@ -1233,9 +1241,9 @@ function Invoke-PatchMilestones {
 
     # Ranking: a milestone whose EVERY site matched (full) always beats a partial
     # one, regardless of raw satisfied count; among full matches the one with MORE
-    # sites wins (most specific), so a Chrome build's multi-site table is chosen
-    # over a coexisting single-site Chromium table (same container tag) and vice-
-    # versa. Among partials the most-satisfied wins. A genuine equal-rank collision
+    # sites wins (most specific), so when several tables fit the same container the
+    # fullest, most-specific one is chosen. Among partials the most-satisfied wins.
+    # A genuine equal-rank collision
     # (two fulls of the same size, or two equal partials) bumps $bestCount and the
     # caller declines when $bestCount > 1.
     $best = $null
@@ -1922,7 +1930,7 @@ function Get-BrowserProcesses {
     $exe = Get-BrowserExePath -TargetPath $TargetPath
     $found = @{}
     if ($exe) {
-        foreach ($p in @(Get-Process -Name 'chrome', 'chromium' -ErrorAction SilentlyContinue)) {
+        foreach ($p in @(Get-Process -Name 'chrome' -ErrorAction SilentlyContinue)) {
             try { if ($p.Path -and $p.Path -eq $exe) { $found[$p.Id] = $p } } catch { }
         }
     }
@@ -1931,7 +1939,7 @@ function Get-BrowserProcesses {
         try {
             $p = Get-Process -Id $h.Pid -ErrorAction Stop
             if ($h.StartTime -ne 0 -and [uint64]$p.StartTime.ToFileTime() -ne $h.StartTime) { continue }
-            if ($p.ProcessName -notin 'chrome', 'chromium') { continue }
+            if ($p.ProcessName -ne 'chrome') { continue }
             if ($exe -and $p.Path -and $p.Path -ne $exe) { continue }   # a different install
             $found[$p.Id] = $p
         } catch { }
@@ -2061,7 +2069,7 @@ function Write-Target {
 
 # The launcher for a chrome.dll target. Chrome's layout is
 # <Application>\<version>\chrome.dll with chrome.exe one level up in
-# <Application>; some Chromium packages keep both in the same directory. Empty
+# <Application>. Empty
 # when there is no chrome.exe in either place (a bare/offline copy of the dll),
 # which is also the signal that there is nothing to reopen.
 function Get-BrowserExePath {
@@ -2220,7 +2228,6 @@ $WinChannels = @(
     @{ Name = 'Beta';   Subdir = 'Google\Chrome Beta' }
     @{ Name = 'Dev';    Subdir = 'Google\Chrome Dev' }
     @{ Name = 'Canary'; Subdir = 'Google\Chrome SxS' }   # SxS = Canary's side-by-side dir
-    @{ Name = 'Chromium'; Subdir = 'Chromium' }          # open-source Chromium keeps the chrome.dll name
 )
 
 # The channel label for a target we were handed as a bare path: an explicit
@@ -2395,8 +2402,8 @@ function Get-ChromeInstalls {
 # reopened with the same tabs when the work is done (Request-TargetUnlock).
 # ============================================================================
 
-# Menu display name: the Google channels get the "Chrome " prefix; Chromium and
-# anything else (custom path, local file) is shown as-is.
+# Menu display name: the Google channels get the "Chrome " prefix; anything else
+# (custom path, local file) is shown as-is.
 function Get-BrowserDisplayName {
     param([string]$Channel)
     if ($Channel -in 'Stable', 'Beta', 'Dev', 'Canary') { return "Chrome $Channel" }

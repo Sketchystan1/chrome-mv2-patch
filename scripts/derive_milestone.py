@@ -60,6 +60,7 @@ class Image:
         self.data = data
         self._text = None
         self.uuid = None                # Mach-O LC_UUID (hex), else None
+        self.macho_base = 0             # Mach-O slice file offset (0 for thin/other)
         # PE-only, for the featurebyte (.rdata) locator (None elsewhere):
         self.imagebase = None
         self.rdata_virt = None
@@ -222,6 +223,7 @@ def _parse_macho_thin(data, base, cputype_hint=None):
         raise ValueError("Mach-O __text out of file bounds")
     img = Image(container, text_addr, raw, text_size, data)
     img.uuid = uuid
+    img.macho_base = base
     return img
 
 
@@ -760,17 +762,45 @@ def cmd_derive(img, milestone_name, as_json, ranges):
     return 0
 
 
-def locate_featurebyte(img, site):
-    """Mirror the runtime featurebyte locator: name-anchored .rdata struct find.
-    `site` is a signatures.json site dict. Returns patch-byte file offsets."""
-    if not img.rdata_size or not img.imagebase:
-        return []
-    data = img.data
-    lo, hi = img.rdata_raw, img.rdata_raw + img.rdata_size
+# --- featurebyte: locate a permission feature's rule-1 struct across containers.
+# The struct's .name field is a POINTER (PE) or a RELOCATION/FIXUP (ELF/Mach-O).
+#   PE:     scan .rdata for pointer VALUES to the "<feature>\0" literal.
+#   ELF:    the slot is 0 on disk, so anchor on .rela.dyn RELATIVE relocs whose
+#           ADDEND == the literal VA (r_offset is then the struct base).
+#   Mach-O: the slot is a chained-fixup rebase, so decode DATA qwords and match the
+#           rebase TARGET (low 36 bits) == literal VA - __TEXT base.
+# All then decode the same inline scalar fields (_FB / _FB32) and verify rule-1.
+_FB32 = {"strlen": 0x04, "ext_types_size": 0x30, "location_has": 0x5C,
+         "min_has": 0x64, "max_val": 0x68, "max_has": 0x6C}
+R_X86_64_RELATIVE = 8
+R_AARCH64_RELATIVE = 0x403
+
+
+def _fb_params(container):
+    """(offset dict, pointer width) for a PE container."""
+    return (_FB32, 4) if container == "pe32" else (_FB, 8)
+
+
+def _fb_site(feature, struct_rva, max_val, fb):
+    """Build the signatures.json site dict — same shape for every container."""
+    return {
+        "name": f"{feature} permission feature rule 1 "
+                f"(max_manifest_version {max_val}->{max_val + 1}; grants MV3)",
+        "kind": "featurebyte", "optional": True, "feature": feature,
+        "structRVA": "0x%08X" % struct_rva, "patchOff": fb["max_val"],
+        "stock": max_val, "patched": max_val + 1,
+        "verify": {str(fb["ext_types_size"]): 2, str(fb["location_has"]): 0,
+                   str(fb["min_has"]): 0, str(fb["max_has"]): 1},
+        "expectedMatches": 1,
+    }
+
+
+def _fb_decoder(data, site, lo, hi):
+    """Return decode(base) -> patch file offset or None. `lo`/`hi` bound the region
+    the struct may lie in (a PE .rdata window, or the whole file for ELF/Mach-O)."""
     patch_off = int(site["patchOff"])
     stock, patched = int(site["stock"]), int(site["patched"])
     verify = {int(str(k), 0): int(v) for k, v in (site.get("verify") or {}).items()}
-    expected = int(site["expectedMatches"])
 
     def decode(base):
         poff = base + patch_off
@@ -781,7 +811,25 @@ def locate_featurebyte(img, site):
             if vo < lo or vo >= hi or data[vo] != exp:
                 return None
         return poff
+    return decode
 
+
+def _rule1_ok(data, boff, fb, width):
+    """True if the struct at file offset boff meets the rule-1 criteria."""
+    et = struct.unpack_from("<Q" if width == 8 else "<I", data, boff + fb["ext_types_size"])[0]
+    return (et == 2 and data[boff + fb["max_has"]] == 1 and
+            data[boff + fb["location_has"]] == 0 and data[boff + fb["min_has"]] == 0)
+
+
+# ---- PE (.rdata pointer-value scan) --------------------------------------
+def _locate_fb_pe(img, site):
+    if not img.rdata_size or not img.imagebase:
+        return []
+    _fb, width = _fb_params(img.container)
+    data = img.data
+    lo, hi = img.rdata_raw, img.rdata_raw + img.rdata_size
+    decode = _fb_decoder(data, site, lo, hi)
+    expected = int(site["expectedMatches"])
     sr = site.get("structRVA")
     if sr:
         srva = int(str(sr), 16)
@@ -797,7 +845,7 @@ def locate_featurebyte(img, site):
             break
         li = i + 1
         lit_rva = img.rdata_virt + (i - img.rdata_raw)
-        ptr = (img.imagebase + lit_rva).to_bytes(8, "little")
+        ptr = (img.imagebase + lit_rva).to_bytes(width, "little")
         p = lo
         while True:
             j = data.find(ptr, p, hi)
@@ -812,20 +860,193 @@ def locate_featurebyte(img, site):
     return found
 
 
+# ---- ELF (.rela.dyn RELATIVE-addend anchor) ------------------------------
+def _elf_fb_layout(data):
+    """(progbits [(vaddr, off, size, name)], (rela_off, rela_size))."""
+    shoff = struct.unpack_from("<Q", data, 0x28)[0]
+    shentsize = struct.unpack_from("<H", data, 0x3A)[0]
+    shnum = struct.unpack_from("<H", data, 0x3C)[0]
+    shstrndx = struct.unpack_from("<H", data, 0x3E)[0]
+    str_hdr = shoff + shstrndx * shentsize
+    str_off = struct.unpack_from("<Q", data, str_hdr + 0x18)[0]
+    str_size = struct.unpack_from("<Q", data, str_hdr + 0x20)[0]
+    strtab = data[str_off:str_off + str_size]
+    progbits, rela = [], (None, None)
+    for i in range(shnum):
+        sh = shoff + i * shentsize
+        nm = struct.unpack_from("<I", data, sh)[0]
+        name = strtab[nm:strtab.find(b"\x00", nm)].decode("latin1")
+        sh_type = struct.unpack_from("<I", data, sh + 4)[0]
+        addr = struct.unpack_from("<Q", data, sh + 0x10)[0]
+        off = struct.unpack_from("<Q", data, sh + 0x18)[0]
+        size = struct.unpack_from("<Q", data, sh + 0x20)[0]
+        if sh_type == 1 and addr:          # SHT_PROGBITS with a load address
+            progbits.append((addr, off, size, name))
+        elif name == ".rela.dyn":
+            rela = (off, size)
+    return progbits, rela
+
+
+def _elf_fb_candidates(data, feature):
+    """[(base_va, base_fileoff)] — one per RELATIVE reloc addend'd at the literal."""
+    progbits, (rela_off, rela_size) = _elf_fb_layout(data)
+    if rela_off is None:
+        return []
+
+    def off_to_va(o):
+        for (a, fo, s, _n) in progbits:
+            if fo <= o < fo + s:
+                return a + (o - fo)
+        return None
+
+    def va_to_off(va):
+        for (a, fo, s, _n) in progbits:
+            if a <= va < a + s:
+                return fo + (va - a)
+        return None
+
+    needle = feature.encode("latin1") + b"\x00"
+    litvas, pos = set(), 0
+    while True:
+        i = data.find(needle, pos)
+        if i < 0:
+            break
+        pos = i + 1
+        va = off_to_va(i)
+        if va is not None:
+            litvas.add(va)
+    out = []
+    for k in range(rela_size // 24):
+        r_off, r_info, r_add = struct.unpack_from("<QQq", data, rela_off + k * 24)
+        if (r_info & 0xffffffff) in (R_X86_64_RELATIVE, R_AARCH64_RELATIVE) and r_add in litvas:
+            bo = va_to_off(r_off)
+            if bo is not None:
+                out.append((r_off, bo))
+    return out
+
+
+def _locate_fb_elf(img, site):
+    data = img.data
+    decode = _fb_decoder(data, site, 0, len(data))
+    expected = int(site["expectedMatches"])
+    sr = site.get("structRVA")
+    if sr:
+        progbits, _ = _elf_fb_layout(data)
+        srva = int(str(sr), 16)
+        for (a, fo, s, _n) in progbits:
+            if a <= srva < a + s:
+                p = decode(fo + (srva - a))
+                if p is not None:
+                    return [p]
+                break
+    found = []
+    for (_base_va, bo) in _elf_fb_candidates(data, site["feature"]):
+        p = decode(bo)
+        if p is not None and p not in found:
+            found.append(p)
+            if len(found) > expected:
+                return found
+    return found
+
+
+# ---- Mach-O (chained-fixup rebase-target anchor) -------------------------
+def _macho_fb_layout(data, base):
+    """([(segname, vmaddr, fileoff_abs, filesize)], text_base)."""
+    ncmds = struct.unpack_from("<I", data, base + 16)[0]
+    segs, p = [], base + 32
+    for _ in range(ncmds):
+        if p + 8 > len(data):
+            break
+        cmd, cmdsize = struct.unpack_from("<II", data, p)
+        if cmdsize < 8:
+            break
+        if cmd == LC_SEGMENT_64:
+            segname = data[p + 8:p + 24].split(b"\x00")[0].decode("latin1")
+            vmaddr, _vmsize, fileoff, filesize = struct.unpack_from("<QQQQ", data, p + 24)
+            segs.append((segname, vmaddr, base + fileoff, filesize))
+        p += cmdsize
+    return segs, (segs[0][1] if segs else 0)
+
+
+def _macho_fb_candidates(data, base, feature):
+    """[(base_va, base_fileoff)] via chained-fixup rebase targets == literal VA."""
+    segs, text_base = _macho_fb_layout(data, base)
+    needle = feature.encode("latin1") + b"\x00"
+    litvas, pos = [], base
+    while True:
+        i = data.find(needle, pos)
+        if i < 0:
+            break
+        pos = i + 1
+        for (_nm, vm, fo, fs) in segs:
+            if fo <= i < fo + fs:
+                litvas.append(vm + (i - fo))
+                break
+    mask36 = (1 << 36) - 1
+    wants = set((lv - text_base) & mask36 for lv in litvas)
+    out = []
+    for (nm, vm, fo, fs) in segs:
+        if not nm.startswith("__DATA"):
+            continue
+        end = min(fo + fs, len(data))
+        for off in range(fo, end - 8, 8):
+            q = struct.unpack_from("<Q", data, off)[0]
+            if q == 0 or (q >> 63) & 1:     # skip empty slots and binds (only rebases)
+                continue
+            if (q & mask36) in wants:
+                out.append((vm + (off - fo), off))
+    return out
+
+
+def _locate_fb_macho(img, site):
+    data = img.data
+    base = img.macho_base
+    decode = _fb_decoder(data, site, 0, len(data))
+    expected = int(site["expectedMatches"])
+    sr = site.get("structRVA")
+    if sr:
+        segs, _tb = _macho_fb_layout(data, base)
+        srva = int(str(sr), 16)
+        for (_nm, vm, fo, fs) in segs:
+            if vm <= srva < vm + fs:
+                p = decode(fo + (srva - vm))
+                if p is not None:
+                    return [p]
+                break
+    found = []
+    for (_base_va, bo) in _macho_fb_candidates(data, base, site["feature"]):
+        p = decode(bo)
+        if p is not None and p not in found:
+            found.append(p)
+            if len(found) > expected:
+                return found
+    return found
+
+
+def locate_featurebyte(img, site):
+    """Runtime featurebyte locator: find the rule-1 struct and return patch-byte
+    file offsets. Dispatches by container (PE pointer scan / ELF rela anchor /
+    Mach-O fixup anchor). `site` is a signatures.json site dict."""
+    c = img.container
+    if c in ("pe", "pe32", "pe-arm64"):
+        return _locate_fb_pe(img, site)
+    if c in ("elf", "elf-arm64"):
+        return _locate_fb_elf(img, site)
+    if c == "macho-arm64":
+        return _locate_fb_macho(img, site)
+    return []
+
+
 # 64-bit SimpleFeatureData field offsets (FeatureData 0x28 + SimpleFeatureConfig).
 # See mv2-reversing.md; used only by the --feature emitter.
 _FB = {"ext_types_size": 0x60, "location_has": 0xB4, "min_has": 0xBC,
        "max_val": 0xC0, "max_has": 0xC4, "channel_val": 0xD8, "channel_has": 0xDC}
 
 
-def emit_featurebyte(img, feature):
-    """Find `feature`'s rule-1 SimpleFeatureData (extension_types size 2, a set
-    max_manifest_version, no location/min) and emit its featurebyte site dict
-    (max_manifest_version value -> value+1). PE x64 ('pe') only."""
-    if img.container != "pe":
-        raise ValueError("--feature derivation is supported only for the 'pe' (x64) container")
+def _emit_fb_pe(img, feature):
     if not img.rdata_size or not img.imagebase:
         raise ValueError("no .rdata section found")
+    fb, width = _fb_params(img.container)
     data = img.data
     lo, hi = img.rdata_raw, img.rdata_raw + img.rdata_size
     needle = feature.encode("latin1") + b"\x00"
@@ -836,33 +1057,48 @@ def emit_featurebyte(img, feature):
             break
         li = i + 1
         lit_rva = img.rdata_virt + (i - img.rdata_raw)
-        ptr = (img.imagebase + lit_rva).to_bytes(8, "little")
+        ptr = (img.imagebase + lit_rva).to_bytes(width, "little")
         p = lo
         while True:
             j = data.find(ptr, p, hi)
             if j < 0:
                 break
             p = j + 1
-            et_size = struct.unpack_from("<Q", data, j + _FB["ext_types_size"])[0]
-            loc_has = data[j + _FB["location_has"]]
-            min_has = data[j + _FB["min_has"]]
-            max_val = struct.unpack_from("<i", data, j + _FB["max_val"])[0]
-            max_has = data[j + _FB["max_has"]]
-            if et_size == 2 and max_has == 1 and loc_has == 0 and min_has == 0:
+            if _rule1_ok(data, j, fb, width):
                 struct_rva = img.rdata_virt + (j - img.rdata_raw)
-                hits.append((struct_rva, max_val))
+                hits.append((struct_rva, struct.unpack_from("<i", data, j + fb["max_val"])[0]))
     if len(hits) != 1:
         raise ValueError(f"expected exactly 1 rule-1 struct for {feature!r}, found {len(hits)}")
     struct_rva, max_val = hits[0]
-    return {
-        "name": f"{feature} permission feature rule 1 (max_manifest_version {max_val}->{max_val + 1}; grants MV3)",
-        "kind": "featurebyte", "optional": True, "feature": feature,
-        "structRVA": "0x%08X" % struct_rva, "patchOff": _FB["max_val"],
-        "stock": max_val, "patched": max_val + 1,
-        "verify": {str(_FB["ext_types_size"]): 2, str(_FB["location_has"]): 0,
-                   str(_FB["min_has"]): 0, str(_FB["max_has"]): 1},
-        "expectedMatches": 1,
-    }
+    return _fb_site(feature, struct_rva, max_val, fb)
+
+
+def _emit_fb_reloc(img, feature, candidates):
+    """Shared emit for ELF/Mach-O: `candidates` yields (base_va, base_fileoff)."""
+    data = img.data
+    hits = []
+    for (base_va, bo) in candidates:
+        if _rule1_ok(data, bo, _FB, 8):
+            hits.append((base_va, struct.unpack_from("<i", data, bo + _FB["max_val"])[0]))
+    if len(hits) != 1:
+        raise ValueError(f"expected exactly 1 rule-1 struct for {feature!r}, found {len(hits)}")
+    base_va, max_val = hits[0]
+    return _fb_site(feature, base_va, max_val, _FB)
+
+
+def emit_featurebyte(img, feature):
+    """Find `feature`'s rule-1 SimpleFeatureData (extension_types size 2, a set
+    max_manifest_version, no location/min) and emit its featurebyte site dict
+    (max_manifest_version value -> value+1). Supports PE (pe/pe32/pe-arm64), ELF
+    (elf/elf-arm64) and Mach-O (macho-arm64)."""
+    c = img.container
+    if c in ("pe", "pe32", "pe-arm64"):
+        return _emit_fb_pe(img, feature)
+    if c in ("elf", "elf-arm64"):
+        return _emit_fb_reloc(img, feature, _elf_fb_candidates(img.data, feature))
+    if c == "macho-arm64":
+        return _emit_fb_reloc(img, feature, _macho_fb_candidates(img.data, img.macho_base, feature))
+    raise ValueError(f"--feature derivation is not supported for container {c!r}")
 
 
 def cmd_verify(img, json_path):
@@ -922,7 +1158,8 @@ def main():
                     help="verify an existing table against the binary (default: signatures.json)")
     ap.add_argument("--feature", metavar="NAME",
                     help="emit a featurebyte site for permission feature NAME (e.g. webRequestBlocking): "
-                         "flips its rule-1 max_manifest_version to grant the permission to MV3 (pe x64 only)")
+                         "flips its rule-1 max_manifest_version to grant the permission to MV3 "
+                         "(PE pe/pe32/pe-arm64, ELF elf/elf-arm64, Mach-O macho-arm64)")
     args = ap.parse_args()
 
     try:

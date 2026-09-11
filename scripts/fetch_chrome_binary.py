@@ -142,105 +142,6 @@ CFT_LAST_KNOWN = (
     "https://googlechromelabs.github.io/chrome-for-testing/last-known-good-versions-with-downloads.json"
 )
 
-# --- open-source Chromium (continuous snapshots) ----------------------------
-# Chrome tables do NOT cover Chromium: Chromium is not PGO-built, so it keeps a
-# single out-of-line manifest_v2_util::IsExtensionAffected predicate and calls it
-# everywhere (Chrome's PGO build inlines it into 5-7 sites). So a Chromium
-# milestone is derived on its own and is typically a SINGLE site. Snapshots are
-# unstripped, so Linux/mac gates are symbol-named straight from the binary
-# (Windows also publishes chrome-win32-syms.zip PDBs). Builds are keyed by main-
-# branch position, not marketing version; chromiumdash maps a milestone to a
-# position and the GCS bucket is walked for the nearest available snapshot.
-SNAPSHOT_BASE = "https://commondatastorage.googleapis.com/chromium-browser-snapshots"
-SNAPSHOT_LIST = "https://www.googleapis.com/storage/v1/b/chromium-browser-snapshots/o"
-CHROMIUMDASH_RELEASES = (
-    "https://chromiumdash.appspot.com/fetch_releases?channel={channel}&platform=Linux&num=1"
-)
-
-# Same --platform keys as PLATFORMS, mapped to the snapshot platform dir, the zip
-# that carries the gate binary, and how locate_binary recognises it. There is NO
-# Linux-arm64 snapshot platform, so linux-arm64 has no entry (rejected below).
-SNAPSHOT_PLATFORMS = {
-    "win64":     {"snap": "Win_x64",   "zip": "chrome-win.zip",   "container": "pe",         "binary": "chrome.dll", "pe_magic": 0x20B, "machine": 0x8664, "tag": "chromium-win64"},
-    "win":       {"snap": "Win",       "zip": "chrome-win.zip",   "container": "pe32",       "binary": "chrome.dll", "pe_magic": 0x10B,                    "tag": "chromium-win32"},
-    "win-arm64": {"snap": "Win_Arm64", "zip": "chrome-win.zip",   "container": "pe-arm64",   "binary": "chrome.dll", "pe_magic": 0x20B, "machine": 0xAA64, "tag": "chromium-win-arm64"},
-    "linux":     {"snap": "Linux_x64", "zip": "chrome-linux.zip", "container": "elf",        "binary": "chrome",     "pe_magic": None,  "machine": 0x3E,   "tag": "chromium-linux64"},
-    "mac-arm64": {"snap": "Mac_Arm",   "zip": "chrome-mac.zip",   "container": "macho-arm64","binary": None,         "pe_magic": None,  "cputype": 0x0100000C, "tag": "chromium-mac-arm64"},
-}
-
-
-def snapshot_last_change(snap):
-    """Trunk build position for a snapshot platform, or ''."""
-    try:
-        with http_get(f"{SNAPSHOT_BASE}/{snap}/LAST_CHANGE", timeout=30) as response:
-            return response.read().decode("utf-8").strip()
-    except (urllib.error.URLError, urllib.error.HTTPError) as err:
-        print(f"  warning: LAST_CHANGE lookup failed for {snap}: {err}")
-        return ""
-
-
-def chromiumdash_position(milestone):
-    """Main-branch position where a milestone was cut, via chromiumdash. Tries
-    each channel until one reports this milestone. Returns an int or None."""
-    for channel in ("Stable", "Beta", "Dev", "Canary"):
-        try:
-            with http_get(CHROMIUMDASH_RELEASES.format(channel=channel), timeout=30) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
-            continue
-        for rel in data if isinstance(data, list) else []:
-            if rel.get("milestone") == milestone and rel.get("chromium_main_branch_position"):
-                return int(rel["chromium_main_branch_position"])
-    return None
-
-
-def list_snapshot_positions(snap, prefix_digits):
-    """Numeric build positions under {snap}/{prefix_digits}* via the GCS listing
-    (delimiter=/ returns dir prefixes), following pagination."""
-    positions = []
-    page_token = ""
-    while True:
-        url = (f"{SNAPSHOT_LIST}?delimiter=/&prefix={snap}/{prefix_digits}"
-               + (f"&pageToken={page_token}" if page_token else ""))
-        try:
-            with http_get(url, timeout=30) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, urllib.error.HTTPError, ValueError):
-            break
-        for entry in data.get("prefixes", []):
-            name = entry[len(snap) + 1:].rstrip("/")
-            if name.isdigit():
-                positions.append(int(name))
-        page_token = data.get("nextPageToken", "")
-        if not page_token:
-            break
-    return positions
-
-
-def nearest_snapshot(snap, target):
-    """Greatest available snapshot position <= target, or None.
-
-    Walks 4-digit buckets downward from the target's (e.g. 1669 -> 1668 -> ...),
-    listing each bucket's positions. Two subtleties:
-      * Buckets are bounded (~1000-wide), so each listing is small - a plain
-        `prefix=166` would page through every 166xxxx build ever and hang.
-      * The bucket also holds ancient short positions (`166907` sits under the
-        same `1669` prefix as `1669021`); only positions with the SAME digit-
-        length as the target are eligible, so a ~166k build never shadows the
-        real ~1.67M one (which would 404). Modern positions are all one width."""
-    target = int(target)
-    ndig = len(str(target))
-    if ndig < 4:
-        return None
-    hi = int(str(target)[:4])
-    for bucket in range(hi, max(hi - 40, -1), -1):
-        cands = [p for p in list_snapshot_positions(snap, str(bucket))
-                 if p <= target and len(str(p)) == ndig]
-        if cands:
-            return max(cands)
-    return None
-
-
 
 def http_get(url, timeout=60):
     request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
@@ -851,89 +752,6 @@ def fetch_branded_mac(platform, channel, out_dir, keep):
     return 0
 
 
-def fetch_chromium(platform, channel, version, position, milestone, out_dir, keep):
-    """Fetch an open-source Chromium snapshot's gate binary for MV2 derivation."""
-    if platform not in SNAPSHOT_PLATFORMS:
-        print(f"error: --browser chromium has no snapshot for --platform {platform} "
-              f"(no such continuous-build platform; e.g. there is no Linux-arm64 snapshot).",
-              file=sys.stderr)
-        return 1
-    spec = SNAPSHOT_PLATFORMS[platform]
-    snap = spec["snap"]
-    seven_zip = find_seven_zip()
-    if not seven_zip:
-        print("error: 7-Zip not found (install it, or put 7z on PATH).", file=sys.stderr)
-        return 1
-
-    # Resolve the build position: explicit --position, else --milestone via
-    # chromiumdash + nearest available snapshot, else the channel's trunk head.
-    if position:
-        pos = nearest_snapshot(snap, position)
-        source = f"--position {position}"
-    elif milestone:
-        branch = chromiumdash_position(milestone)
-        if not branch:
-            print(f"error: chromiumdash has no main-branch position for milestone {milestone}.", file=sys.stderr)
-            return 1
-        pos = nearest_snapshot(snap, branch)
-        source = f"milestone {milestone} (branch @{branch})"
-    else:
-        pos = snapshot_last_change(snap)
-        source = "LAST_CHANGE (trunk)"
-    if not pos:
-        print(f"error: could not resolve a {snap} snapshot position for {source}.", file=sys.stderr)
-        return 1
-
-    url = f"{SNAPSHOT_BASE}/{snap}/{pos}/{spec['zip']}"
-    print(f"Chromium snapshot {snap} @ {pos}  ({source})")
-    print(f"Source: {url}")
-    print("  note: Chromium is UNBRANDED and not PGO-built; re-verify the derived table "
-          "against a real Chromium install (its gate is a single free predicate).")
-
-    workdir = os.path.join(out_dir, f"_fetch_tmp_{spec['tag']}")
-    if os.path.isdir(workdir):
-        shutil.rmtree(workdir, ignore_errors=True)
-    os.makedirs(workdir, exist_ok=True)
-
-    archive = os.path.join(workdir, spec["zip"])
-    print(f"\nDownloading into {os.path.relpath(workdir)}/ ...")
-    if not download(url, archive):
-        shutil.rmtree(workdir, ignore_errors=True)
-        return 1
-
-    print(f"Extracting {spec['zip']} ...")
-    tree = extract(archive, workdir, seven_zip)
-    binary = locate_binary(tree, spec)
-    if not binary:
-        kind = spec["binary"] or "framework Mach-O"
-        print(f"error: no {kind} ({spec['container']}) found in the extracted tree.", file=sys.stderr)
-        if not keep:
-            shutil.rmtree(workdir, ignore_errors=True)
-        return 1
-
-    suffix = ".dll" if spec["container"].startswith("pe") else ""
-    dest = os.path.join(out_dir, f"chrome-{pos}-{spec['tag']}{suffix}")
-    shutil.copy2(binary, dest)
-    size = os.path.getsize(dest)
-    if not keep:
-        shutil.rmtree(workdir, ignore_errors=True)
-
-    print(f"\nSaved {spec['container']} binary ({human_size(size)}):")
-    print(f"  {os.path.relpath(dest)}")
-    print("\nNext (Chromium gates are usually a SINGLE free-predicate site):")
-    if spec["container"].startswith("macho"):
-        print(f"  nm -n {os.path.relpath(dest)} > _scratch/syms.txt   # snapshot Mach-O is unstripped")
-        print(f"  python scripts/derive_milestone.py {os.path.relpath(dest)} --symbols _scratch/syms.txt --name <ver>-chromium --json")
-    elif spec["container"] == "elf":
-        print(f"  python scripts/symbols_from_elf.py {os.path.relpath(dest)} _scratch/syms.txt   # snapshot ELF is unstripped")
-        print(f"  python scripts/derive_milestone.py {os.path.relpath(dest)} --symbols _scratch/syms.txt --name <ver>-chromium --json")
-    else:
-        print(f"  python scripts/fetch_symbols.py {os.path.relpath(dest)}   # pulls the matching PDB by GUID from the Chromium symbol server")
-        print(f"  python scripts/symbols_from_pdb.py {os.path.relpath(dest)} --symdir _scratch --json _scratch/syms.json")
-        print(f"  python scripts/derive_milestone.py {os.path.relpath(dest)} --symbols _scratch/syms.json --name <ver>-chromium --json")
-    return 0
-
-
 def default_platform():
     if sys.platform.startswith("win"):
         return "win64"
@@ -948,11 +766,6 @@ def parse_args(argv=None):
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--browser", choices=("chrome", "chromium"), default="chrome",
-        help="chrome (default): the branded consumer build. chromium: an open-source "
-             "continuous snapshot (single-site gate; use --position/--milestone to pin one)",
-    )
-    parser.add_argument(
         "--platform", choices=sorted(PLATFORMS), default=default_platform(),
         help="which gate binary to fetch (default: this host's)",
     )
@@ -964,16 +777,6 @@ def parse_args(argv=None):
         "--version", metavar="X.Y.Z.W",
         help="pin a version; falls back to the Chrome for Testing archive when "
              "Google no longer serves that build as an installer",
-    )
-    parser.add_argument(
-        "--position", metavar="N",
-        help="Chromium only: pin a main-branch build position (nearest available "
-             "snapshot <= N is used)",
-    )
-    parser.add_argument(
-        "--milestone", metavar="N", type=int,
-        help="Chromium only: pin a milestone (e.g. 152); resolved to its branch "
-             "position via chromiumdash, then the nearest snapshot",
     )
     parser.add_argument(
         "--url", metavar="INSTALLER_URL",
@@ -1004,10 +807,6 @@ def parse_args(argv=None):
             parser.error("no default platform for this host; pass --platform win64|win|linux")
         if args.version and not all(p.isdigit() for p in args.version.split(".")):
             parser.error(f"--version expects a dotted numeric version, got {args.version!r}")
-        if args.position and not args.position.isdigit():
-            parser.error(f"--position expects a numeric build position, got {args.position!r}")
-        if args.browser == "chrome" and (args.position or args.milestone):
-            parser.error("--position/--milestone apply only to --browser chromium")
     return args
 
 
@@ -1022,9 +821,6 @@ def main(argv=None):
             print("error: --branded is only for mac platforms.", file=sys.stderr)
             return 1
         return fetch_branded_mac(args.platform, args.channel, args.out, args.keep)
-    if args.browser == "chromium":
-        return fetch_chromium(args.platform, args.channel, args.version,
-                              args.position, args.milestone, args.out, args.keep)
     return fetch(args.platform, args.channel, args.version, args.out, args.keep, args.url)
 
 

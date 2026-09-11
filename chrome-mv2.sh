@@ -56,10 +56,14 @@ readonly APP_VERSION="1.10.1"
 # container: elf | elf-arm64 | macho-arm64   (this script patches ELF + Mach-O)
 # kind: short (7F->EB) | near (0F8F->90E9) | bcond (arm64 b.gt GT->AL)
 #     | cbz (arm64 CBZ->B) | tbz (arm64 TBZ/TBNZ->B, same resolved target)
+#     | featurebyte (name-anchored data byte, e.g. max_manifest_version 2->3)
 # jgRVA: hex RVA of the jump opcode in the reference build (fast-path probe)
 # jgOff: byte index of the jump opcode within sig
 # optional: 1 = best-effort (applied if found, never blocks the patch)
 # sig: hex bytes, jump opcode included at jgOff
+# featurebyte reuses the S record positionally: jgRVA slot = fast-path structRVA,
+#   jgOff slot = patchOff, sig slot = "feature,stock,patched,voff=val;voff=val;..."
+#   (no | so the split is intact); located by ELF .rela.dyn / Mach-O fixup anchor.
 #
 # signatures.json is the canonical table. See mv2-reversing.md.
 # ============================================================================
@@ -126,8 +130,8 @@ banner() {
     rule
 }
 
-# Menu display name: the Google channels get the "Chrome " prefix; Chromium and
-# anything else (custom path) is shown as-is.
+# Menu display name: the Google channels get the "Chrome " prefix; anything else
+# (custom path) is shown as-is.
 display_name() {
     case "$1" in
         Stable|Beta|Dev|Canary) echo "Chrome $1" ;;
@@ -292,8 +296,57 @@ for m in ms:
         if snm in sn: raise ValueError("dup site %s in %s" % (snm, name))
         sn.add(snm)
         kind = s.get("kind")
-        if kind not in ("short", "near", "bcond", "cbz", "tbz"):
+        if kind not in ("short", "near", "bcond", "cbz", "tbz", "featurebyte"):
             raise ValueError("bad kind in %s/%s" % (name, snm))
+        if kind == "featurebyte":
+            # featurebyte is a name-anchored data-byte flip (a permission feature
+            # max_manifest_version 2 -> 3), NOT a code-branch flip, so it is valid
+            # in every container this script handles (elf / elf-arm64 / macho-arm64)
+            # and skips the branch-kind arch/opcode checks below. It carries its own
+            # fields packed into the positional S record: the jgRVA slot holds the
+            # fast-path structRVA (0x0 when absent), the jgOff slot holds patchOff,
+            # and the sig slot holds "feature,stock,patched,voff=val;voff=val;..."
+            # (chosen delimiters avoid | so the 7-field split downstream is intact).
+            # The locate step reads them back and runs the ELF .rela.dyn / Mach-O
+            # chained-fixup anchor scan. Mirrors chrome-mv2.py import_milestones.
+            feat = s.get("feature")
+            if not isinstance(feat, str) or not feat or any(c in feat for c in "\r\n\t|,;="):
+                raise ValueError("featurebyte needs a clean feature name in %s/%s" % (name, snm))
+            poff = s.get("patchOff")
+            if not isinstance(poff, int) or isinstance(poff, bool) or poff < 0:
+                raise ValueError("featurebyte needs a non-negative patchOff in %s/%s" % (name, snm))
+            stk = s.get("stock"); pch = s.get("patched")
+            for lbl, vv in (("stock", stk), ("patched", pch)):
+                if not isinstance(vv, int) or isinstance(vv, bool) or not (0 <= vv <= 255):
+                    raise ValueError("featurebyte %s must be a byte 0..255 in %s/%s" % (lbl, name, snm))
+            if stk == pch:
+                raise ValueError("featurebyte stock and patched are identical in %s/%s" % (name, snm))
+            vraw = s.get("verify", {})
+            if not isinstance(vraw, dict):
+                raise ValueError("featurebyte verify must be an object in %s/%s" % (name, snm))
+            vpairs = []
+            for vk, vv in vraw.items():
+                try:
+                    ko = int(str(vk), 0)
+                except ValueError:
+                    raise ValueError("featurebyte verify key is not an integer in %s/%s" % (name, snm))
+                if ko < 0 or not isinstance(vv, int) or isinstance(vv, bool) or not (0 <= vv <= 255):
+                    raise ValueError("featurebyte verify value out of range in %s/%s" % (name, snm))
+                vpairs.append("%d=%d" % (ko, vv))
+            sr = s.get("structRVA")
+            if sr is None:
+                srhex = "0x0"
+            elif re.fullmatch(r"0[xX][0-9A-Fa-f]+", str(sr)):
+                srhex = str(sr)
+            else:
+                raise ValueError("bad structRVA in %s/%s" % (name, snm))
+            exp = s.get("expectedMatches")
+            if not isinstance(exp, int) or isinstance(exp, bool) or exp < 1:
+                raise ValueError("bad expectedMatches in %s/%s" % (name, snm))
+            opt = 1 if s.get("optional") else 0
+            packed = "%s,%d,%d,%s" % (feat, stk, pch, ";".join(vpairs))
+            print("S|%s|featurebyte|%s|%d|%d|%d|%s" % (snm, srhex, poff, exp, opt, packed))
+            continue
         # x86_64 gates (elf) are cmp/jg (short/near); the arm64 gates (elf-arm64,
         # macho-arm64) are the bcond flip, the cbz rewrite, or the tbz rewrite.
         # Reject a kind that does not match the container architecture.
@@ -997,6 +1050,212 @@ except Exception:
 
 # find_site_matches <file> <base> <traw> <tvaddr> <tsize> <spec> -> FOUND_OFFSETS, RELOCATED
 
+# featurebyte locator. A featurebyte site is not a code branch: it flips ONE data
+# byte in a named permission feature's SimpleFeatureData struct (max_manifest_version
+# 2 -> 3, granting webRequestBlocking to MV3). The struct is found by the container's
+# own reference to the feature-name literal - an R_*_RELATIVE reloc addend in ELF, a
+# chained-fixup rebase target in Mach-O - because the .name slot is 0 / a fixup on
+# disk. Both containers also try a fast path via the table's structRVA (self-checked
+# by the verify map), then fall back to the anchor scan, since structRVAs drift
+# across builds. Prints the ABSOLUTE patch-byte file offset(s), one per line.
+# Stdin: the target file.  Args: base structRVA(dec) patchOff expected packed
+#   packed = "feature,stock,patched,voff=val;voff=val;..."  (parsed in-process)
+python_locate_featurebyte() {
+    "$MV2_PYTHON" -c '
+import sys
+try:
+    a = sys.argv
+    base = int(a[1]); struct_rva = int(a[2]); patch_off = int(a[3]); expected = int(a[4])
+    parts = a[5].split(",", 3)
+    if len(parts) < 3:
+        sys.exit(0)
+    feature = parts[0]; stock = int(parts[1]); patched = int(parts[2])
+    verify = {}
+    if len(parts) > 3 and parts[3]:
+        for item in parts[3].split(";"):
+            if not item:
+                continue
+            ks, vs = item.split("=")
+            verify[int(ks)] = int(vs)
+    data = sys.stdin.buffer.read()
+    n = len(data)
+    needle = feature.encode("latin1") + b"\x00"
+    found = []
+
+    def decode(bo):
+        # Return the patch-byte file offset if the struct whose .name field is at
+        # file offset bo satisfies the verify map and its patch byte is stock or
+        # patched; else None. Byte-wise and container-independent.
+        poff = bo + patch_off
+        if poff < 0 or poff >= n:
+            return None
+        b = data[poff]
+        if b != stock and b != patched:
+            return None
+        for off, expect in verify.items():
+            vo = bo + off
+            if vo < 0 or vo >= n or data[vo] != expect:
+                return None
+        return poff
+
+    def add(bo):
+        p = decode(bo)
+        if p is not None and p not in found:
+            found.append(p)
+
+    magic = data[base:base + 4]
+    if magic == b"\x7fELF":
+        shoff = int.from_bytes(data[0x28:0x30], "little")
+        shentsize = int.from_bytes(data[0x3A:0x3C], "little")
+        shnum = int.from_bytes(data[0x3C:0x3E], "little")
+        shstrndx = int.from_bytes(data[0x3E:0x40], "little")
+        if shoff < 64 or shoff > n or shnum == 0 or shstrndx >= shnum or shentsize < 64:
+            sys.exit(0)
+        strhdr = shoff + shstrndx * shentsize
+        stroff = int.from_bytes(data[strhdr + 0x18:strhdr + 0x20], "little")
+        strsize = int.from_bytes(data[strhdr + 0x20:strhdr + 0x28], "little")
+        progbits = []
+        rela_off = rela_size = None
+        for i in range(shnum):
+            sh = shoff + i * shentsize
+            nm = int.from_bytes(data[sh:sh + 4], "little")
+            st = int.from_bytes(data[sh + 4:sh + 8], "little")
+            addr = int.from_bytes(data[sh + 0x10:sh + 0x18], "little")
+            o = int.from_bytes(data[sh + 0x18:sh + 0x20], "little")
+            sz = int.from_bytes(data[sh + 0x20:sh + 0x28], "little")
+            if st == 1 and addr:
+                progbits.append((addr, o, sz))
+            elif nm < strsize and data[stroff + nm:stroff + nm + 10].split(b"\x00", 1)[0] == b".rela.dyn":
+                rela_off, rela_size = o, sz
+
+        def va_to_off(va):
+            for (aa, oo, ss) in progbits:
+                if aa <= va < aa + ss:
+                    return oo + (va - aa)
+            return None
+
+        def off_to_va(o):
+            for (aa, oo, ss) in progbits:
+                if oo <= o < oo + ss:
+                    return aa + (o - oo)
+            return None
+
+        if struct_rva:
+            bo = va_to_off(struct_rva)
+            if bo is not None:
+                p = decode(bo)
+                if p is not None:
+                    sys.stdout.buffer.write(("%d\n" % p).encode()); sys.exit(0)
+        if rela_off is None:
+            sys.exit(0)
+        litvas = set(); pos = 0
+        while True:
+            i = data.find(needle, pos)
+            if i < 0:
+                break
+            pos = i + 1
+            va = off_to_va(i)
+            if va is not None:
+                litvas.add(va)
+        R_X86_64_RELATIVE = 8; R_AARCH64_RELATIVE = 0x403
+        for k in range(rela_size // 24):
+            bb = rela_off + k * 24
+            r_info = int.from_bytes(data[bb + 8:bb + 16], "little")
+            if (r_info & 0xffffffff) not in (R_X86_64_RELATIVE, R_AARCH64_RELATIVE):
+                continue
+            r_add = int.from_bytes(data[bb + 16:bb + 24], "little", signed=True)
+            if r_add in litvas:
+                r_off = int.from_bytes(data[bb:bb + 8], "little")
+                bo = va_to_off(r_off)
+                if bo is not None:
+                    add(bo)
+                    if len(found) > expected:
+                        break
+    elif magic == b"\xcf\xfa\xed\xfe":
+        ncmds = int.from_bytes(data[base + 16:base + 20], "little")
+        segs = []; p = base + 32
+        for _ in range(ncmds):
+            if p + 8 > n:
+                break
+            cmd = int.from_bytes(data[p:p + 4], "little")
+            cmdsize = int.from_bytes(data[p + 4:p + 8], "little")
+            if cmdsize < 8 or p + cmdsize > n:
+                break
+            if cmd == 0x19:
+                segname = data[p + 8:p + 24].split(b"\x00", 1)[0]
+                vmaddr = int.from_bytes(data[p + 24:p + 32], "little")
+                fileoff = int.from_bytes(data[p + 40:p + 48], "little")
+                filesize = int.from_bytes(data[p + 48:p + 56], "little")
+                segs.append((segname, vmaddr, base + fileoff, filesize))
+            p += cmdsize
+        if not segs:
+            sys.exit(0)
+        text_base = segs[0][1]
+
+        def va_to_off(va):
+            for (_nm, vm, fo, fs) in segs:
+                if vm <= va < vm + fs:
+                    return fo + (va - vm)
+            return None
+
+        if struct_rva:
+            bo = va_to_off(struct_rva)
+            if bo is not None:
+                p = decode(bo)
+                if p is not None:
+                    sys.stdout.buffer.write(("%d\n" % p).encode()); sys.exit(0)
+        litvas = []; pos = base
+        while True:
+            i = data.find(needle, pos)
+            if i < 0:
+                break
+            pos = i + 1
+            for (_nm, vm, fo, fs) in segs:
+                if fo <= i < fo + fs:
+                    litvas.append(vm + (i - fo)); break
+        mask36 = (1 << 36) - 1
+        wants = set((lv - text_base) & mask36 for lv in litvas)
+        for (nm, vm, fo, fs) in segs:
+            if not nm.startswith(b"__DATA"):
+                continue
+            end = min(fo + fs, n); o = fo
+            while o + 8 <= end:
+                q = int.from_bytes(data[o:o + 8], "little")
+                if q and not ((q >> 63) & 1) and (q & mask36) in wants:
+                    add(o)
+                    if len(found) > expected:
+                        break
+                o += 8
+            if len(found) > expected:
+                break
+
+    sys.stdout.buffer.write("".join("%d\n" % p for p in found).encode())
+except Exception:
+    sys.exit(0)
+' "$@" 2>/dev/null || true
+}
+
+# locate_featurebyte <file> <base> <structRVA_dec> <patchOff> <expected> <packed>
+# Fills FOUND_OFFSETS with the patch-byte file offset(s). featurebyte is optional,
+# so a missing python interpreter (or any failure) leaves FOUND_OFFSETS empty and
+# returns 0 - the site is simply skipped, never blocking MV2.
+locate_featurebyte() {
+    local file="$1" base="$2" struct_rva="$3" patch_off="$4" expected="$5" packed="$6"
+    FOUND_OFFSETS=(); RELOCATED=false
+    resolve_python
+    [[ -n "$MV2_PYTHON" ]] || return 0
+    local off matches=()
+    while IFS= read -r off; do
+        off="${off%$'\r'}"   # a Windows python3 may emit CRLF
+        [[ "$off" =~ ^[0-9]+$ ]] || continue
+        matches+=("$off")
+    done < <(python_locate_featurebyte "$base" "$struct_rva" "$patch_off" "$expected" "$packed" < "$file")
+    if (( ${#matches[@]} > 0 )); then
+        FOUND_OFFSETS=("${matches[@]}"); RELOCATED=true
+    fi
+    return 0
+}
+
 # spec is "name|kind|jgRVA|jgOff|expectedMatches|optional|sig". FOUND_OFFSETS holds
 # ABSOLUTE file offsets of the jump opcode within this slice. Fast path probes
 # the recorded RVA; a miss falls back to one raw fixed-string grep for the site.
@@ -1007,6 +1266,15 @@ find_site_matches() {
     IFS='|' read -r name kind jg_rva_hex jg_off expected optional sig_hex <<< "$spec"
     local jg_rva=$(( jg_rva_hex )) sig_len=$(( ${#sig_hex} / 2 ))
     FOUND_OFFSETS=(); RELOCATED=false
+
+    # featurebyte is name-anchored, not a .text branch: dispatch to its own locator
+    # and return. Runs in BOTH probe passes (the name scan is cheap) so this optional
+    # site is never missed just because the required gates matched on the fast pass.
+    # Here jg_rva_hex is the fast-path structRVA and jg_off is the patchOff.
+    if [[ "$kind" == "featurebyte" ]]; then
+        locate_featurebyte "$file" "$base" "$jg_rva" "$jg_off" "$expected" "$sig_hex"
+        return 0
+    fi
 
     # Fast path: probe the recorded RVA (only when expectedMatches == 1).
     if (( expected == 1 && jg_rva >= tvaddr )); then
@@ -1095,9 +1363,9 @@ reset_probe_results() {
 
 # Ranking: a milestone whose EVERY site matched (full) always beats a partial
 # one, regardless of raw satisfied count; among full matches the one with MORE
-# sites wins (most specific), so a Chrome build's multi-site table is chosen over
-# a coexisting single-site Chromium table (which shares the container tag) and
-# vice-versa. Among partial matches the most-satisfied one wins. A genuine
+# sites wins (most specific), so when several tables fit the same container the
+# fullest, most-specific one is chosen. Among partial matches the most-satisfied
+# one wins. A genuine
 # equal-rank collision (two fulls of the same size, or two equal partials) bumps
 # BEST_TIES, and the callers decline on BEST_TIES > 1.
 probe_slice_pass() {
@@ -1109,6 +1377,7 @@ probe_slice_pass() {
         local satisfied=0 total=0
         local fn=() fk=() fo=() fr=() fs=()
         local spec s_name s_kind s_jgrva s_jgoff s_expected s_optional s_sig off stock_hex matched
+        local fb_rest fb_patch_rest
         while IFS= read -r spec; do
             [[ -n "$spec" ]] || continue
             IFS='|' read -r s_name s_kind s_jgrva s_jgoff s_expected s_optional s_sig <<< "$spec"
@@ -1119,7 +1388,12 @@ probe_slice_pass() {
                 # The sig bytes at jgOff are the stock encoding (7F short,
                 # 0F8F/0F84 near, or the 4-byte CBZ word for cbz); the flip
                 # engine works off arrays without the sig, so carry them along.
-                if [[ "$s_kind" == "cbz" || "$s_kind" == "tbz" ]]; then
+                # featurebyte has no sig: its s_sig is "feature,stock,patched,verify",
+                # so carry the stock+patched bytes (two hex bytes) for the flip/classify.
+                if [[ "$s_kind" == "featurebyte" ]]; then
+                    fb_rest="${s_sig#*,}"; fb_patch_rest="${fb_rest#*,}"
+                    stock_hex="$(printf '%02X%02X' "${fb_rest%%,*}" "${fb_patch_rest%%,*}")"
+                elif [[ "$s_kind" == "cbz" || "$s_kind" == "tbz" ]]; then
                     stock_hex="${s_sig:$(( s_jgoff*2 )):8}"
                 elif [[ "$s_kind" == "near" ]]; then
                     stock_hex="${s_sig:$(( s_jgoff*2 )):4}"
@@ -1198,7 +1472,7 @@ probe_slice() {
 SLICE_FLIPS=0; SLICE_ALREADY=0
 apply_flips_slice() {
     local file="$1" applied=0 already=0 i name kind offset cur o0 o1 nib newb
-    local stock_hex sb0 sb1 b0 b1 b2 b3 word sw imm19 neww nb0 nb1 nb2 nb3 cdisp sdisp
+    local stock_hex sb0 sb1 pb b0 b1 b2 b3 word sw imm19 neww nb0 nb1 nb2 nb3 cdisp sdisp
     _hexcache_load "$file"   # prime for the per-site reads; flushed after writing
     SLICE_FLIPS=0; SLICE_ALREADY=0
     for (( i = 0; i < ${#FLIP_OFFSETS[@]}; i++ )); do
@@ -1278,6 +1552,19 @@ apply_flips_slice() {
             nb2=$(( (neww >> 16) & 0xFF )); nb3=$(( (neww >> 24) & 0xFF ))
             printf "\x$(printf '%02X' $nb0)\x$(printf '%02X' $nb1)\x$(printf '%02X' $nb2)\x$(printf '%02X' $nb3)" | dd of="$file" bs=1 seek="$offset" count=4 conv=notrunc 2>/dev/null
             applied=$(( applied + 1 ))
+        elif [[ "$kind" == "featurebyte" ]]; then
+            # One data byte: stock -> patched (e.g. max_manifest_version 2 -> 3).
+            # stock_hex carries the two bytes as "SSPP". Idempotent: already-patched
+            # counts as done; anything unexpected is skipped (never overwritten).
+            cur=$(read_byte "$file" "$offset")
+            sb0=$(( 16#${stock_hex:0:2} )); pb=$(( 16#${stock_hex:2:2} ))
+            if (( cur == pb )); then already=$(( already + 1 )); continue; fi
+            if (( cur != sb0 )); then
+                warnf "    Skipped one change - it didn't look the way we expected."
+                continue
+            fi
+            printf "\x$(printf '%02X' "$pb")" | dd of="$file" bs=1 seek="$offset" count=1 conv=notrunc 2>/dev/null
+            applied=$(( applied + 1 ))
         else  # bcond
             cur=$(read_byte "$file" "$offset")   # little-endian byte0 holds the condition
             nib=$(( cur & 0x0F ))
@@ -1298,7 +1585,7 @@ apply_flips_slice() {
 STATE_STOCK=0; STATE_PATCHED=0
 classify_flip_states_slice() {
     local file="$1" i kind offset o0 o1 nib
-    local stock_hex sb0 sb1 b0 b1 b2 b3 word sw cdisp sdisp
+    local stock_hex sb0 sb1 pb b0 b1 b2 b3 word sw cdisp sdisp
     _hexcache_load "$file"   # prime the byte cache for the per-site reads
     STATE_STOCK=0; STATE_PATCHED=0
     for (( i = 0; i < ${#FLIP_OFFSETS[@]}; i++ )); do
@@ -1352,6 +1639,12 @@ classify_flip_states_slice() {
             else
                 return 1
             fi
+        elif [[ "$kind" == "featurebyte" ]]; then
+            # stock_hex is "SSPP": the located data byte must read as stock or patched.
+            sb0=$(( 16#${stock_hex:0:2} )); pb=$(( 16#${stock_hex:2:2} ))
+            if (( o0 == sb0 )); then STATE_STOCK=$(( STATE_STOCK + 1 ))
+            elif (( o0 == pb )); then STATE_PATCHED=$(( STATE_PATCHED + 1 ))
+            else return 1; fi
         else
             nib=$(( o0 & 0x0F ))
             if (( nib == 0x0C )); then STATE_STOCK=$(( STATE_STOCK + 1 ))
@@ -1725,8 +2018,8 @@ resolve_macho_target() {
     return 0
 }
 
-CHROME_APPS=("Google Chrome.app" "Google Chrome Beta.app" "Google Chrome Dev.app" "Google Chrome Canary.app" "Chromium.app")
-CHROME_LABELS=("Stable" "Beta" "Dev" "Canary" "Chromium")
+CHROME_APPS=("Google Chrome.app" "Google Chrome Beta.app" "Google Chrome Dev.app" "Google Chrome Canary.app")
+CHROME_LABELS=("Stable" "Beta" "Dev" "Canary")
 MAC_LABELS=(); MAC_APPS=(); MAC_VERSIONS=(); MAC_RUNNING=()
 
 enumerate_macos_installs() {
@@ -1804,22 +2097,6 @@ reopen_browser_macos() {
 LINUX_CHANNELS=("Stable" "Beta" "Dev")
 LINUX_DIRS=("/opt/google/chrome" "/opt/google/chrome-beta" "/opt/google/chrome-unstable")
 
-# Chromium (open-source) install layouts vary by distro/packaging; the gate ELF
-# is usually named "chromium" or "chrome" under one of these dirs. Snap/Flatpak
-# builds live on read-only mounts (squashfs/OSTree) and can't be patched in
-# place, so they are NOT auto-listed - extract a Google snapshot or pass an
-# explicit writable path instead.
-CHROMIUM_BINS=(
-    "/usr/lib/chromium/chromium"
-    "/usr/lib/chromium/chrome"
-    "/usr/lib/chromium-browser/chromium-browser"
-    "/usr/lib/chromium-browser/chrome"
-    "/usr/lib64/chromium/chromium"
-    "/usr/lib64/chromium-browser/chromium-browser"
-    "/opt/chromium.org/chromium/chrome"
-    "/opt/chromium/chrome"
-)
-
 chrome_version() {
     local bin="$1" pkg=""
     case "$bin" in
@@ -1834,22 +2111,6 @@ chrome_version() {
         rpm -q --qf '%{VERSION}\n' "$pkg" 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
         return
     fi
-    # Chromium (any distro/snapshot): no fixed package mapping. Try the common
-    # Chromium package names, then fall back to asking the binary itself
-    # ("Chromium X.Y.Z.W"), which is cheap - --version prints and exits.
-    local p ver
-    if command -v dpkg-query >/dev/null 2>&1; then
-        for p in chromium chromium-browser; do
-            ver=$(dpkg-query -W -f='${Version}\n' "$p" 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
-            [[ -n "$ver" ]] && { echo "$ver"; return; }
-        done
-    fi
-    if command -v rpm >/dev/null 2>&1; then
-        for p in chromium chromium-browser; do
-            ver=$(rpm -q --qf '%{VERSION}\n' "$p" 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
-            [[ -n "$ver" ]] && { echo "$ver"; return; }
-        done
-    fi
     if [[ -x "$bin" ]]; then
         "$bin" --version 2>/dev/null | grep -o -E '[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true
     fi
@@ -1863,7 +2124,6 @@ detect_target_version() {
     local bin="$1" b
     local known=()
     for b in "${LINUX_DIRS[@]}"; do known+=("${b}/chrome"); done
-    known+=("${CHROMIUM_BINS[@]}")
     for b in "${known[@]}"; do
         if [[ "$bin" == "$b" ]]; then chrome_version "$b"; return; fi
     done
@@ -2089,13 +2349,9 @@ elf_patch_state() {
 enumerate_linux_installs() {
     LNX_CHANNELS=(); LNX_PATHS=(); LNX_VERSIONS=(); LNX_RUNNING=(); LNX_HOLDERS=(); LNX_BACKUPS=(); LNX_STATE=()
     local labels=() bins=() i
-    # Google Chrome channels first (gate ELF is <dir>/chrome)...
+    # Google Chrome channels (gate ELF is <dir>/chrome).
     for (( i = 0; i < ${#LINUX_CHANNELS[@]}; i++ )); do
         labels+=("${LINUX_CHANNELS[$i]}"); bins+=("${LINUX_DIRS[$i]}/chrome")
-    done
-    # ...then the open-source Chromium candidates.
-    for (( i = 0; i < ${#CHROMIUM_BINS[@]}; i++ )); do
-        labels+=("Chromium"); bins+=("${CHROMIUM_BINS[$i]}")
     done
 
     local seen="" bin label rp ver holders has_backup running state
@@ -2103,7 +2359,7 @@ enumerate_linux_installs() {
         bin="${bins[$i]}"; label="${labels[$i]}"
         [[ -f "$bin" ]] || continue
         # Only patchable ELF binaries qualify - skips launcher shell scripts that
-        # some distros name "chromium"/"chromium-browser" beside the real ELF.
+        # some distros install beside the real ELF.
         parse_elf "$bin" >/dev/null 2>&1 || continue
         rp=$(readlink -f "$bin" 2>/dev/null || echo "$bin")
         case " $seen " in *" $rp "*) continue ;; esac   # a distro may list a path twice
@@ -2158,7 +2414,7 @@ read_custom_path() {
 choose_linux_install() {
     local count=${#LNX_CHANNELS[@]}
     if (( count == 0 )); then
-        warnf "Couldn't find Chrome or Chromium on this computer."
+        warnf "Couldn't find Chrome on this computer."
         echo ""
         if read_custom_path; then TARGET_FILE="$CHOSEN_CUSTOM_PATH"; return 0; fi
         infof "No path entered - nothing was changed."
@@ -2214,7 +2470,7 @@ choose_linux_install() {
 choose_macos_install() {
     local count=${#MAC_APPS[@]} i
     if (( count == 0 )); then
-        warnf "Couldn't find Google Chrome or Chromium on this Mac."
+        warnf "Couldn't find Google Chrome on this Mac."
         echo "    Give the path, e.g. bash $0 patch \"/path/to/Google Chrome.app\""
         return 1
     fi
@@ -2675,9 +2931,9 @@ print_usage() {
     cat <<EOF
 Usage: bash chrome-mv2.sh [command] [path] [options]
 
-Turns Manifest V2 extension support back on in Google Chrome or Chromium. Works
-on both Linux (the chrome/chromium binary) and macOS (Google Chrome.app or
-Chromium.app). On macOS it also re-signs the app so it opens normally.
+Turns Manifest V2 extension support back on in Google Chrome. Works
+on both Linux (the chrome binary) and macOS (Google Chrome.app). On
+macOS it also re-signs the app so it opens normally.
 
 Commands:
   patch                  Turn Manifest V2 back on (default).
@@ -2685,7 +2941,7 @@ Commands:
   check                  Show the current status. Changes nothing.
 
 Arguments:
-  path                   Path to Chrome/Chromium. On macOS a .app also works.
+  path                   Path to Chrome. On macOS a .app also works.
                          If left out, an installed browser is found automatically.
 
 Options:
@@ -2791,7 +3047,7 @@ main() {
         enumerate_linux_installs
         if $QUIET; then
             if (( ${#LNX_CHANNELS[@]} == 0 )); then
-                errf "Couldn't find Chrome or Chromium on this computer."
+                errf "Couldn't find Chrome on this computer."
                 echo "    Give the path, e.g. sudo bash $0 patch /path/to/chrome"; exit 1
             fi
             if (( ${#LNX_CHANNELS[@]} > 1 )); then

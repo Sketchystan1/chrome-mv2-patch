@@ -315,34 +315,6 @@
    ]
   },
   {
-   "name": "152-chromium-linux",
-   "container": "elf",
-   "sites": [
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate)",
-     "kind": "short",
-     "jgRVA": "0x0923C9D9",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"
-    }
-   ]
-  },
-  {
-   "name": "152-chromium",
-   "container": "pe",
-   "sites": [
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate)",
-     "kind": "short",
-     "jgRVA": "0x04723915",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"
-    }
-   ]
-  },
-  {
    "name": "154-x86",
    "container": "pe32",
    "sites": [
@@ -569,6 +541,24 @@
      "optional": true,
      "stockOpcode": "0x75",
      "sig": "F68754020000087545488B5310"
+    },
+    {
+     "_comment": "Chrome only lets MV2 extensions use webRequestBlocking. This flips one byte in the feature's .rdata struct (max manifest version 2 -> 3) so MV3 can use it too, and nothing else. We find it by name, not by a code branch. Optional: if it's missing, MV2 patching still works. Only 155-era tables (155/155-x86/155-linux/155-linux-arm64/155-macos-arm64) have it (older builds lay the struct out differently).",
+     "name": "let MV3 extensions use webRequestBlocking",
+     "kind": "featurebyte",
+     "optional": true,
+     "feature": "webRequestBlocking",
+     "structRVA": "0x10228E10",
+     "patchOff": 192,
+     "stock": 2,
+     "patched": 3,
+     "verify": {
+      "96": 2,
+      "180": 0,
+      "188": 0,
+      "196": 1
+     },
+     "expectedMatches": 1
     }
    ]
   },
@@ -634,6 +624,24 @@
      "optional": true,
      "stockOpcode": "0x75",
      "sig": "F6867C01000008755A8B47088945D4"
+    },
+    {
+     "_comment": "Same gate as 155 win64, for 32-bit Chrome (smaller struct: max-version byte at +104). Flips webRequestBlocking's rule-1 max manifest version 2 -> 3 so MV3 can use it. Found by name in .rdata; optional.",
+     "name": "let MV3 extensions use webRequestBlocking",
+     "kind": "featurebyte",
+     "optional": true,
+     "feature": "webRequestBlocking",
+     "structRVA": "0x0E43907C",
+     "patchOff": 104,
+     "stock": 2,
+     "patched": 3,
+     "verify": {
+      "48": 2,
+      "92": 0,
+      "100": 0,
+      "108": 1
+     },
+     "expectedMatches": 1
     }
    ]
   },
@@ -688,6 +696,24 @@
      "jgOff": 4,
      "expectedMatches": 1,
      "sig": "837B50020F8FD4000000488B8B280200008B415080BB080200000075"
+    },
+    {
+     "_comment": "Same webRequestBlocking MV3 gate for Linux. The struct's name pointer is a relocation (0 on disk), so we find the struct via a .rela.dyn RELATIVE reloc pointing at the 'webRequestBlocking' string, then flip max version 2 -> 3. Optional.",
+     "name": "let MV3 extensions use webRequestBlocking",
+     "kind": "featurebyte",
+     "optional": true,
+     "feature": "webRequestBlocking",
+     "structRVA": "0x113F75F0",
+     "patchOff": 192,
+     "stock": 2,
+     "patched": 3,
+     "verify": {
+      "96": 2,
+      "180": 0,
+      "188": 0,
+      "196": 1
+     },
+     "expectedMatches": 1
     }
    ]
   },
@@ -736,6 +762,24 @@
      "expectedMatches": 1,
      "optional": true,
      "sig": "0831493948021837E80B40F9010D40F9"
+    },
+    {
+     "_comment": "Same webRequestBlocking MV3 gate for macOS arm64. The name pointer is a chained fixup, so we find the struct via its rebase target, then flip max version 2 -> 3 in __DATA_CONST. Optional.",
+     "name": "let MV3 extensions use webRequestBlocking",
+     "kind": "featurebyte",
+     "optional": true,
+     "feature": "webRequestBlocking",
+     "structRVA": "0x0E6206A8",
+     "patchOff": 192,
+     "stock": 2,
+     "patched": 3,
+     "verify": {
+      "96": 2,
+      "180": 0,
+      "188": 0,
+      "196": 1
+     },
+     "expectedMatches": 1
     }
    ]
   },
@@ -782,6 +826,24 @@
      "jgOff": 4,
      "expectedMatches": 1,
      "sig": "7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071"
+    },
+    {
+     "_comment": "Same webRequestBlocking MV3 gate for Linux arm64. Located via a .rela.dyn RELATIVE reloc (the name pointer is 0 on disk), then flip max version 2 -> 3. Optional.",
+     "name": "let MV3 extensions use webRequestBlocking",
+     "kind": "featurebyte",
+     "optional": true,
+     "feature": "webRequestBlocking",
+     "structRVA": "0x10D57318",
+     "patchOff": 192,
+     "stock": 2,
+     "patched": 3,
+     "verify": {
+      "96": 2,
+      "180": 0,
+      "188": 0,
+      "196": 1
+     },
+     "expectedMatches": 1
     }
    ]
   },

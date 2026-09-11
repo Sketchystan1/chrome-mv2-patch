@@ -10,7 +10,6 @@ Re-enables Manifest V2 extensions in Chrome by patching a few bytes. See [`mv2-r
 
 ### Should work. Please check.
 
-- 🧪 Chromium
 - 🧪 Windows ARM
 - 🧪 Linux ARM
 - 🧪 macOS ARM
