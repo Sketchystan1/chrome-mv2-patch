@@ -1,7 +1,12 @@
-# Manually builds the Windows version.dll proxy (x64/x86/arm64) and publishes a
-# single version.dll.zip to the rolling "win-latest" GitHub Release, which is
-# where chrome-mv2.ps1 downloads it from:
-#   releases/latest/download/version.dll.zip   (x64/ x86/ arm64/ inside)
+# Manually builds the Windows version.dll proxy (x64/x86/arm64) and publishes
+# version.dll-v<ver>.zip (x64/, x86/, arm64/ folders inside) to a release
+# tagged v<ver>. <ver> is the DLL's ProductVersion, whose single source of
+# truth is build.bat's MV2_VER. chrome-mv2.ps1 finds the asset by following the
+# releases/latest redirect to the tag (api.github.com is avoided - it
+# rate-limits by IP).
+# (GitHub also auto-attaches "Source code" links to every release - the whole
+# repo, minus gitignored detours/ and build/ - which cannot be scoped or
+# disabled.)
 #
 # Manual runs only: Actions tab -> "Build Windows version.dll" -> Run workflow.
 # The file must exist on the default branch for the button to appear.
@@ -34,11 +39,11 @@ jobs:
             )
           )
 
-      # Stage the arch dirs, then zip them with bsdtar (Compress-Archive writes
-      # backslash entry separators, which non-Windows unzip tools mishandle).
-      # An arch whose toolchain is missing is skipped with a warning, but x64
-      # must be present to release.
-      - name: Package version.dll.zip (x64/ x86/ arm64/)
+      # Zip the arch dirs with bsdtar (Compress-Archive writes backslash entry
+      # separators, which non-Windows unzip tools mishandle). An arch whose
+      # toolchain is missing is skipped with a warning, but x64 must be present.
+      - name: Package version.dll-v<ver>.zip
+        id: package
         shell: pwsh
         run: |
           $root = Join-Path $env:GITHUB_WORKSPACE 'zip-root'
@@ -55,18 +60,21 @@ jobs:
             }
           }
           if ($built -notcontains 'x64') { throw 'no x64 version.dll - refusing to release' }
-          Write-Host "packaging: $($built -join ', ')"
-          New-Item -ItemType Directory -Force -Path (Join-Path $env:GITHUB_WORKSPACE 'release-assets') | Out-Null
-          tar -a -cf (Join-Path $env:GITHUB_WORKSPACE 'release-assets\version.dll.zip') -C $root @built
+          $ver = (Get-Item (Join-Path $root 'x64/version.dll')).VersionInfo.ProductVersion
+          if (-not $ver) { throw "couldn't read ProductVersion from the x64 version.dll" }
+          $zip = "version.dll-v$ver.zip"
+          Write-Host "packaging $zip ($($built -join ', '))"
+          $outDir = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          tar -a -cf (Join-Path $outDir $zip) -C $root @built
+          "version=v$ver" >> $env:GITHUB_OUTPUT
 
-      # A FULL release (not a pre-release) so the script's /releases/latest/
-      # URL resolves to it. No body / release notes: the release carries only
-      # version.dll.zip. (GitHub auto-attaches "Source code" links to every
-      # release; those cannot be turned off.)
+      # No release name or body: the release is just the version-stamped zips
+      # on a v<ver> tag. (GitHub auto-attaches "Source code" links to every
+      # release; those cannot be disabled.)
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: win-latest
-          name: Windows version.dll
-          files: release-assets/version.dll.zip
+          tag_name: ${{ steps.package.outputs.version }}
+          files: release-assets/*
           fail_on_unmatched_files: true

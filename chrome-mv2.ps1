@@ -15,9 +15,9 @@
       1. If Chrome was patched by the old on-disk byte-patcher (a chrome.dll.bak
          is present), restore chrome.dll to stock first - the version.dll method
          needs an unmodified chrome.dll for DRM.
-      2. Download version.dll.zip from the project's GitHub Releases and take
-         the matching version.dll (x64/x86/arm64) out of it, plus
-         signatures.json.
+      2. Find the latest version.dll-v*.zip release on the project's GitHub,
+         download it, and take the matching version.dll (x64/x86/arm64) out of
+         it, plus signatures.json.
       3. Place version.dll next to chrome.exe, and signatures.json beside it (and
          in the per-user store the DLL falls back to).
       4. Clear any HKLM Chrome policies (removes the "managed by your
@@ -90,8 +90,12 @@
 
 [CmdletBinding()]
 param(
+    # No [ValidateSet] on $Command/$Arch on purpose: under `irm | iex` the param
+    # block runs in the CALLER's scope, and a session variable of the same name
+    # (profiles and tooling define $Arch/$Command) fails the attribute with a
+    # cryptic MetadataError before any of our code runs. Both are validated at
+    # startup instead, just before Invoke-Main.
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'update', 'check', 'patch', 'restore')]
     [string]$Command = 'install',
 
     [Parameter(Position = 1)]
@@ -109,7 +113,6 @@ param(
     [switch]$NoUblock,
 
     # Force the version.dll architecture instead of detecting it from chrome.exe.
-    [ValidateSet('x64', 'x86', 'arm64')]
     [string]$Arch,
 
     [switch]$AllowPartial,
@@ -133,9 +136,12 @@ $ErrorActionPreference = 'Stop'
 $AppVersion      = '1.12.0'
 $SignaturesFile  = 'signatures.json'
 $SignaturesUrl   = 'https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json'
-# version.dll release asset: <base>/version.dll.zip, with x64/, x86/, and
-# arm64/ folders (each holding version.dll) inside. Built by win-build.yml.
-$DllReleaseBase  = 'https://github.com/Sketchystan1/chrome-mv2-patch/releases/latest/download'
+# version.dll release: the latest GitHub release's version.dll-v<ver>.zip asset
+# (x64/, x86/, arm64/ folders inside). Found by following the releases/latest
+# redirect to the tag - NOT via api.github.com, which is rate-limited by IP
+# (403 for many shared/VPN addresses). win-build.yml names the asset after the
+# tag, so the tag alone gives the download URL. Built by win-build.yml.
+$DllReleaseLatest = 'https://github.com/Sketchystan1/chrome-mv2-patch/releases/latest'
 # Off-store uBlock Origin (MV2) force-install.
 $UboId           = 'fkgkibajhfbepljeaefdnfnegdcjomkh'
 $UboUpdateUrl    = 'https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml'
@@ -2653,6 +2659,44 @@ function Get-RemoteFile {
     finally { $ProgressPreference = $old }
 }
 
+# Resolve the latest release without the GitHub API: github.com's plain
+# releases/latest URL 302-redirects to the release's tag (a repo with no
+# releases redirects to the bare /releases page), and win-build.yml names the
+# zip deterministically after the tag, so no asset listing is needed.
+function Get-LatestDllRelease {
+    try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }
+    $req = [Net.HttpWebRequest]::Create($DllReleaseLatest)
+    $req.AllowAutoRedirect = $false
+    $req.UserAgent = 'chrome-mv2-patch'
+    $req.Timeout   = 30000
+    $loc = $null
+    try {
+        $resp = $req.GetResponse()
+        $loc  = $resp.Headers['Location']
+        $resp.Close()
+    } catch [Net.WebException] {
+        $r = $_.Exception.Response
+        if ($r) {
+            $code = [int]$r.StatusCode
+            $r.Close()
+            throw "GitHub answered HTTP $code for the latest release."
+        }
+        throw "Couldn't reach GitHub for the latest release: $($_.Exception.Message)"
+    }
+    $tag = $null
+    if ($loc -match '/(?:releases/)?(?:tag|tree)/([^/?#]+)') { $tag = $Matches[1] }
+    if (-not $tag) { throw 'No release has been published yet (run the win-build workflow on GitHub).' }
+    if ($tag -notmatch '^v[0-9][0-9.]*$') {
+        throw "The latest release tag '$tag' is not a version.dll build."
+    }
+    $zip  = "version.dll-$tag.zip"
+    $base = $DllReleaseLatest -replace '/releases/latest/?$',''
+    return [pscustomobject]@{
+        ZipName = $zip
+        ZipUrl  = "$base/releases/download/$tag/$zip"
+    }
+}
+
 # Pull <arch>/version.dll out of the downloaded version.dll.zip. Entry names are
 # matched case-insensitively with either path separator, so zips made by bsdtar
 # ('/') and Compress-Archive ('\') both work. Throws when the arch is missing.
@@ -2671,7 +2715,7 @@ function Get-DllFromReleaseZip {
                 return ,$ms.ToArray()
             }
         }
-        throw "The published version.dll.zip has no $Arch build."
+        throw "The downloaded version.dll zip has no $Arch build."
     } finally { $zip.Dispose() }
 }
 
@@ -2791,18 +2835,20 @@ function Invoke-Install {
         Write-Host '    MV2 will still work; reinstall Chrome if Widevine DRM (Netflix, etc.) misbehaves.'
     }
 
-    # (2) Download version.dll.zip + signatures, and take the matching DLL out.
+    # (2) Find the latest release, download its version.dll zip, and take the
+    # matching DLL out of it.
     $arch = Get-ChromeArch -Target $Target -Override $Arch
     if (-not $arch) {
         Write-Err "Couldn't detect Chrome's architecture. Re-run with -Arch x64, x86, or arm64."
         return 1
     }
-    $url    = "$DllReleaseBase/version.dll.zip"
-    $tmpZip = Join-Path ([IO.Path]::GetTempPath()) ('version.dll-' + [Guid]::NewGuid().ToString('N') + '.zip')
-    $tmpDll = Join-Path ([IO.Path]::GetTempPath()) ('version-' + $arch + '-' + [Guid]::NewGuid().ToString('N') + '.dll')
+    $tmpZip  = Join-Path ([IO.Path]::GetTempPath()) ('version.dll-' + [Guid]::NewGuid().ToString('N') + '.zip')
+    $tmpDll  = Join-Path ([IO.Path]::GetTempPath()) ('version-' + $arch + '-' + [Guid]::NewGuid().ToString('N') + '.dll')
     try {
-        Write-Info "Downloading version.dll ($arch)..."
-        Get-RemoteFile -Uri $url -OutFile $tmpZip
+        Write-Info 'Finding the latest version.dll release...'
+        $rel = Get-LatestDllRelease
+        Write-Info "Downloading $($rel.ZipName) ($arch)..."
+        Get-RemoteFile -Uri $rel.ZipUrl -OutFile $tmpZip
         $dllBytes = Get-DllFromReleaseZip -ZipPath $tmpZip -Arch $arch
         [IO.File]::WriteAllBytes($tmpDll, $dllBytes)
         $gotArch = Get-PeArch $tmpDll
@@ -3047,6 +3093,20 @@ function Invoke-Main {
     }
 
     Write-Banner
+
+    # Deferred param validation (see the param block): empty values are leftover
+    # session variables under `irm | iex`, not user input, so they mean "not
+    # supplied". -notcontains is case-insensitive, like [ValidateSet] was.
+    if ([string]::IsNullOrWhiteSpace($Command)) { $Command = 'install' }
+    if ([string]::IsNullOrWhiteSpace($Arch))    { $Arch = '' }
+    if (@('install', 'uninstall', 'update', 'check', 'patch', 'restore') -notcontains $Command) {
+        Write-Err "Unknown command '$Command'. Use install, uninstall, update, or check."
+        return 1
+    }
+    if ($Arch -and @('x64', 'x86', 'arm64') -notcontains $Arch) {
+        Write-Err "-Arch must be x64, x86, or arm64 (got '$Arch')."
+        return 1
+    }
 
     # patch/restore are accepted as aliases for install/uninstall.
     if ($Command -eq 'patch')      { $script:Command = 'install' }
