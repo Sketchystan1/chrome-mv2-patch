@@ -18,7 +18,7 @@ powershell "irm github.com/Sketchystan1/chrome-mv2-patch/raw/master/chrome-mv2.p
     Copy version.dll next to chrome.exe.  
     Install uBlock Origin Run in Terminal (admin).
 
-    reg.exe add "HKLM\Software\Google\Chrome\Extensions\fkgkibajhfbepljeaefdnfnegdcjomkh" /v update_url /t REG_SZ /d "https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml" /f 
+    reg.exe add "HKLM\Software\Google\Chrome\Extensions\fkgkibajhfbepljeaefdnfnegdcjomkh" /v update_url /t REG_SZ /d "https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml" /f /reg:32
 </details>
 
 ## Linux, macOS
