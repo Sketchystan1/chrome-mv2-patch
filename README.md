@@ -1,7 +1,8 @@
 # Chrome MV2 Extension Patcher
 
 Re-enables Manifest V2 extensions in Chrome.  
-Windows: `version.dll` that Chrome loads at startup and patches MV2 switch in memory. DRM works. See [`mv2-reversing.md`](mv2-reversing.md) for details.
+Windows: `version.dll` that Chrome loads at startup and patches MV2 switch in memory. DRM works.  
+See [`mv2-reversing.md`](mv2-reversing.md) for details.
 
 ## Windows
 ### Chrome 152-155 x64, x86, ARM

@@ -222,6 +222,19 @@ function Write-Err     { param([string]$m) Write-Host "$script:TagErr $m" }
 function Write-Success { param([string]$m) Write-Host "$script:TagSuccess $m" }
 function Write-Rule    { Write-Host "$($C.Cyn)==========================================================$($C.Reset)" }
 
+# reg.exe reports "key not found" on stderr (exit code 1). Under
+# $ErrorActionPreference='Stop' in Windows PowerShell 5.1, redirected native
+# stderr becomes a terminating NativeCommandError - so a mere key-existence
+# probe would kill the script (broke irm|iex installs). Relax EAP around the
+# call and speak in exit codes only.
+function Invoke-Reg {
+    param([Parameter(Mandatory)][string[]]$RegArgs)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & reg.exe @RegArgs *>$null; return $LASTEXITCODE }
+    catch { return 1 } finally { $ErrorActionPreference = $prev }
+}
+
 function Write-Banner {
     Write-Rule
     Write-Host "$($C.Bold)                    MV2 Patcher v$AppVersion                    $($C.Reset)"
@@ -2406,6 +2419,7 @@ function Get-InstallDetails {
         Holders   = $holders.Count
         HasBackup = (Test-Path -LiteralPath (Get-BackupPath $TargetPath) -PathType Leaf)
         State     = (Get-PatchStateQuick $TargetPath)
+        HasVersionDll = [bool]($appDir -and (Test-Path -LiteralPath (Join-Path $appDir 'version.dll') -PathType Leaf))
     }
 }
 
@@ -2461,11 +2475,14 @@ function Get-TargetLabel {
 }
 
 # One numbered row of the browser table:
-#   "  1  Chrome Stable    152.0.7977.65       Patched".
+#   "  1  Chrome Stable    152.0.7977.65       Installed".
+# version.dll presence is the current install state; the chrome.dll probe only
+# detects legacy byte-patches underneath it.
 function Show-InstallRow {
     param([int]$Index, $Inst)
-    $status = if ($Inst.State -eq 'patched') { "$($C.Grn)Patched$($C.Reset)" }
-              elseif ($Inst.State -eq 'not patched') { "$($C.Dim)Not patched$($C.Reset)" }
+    $status = if ($Inst.HasVersionDll) { "$($C.Grn)Installed$($C.Reset)" }
+              elseif ($Inst.State -eq 'patched') { "$($C.Yel)Patched (old)$($C.Reset)" }
+              elseif ($Inst.State -eq 'not patched') { "$($C.Dim)Not installed$($C.Reset)" }
               else { '' }
     Write-Host ("  {0,-2} {1,-17}{2,-20}{3}" -f $Index, (Get-BrowserDisplayName $Inst.Channel), [string]$Inst.Version, $status)
 }
@@ -2762,10 +2779,8 @@ function Remove-ChromePolicies {
     $key = 'HKLM\Software\Policies\Google\Chrome'
     $removed = $false
     foreach ($view in '64', '32') {
-        & reg.exe query $key "/reg:$view" *>$null
-        if ($LASTEXITCODE -eq 0) {
-            & reg.exe delete $key /f "/reg:$view" *>$null
-            if ($LASTEXITCODE -eq 0) { $removed = $true }
+        if ((Invoke-Reg @('query', $key, "/reg:$view")) -eq 0) {
+            if ((Invoke-Reg @('delete', $key, '/f', "/reg:$view")) -eq 0) { $removed = $true }
             else { Write-Warn "Couldn't remove Chrome policies ($view-bit view)." }
         }
     }
@@ -2773,15 +2788,19 @@ function Remove-ChromePolicies {
     else { Write-Info 'No Chrome machine policies to remove.' }
 }
 
-# Off-store uBlock Origin (MV2). Written to BOTH the native and 32-bit views so
-# 64-bit Chrome (which reads external extensions through the 32-bit view) and any
-# 32-bit build both see it.
+# Off-store uBlock Origin (MV2). Written to BOTH the native and 32-bit views:
+# Chrome's external-extension loader opens HKLM\Software\Google\Chrome\Extensions
+# with KEY_WOW64_32KEY (chrome/browser/extensions/external_registry_loader_win.cc),
+# so the 32-bit (Wow6432Node) copy is the ONLY one Chrome ever reads; the native
+# copy is inert but kept so the key also shows at the expected regedit path.
+# Do NOT drop the /reg:32 write - off-store uBO would stop installing entirely.
 function Add-UboExtension {
     $key = "HKLM\Software\Google\Chrome\Extensions\$UboId"
     $ok = $true
     foreach ($view in '64', '32') {
-        & reg.exe add $key /v update_url /t REG_SZ /d $UboUpdateUrl /f "/reg:$view" *>$null
-        if ($LASTEXITCODE -ne 0) { $ok = $false; Write-Warn "reg add for uBlock Origin failed ($view-bit view)." }
+        if ((Invoke-Reg @('add', $key, '/v', 'update_url', '/t', 'REG_SZ', '/d', $UboUpdateUrl, '/f', "/reg:$view")) -ne 0) {
+            $ok = $false; Write-Warn "reg add for uBlock Origin failed ($view-bit view)."
+        }
     }
     if ($ok) { Write-Ok 'uBlock Origin (MV2) will install on the next launch.' }
 }
@@ -2790,10 +2809,8 @@ function Remove-UboExtension {
     $key = "HKLM\Software\Google\Chrome\Extensions\$UboId"
     $removed = $false
     foreach ($view in '64', '32') {
-        & reg.exe query $key "/reg:$view" *>$null
-        if ($LASTEXITCODE -eq 0) {
-            & reg.exe delete $key /f "/reg:$view" *>$null
-            if ($LASTEXITCODE -eq 0) { $removed = $true }
+        if ((Invoke-Reg @('query', $key, "/reg:$view")) -eq 0) {
+            if ((Invoke-Reg @('delete', $key, '/f', "/reg:$view")) -eq 0) { $removed = $true }
         }
     }
     if ($removed) { Write-Ok 'Removed the uBlock Origin registry entry.' }
@@ -3046,11 +3063,11 @@ function Invoke-Check {
 
     $uboKey = "HKLM\Software\Google\Chrome\Extensions\$UboId"
     $uboFound = $false
-    foreach ($view in '64', '32') { & reg.exe query $uboKey "/reg:$view" *>$null; if ($LASTEXITCODE -eq 0) { $uboFound = $true } }
+    foreach ($view in '64', '32') { if ((Invoke-Reg @('query', $uboKey, "/reg:$view")) -eq 0) { $uboFound = $true } }
     if ($uboFound) { Write-Ok 'uBlock Origin (MV2) is registered to auto-install.' } else { Write-Info 'uBlock Origin is not registered.' }
 
     $polFound = $false
-    foreach ($view in '64', '32') { & reg.exe query 'HKLM\Software\Policies\Google\Chrome' "/reg:$view" *>$null; if ($LASTEXITCODE -eq 0) { $polFound = $true } }
+    foreach ($view in '64', '32') { if ((Invoke-Reg @('query', 'HKLM\Software\Policies\Google\Chrome', "/reg:$view")) -eq 0) { $polFound = $true } }
     if ($polFound) { Write-Warn 'Chrome machine policies are set (may show a "managed by your organization" banner).' }
 
     if (Test-Path -LiteralPath (Get-BackupPath $Target.Path) -PathType Leaf) {
