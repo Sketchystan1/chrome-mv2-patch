@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.13.0] - 2026-09-16
+
+- Chrome 156 support.
+
 ## [1.12.0] - 2026-09-11
 
 - chrome-mv2.ps1 switch from byte-patching to version.dll.
