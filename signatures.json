@@ -1,962 +1,1099 @@
 {
- "_comment": "Byte-patch signatures the patcher reads at runtime (next to the exe, or the current dir). Per site: sig is hex from the cmp, the jump byte is at jgOff, and it must match exactly expectedMatches times. Add builds with scripts/derive_milestone.py; details in mv2-reversing.md.",
- "milestones": [
-  {
-   "name": "152",
-   "container": "pe",
-   "sites": [
+  "_comment": "Byte-patch signatures the patcher reads at runtime (next to the exe, or the current dir). Per site: sig is hex from the cmp, the jump byte is at jgOff, and it must match exactly expectedMatches times. Add builds with scripts/derive_milestone.py; details in mv2-reversing.md.",
+  "milestones": [
     {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
-     "kind": "short",
-     "jgRVA": "0x082D26F5",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F805"
+      "name": "152",
+      "container": "pe",
+      "sites": [
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+          "kind": "short",
+          "jgRVA": "0x082D26F5",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F805"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x03348754",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837A50027F34488B8A280200008B413080BA080200000075"
+        },
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x0124109C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950027F2D488B91280200008B423080B90802000000750C"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x082D24D6",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F2D488B8E280200008B413080BE08020000007508"
+        },
+        {
+          "name": "UserMayInstall (inlined)",
+          "kind": "short",
+          "jgRVA": "0x08DDC241",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50027F4E488B8F280200008B413080BF0802000000750C"
+        },
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x015A8D31",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50020F8F8B000000488B8F280200008B413080BF080200000075"
+        },
+        {
+          "_comment": "Real Chrome blocks off-store extensions ('not from the Web Store') and greys out Enable. Flips the from-webstore check to always-yes, so they install and stay on -- no 'managed by your organization' banner. Branded Chrome only.",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "jgRVA": "0x0337FB00",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "optional": true,
+          "stockOpcode": "0x75",
+          "sig": "F68754020000087545488B5310"
+        }
+      ]
     },
     {
-     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
-     "kind": "short",
-     "jgRVA": "0x03348754",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "837A50027F34488B8A280200008B413080BA080200000075"
+      "name": "154",
+      "container": "pe",
+      "_comment": "Early 154 (unshifted, ~8011..8029) before the +0x20 manifest field shift; verified against 154.0.8011.0. Late-154 (>=~8030) and 155 use the shifted '155' table. Core gates only: the branded-only InstallVerifier gate and 155-era webRequestBlocking are absent here.",
+      "sites": [
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+          "kind": "short",
+          "jgRVA": "0x08D19B45",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F805"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x0356AFA4",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837A50027F34488B8A280200008B413080BA080200000075"
+        },
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x0285D443",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950027F2D488B91280200008B423080B90802000000750C"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x08D19926",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F2D488B8E280200008B413080BE08020000007508"
+        },
+        {
+          "name": "UserMayInstall (inlined)",
+          "kind": "short",
+          "jgRVA": "0x097E4AB1",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50027F4E488B8F280200008B413080BF0802000000750C"
+        },
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x01625CD1",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50020F8F8B000000488B8F280200008B413080BF080200000075"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body, 2nd copy, diverged reg)",
+          "kind": "short",
+          "jgRVA": "0x0356B024",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950027F34488B91280200008B423080B908020000007508"
+        }
+      ]
     },
     {
-     "name": "OnExtensionSystemReady startup loop",
-     "kind": "short",
-     "jgRVA": "0x0124109C",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837950027F2D488B91280200008B423080B90802000000750C"
+      "name": "152-linux",
+      "container": "elf",
+      "sites": [
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)",
+          "kind": "short",
+          "jgRVA": "0x0985B449",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)",
+          "kind": "short",
+          "jgRVA": "0x0985B0F4",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F2F554889E5488B8E280200008B413080BE080200"
+        },
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension (inlined)",
+          "kind": "short",
+          "jgRVA": "0x0985B238",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B50027F30488B8B280200008B413080BB08020000007508"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)",
+          "kind": "near",
+          "jgRVA": "0x0A256BAA",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B50020F8FD1000000488B8B280200008B413080BB080200000075"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x0599A69A",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50020F8F8E000000498B8E280200008B41304180BE0802000000"
+        }
+      ]
     },
     {
-     "name": "MaybeReEnableExtension",
-     "kind": "short",
-     "jgRVA": "0x082D24D6",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50027F2D488B8E280200008B413080BE08020000007508"
+      "name": "152-linux-arm64",
+      "container": "elf-arm64",
+      "_comment": "Linux aarch64 `chrome` ELF, 152.0.7977.42 beta (official arm64 .deb) - same build version as 152-win-arm64 / 152-macos-arm64, whose four gate bodies this table matches 1:1 (register allocation aside). B.cond GT->AL flip (kind bcond); shared folded bodies carry expectedMatches=2. Structurally derived (no arm64 Linux symbols) and cross-checked against those two symbol-verified tables.",
+      "sites": [
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x05D64DD8",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900712C020054691641F96A224839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x05D64F9C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900710C020054091441F90A204839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x05F78874",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900718C010054891641F98A224839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::OnExtensionSystemReady (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x0696E3C8",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "3F090071EC4A0054091541F90A214839283140B98A000037296940B93F050071"
+        }
+      ]
     },
     {
-     "name": "UserMayInstall (inlined)",
-     "kind": "short",
-     "jgRVA": "0x08DDC241",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50027F4E488B8F280200008B413080BF0802000000750C"
+      "name": "152-x86",
+      "container": "pe32",
+      "sites": [
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+          "kind": "short",
+          "jgRVA": "0x06FB7547",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x0299ED6A",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837A28027F368B8A640100008B411880BA540100000075088B"
+        },
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x00A580A6",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837928027F2C8B91640100008B421880B95401000000750C8B"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x06FB736D",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E28027F248B8E640100008B411880BE540100000075088B"
+        },
+        {
+          "name": "UserMayInstall (inlined)",
+          "kind": "short",
+          "jgRVA": "0x0791012F",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F28027F458B8F640100008B411880BF5401000000750C8B"
+        },
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x010851A8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B28020F8F840000008B8B640100008B411880BB54010000007508"
+        },
+        {
+          "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "jgRVA": "0x032EFE77",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "optional": true,
+          "stockOpcode": "0x75",
+          "sig": "F6867C01000008755A8B47088945D4"
+        }
+      ]
     },
     {
-     "name": "MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x015A8D31",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50020F8F8B000000488B8F280200008B413080BF080200000075"
+      "name": "152-macos-arm64",
+      "container": "macho-arm64",
+      "_comment": "macOS Apple Silicon slice, 152.0.7977.42 (consumer beta). Chrome 152 layout, B.cond GT->AL flip (kind bcond), symbol-verified against the official arm64 dSYM; a shared folded body covers ShouldBlockExtensionInstallation + UserMayInstall. Patched by default like the x86_64 slice.",
+      "sites": [
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled",
+          "kind": "bcond",
+          "jgRVA": "0x02218740",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::OnExtensionSystemReady",
+          "kind": "bcond",
+          "jgRVA": "0x0320635C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected",
+          "kind": "bcond",
+          "jgRVA": "0x03FFBD84",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x066F0E38",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"
+        },
+        {
+          "_comment": "Same as pe, mac arm64 (flag byte at ext+0x24c).",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "tbz",
+          "jgRVA": "0x0294FDDC",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "optional": true,
+          "sig": "0831493948021837E80B40F9010D40F9"
+        }
+      ]
     },
     {
-     "_comment": "Real Chrome blocks off-store extensions ('not from the Web Store') and greys out Enable. Flips the from-webstore check to always-yes, so they install and stay on -- no 'managed by your organization' banner. Branded Chrome only.",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "short",
-     "jgRVA": "0x0337FB00",
-     "jgOff": 7,
-     "expectedMatches": 1,
-     "optional": true,
-     "stockOpcode": "0x75",
-     "sig": "F68754020000087545488B5310"
+      "name": "152-win-arm64",
+      "container": "pe-arm64",
+      "_comment": "Windows-on-ARM native arm64 chrome.dll (PE32+, machine 0xAA64), 152.0.7977.42 beta. Chrome 152's rearchitected ManifestV2Handler set (same gates as Windows 152 x64); arm64 flips the B.cond GT->AL (kind bcond). Symbol-verified against the arm64 chrome.dll PDB; a shared folded body covers ShouldBlockExtensionEnable + IsExtensionAffected.",
+      "sites": [
+        {
+          "name": "ManifestV2Handler::OnExtensionSystemReady",
+          "kind": "bcond",
+          "jgRVA": "0x01014CBC",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x013591BC",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F090071EC050054891641F98A224839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x02C1FD9C",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900710C020054291441F92A204839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension",
+          "kind": "bcond",
+          "jgRVA": "0x07702AEC",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"
+        },
+        {
+          "_comment": "Same as pe, arm64 (flip the tbnz bit-test to a plain branch).",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "tbz",
+          "jgRVA": "0x02E82BC8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "optional": true,
+          "sig": "085149398801183760E641F9E80F40F9"
+        }
+      ]
+    },
+    {
+      "name": "154-x86",
+      "container": "pe32",
+      "sites": [
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+          "kind": "short",
+          "jgRVA": "0x08BBA217",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x031C47CA",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837A28027F368B8A640100008B411880BA540100000075088B"
+        },
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x01B51743",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837928027F288B91640100008B421880B95401000000750C8B"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x08BBA108",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E28027F248B8E640100008B411880BE540100000075088B"
+        },
+        {
+          "name": "UserMayInstall (inlined)",
+          "kind": "short",
+          "jgRVA": "0x093997BF",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F28027F458B8F640100008B411880BF5401000000750C8B"
+        },
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x01205788",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B28020F8F840000008B8B640100008B411880BB54010000007508"
+        },
+        {
+          "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "jgRVA": "0x0319D797",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "optional": true,
+          "stockOpcode": "0x75",
+          "sig": "F6867C01000008755A8B47088945D4"
+        }
+      ]
+    },
+    {
+      "name": "154-linux",
+      "container": "elf",
+      "sites": [
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)",
+          "kind": "short",
+          "jgRVA": "0x0991AA29",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)",
+          "kind": "short",
+          "jgRVA": "0x0991A6D4",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F2F554889E5488B8E280200008B413080BE080200"
+        },
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension (inlined)",
+          "kind": "short",
+          "jgRVA": "0x0991A818",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B50027F30488B8B280200008B413080BB08020000007508"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)",
+          "kind": "near",
+          "jgRVA": "0x0A37E1CA",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B50020F8FD1000000488B8B280200008B413080BB080200000075"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x05AB5FFA",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50020F8F8E000000498B8E280200008B41304180BE0802000000"
+        },
+        {
+          "name": "IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)",
+          "kind": "short",
+          "jgRVA": "0x053B0E40",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950027F2D488B91280200008B423080B90802000000750C"
+        }
+      ]
+    },
+    {
+      "name": "154-linux-arm64",
+      "container": "elf-arm64",
+      "sites": [
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x05E87478",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900712C020054691641F96A224839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x05E8763C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900710C020054091441F90A204839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x0609B370",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900718C010054891641F98A224839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::OnExtensionSystemReady (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x06AB7470",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)",
+          "kind": "bcond",
+          "jgRVA": "0x09B77244",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "7F0900718C0100544B1541F94C2148396A3140B98C0000376B6940B97F050071"
+        }
+      ]
+    },
+    {
+      "name": "155",
+      "container": "pe",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x0155EB53",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950027F30488B91280200008B425080B90802000000750F"
+        },
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x016CB234",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50020F8F8E000000488B8F280200008B415080BF080200000075"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x03269A44",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837A50027F37488B8A280200008B415080BA0802000000750B"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x084DEA66",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F30488B8E280200008B415080BE0802000000750B"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+          "kind": "short",
+          "jgRVA": "0x084DEC85",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"
+        },
+        {
+          "name": "UserMayInstall (inlined)",
+          "kind": "short",
+          "jgRVA": "0x090A7931",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50027F51488B8F280200008B415080BF0802000000750F"
+        },
+        {
+          "_comment": "Real Chrome blocks off-store extensions ('not from the Web Store') and greys out Enable. Flips the from-webstore check to always-yes, so they install and stay on -- no 'managed by your organization' banner. Branded Chrome only.",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "jgRVA": "0x032F4553",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "optional": true,
+          "stockOpcode": "0x75",
+          "sig": "F68754020000087545488B5310"
+        },
+        {
+          "_comment": "Chrome only lets MV2 extensions use webRequestBlocking. This flips one byte in the feature's .rdata struct (max manifest version 2 -> 3) so MV3 can use it too, and nothing else. We find it by name, not by a code branch. Optional: if it's missing, MV2 patching still works. Only 155-era tables (155/155-x86/155-linux/155-linux-arm64/155-macos-arm64) have it (older builds lay the struct out differently).",
+          "name": "let MV3 extensions use webRequestBlocking",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x10228E10",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        }
+      ]
+    },
+    {
+      "name": "155-x86",
+      "container": "pe32",
+      "sites": [
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x011D9EB8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B28020F8F840000008B8B640100008B412880BB54010000007508"
+        },
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x01AFBEF3",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837928027F288B91640100008B422880B95401000000750C8B"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x032F125A",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837A28027F368B8A640100008B412880BA540100000075088B"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x08F66848",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E28027F248B8E640100008B412880BE540100000075088B"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+          "kind": "short",
+          "jgRVA": "0x08F66957",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"
+        },
+        {
+          "name": "UserMayInstall (inlined)",
+          "kind": "short",
+          "jgRVA": "0x097626DF",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F28027F458B8F640100008B412880BF5401000000750C8B"
+        },
+        {
+          "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "jgRVA": "0x032F4E47",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "optional": true,
+          "stockOpcode": "0x75",
+          "sig": "F6867C01000008755A8B47088945D4"
+        },
+        {
+          "_comment": "Same gate as 155 win64, for 32-bit Chrome (smaller struct: max-version byte at +104). Flips webRequestBlocking's rule-1 max manifest version 2 -> 3 so MV3 can use it. Found by name in .rdata; optional.",
+          "name": "let MV3 extensions use webRequestBlocking",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0E43907C",
+          "patchOff": 104,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "48": 2,
+            "92": 0,
+            "100": 0,
+            "108": 1
+          },
+          "expectedMatches": 1
+        }
+      ]
+    },
+    {
+      "name": "155-linux",
+      "container": "elf",
+      "sites": [
+        {
+          "name": "IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)",
+          "kind": "short",
+          "jgRVA": "0x041AAAE0",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950027F30488B91280200008B425080B90802000000750F"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x06835F7D",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50020F8F91000000498B8E280200008B41504180BE0802000000"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)",
+          "kind": "short",
+          "jgRVA": "0x099272C4",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F32554889E5488B8E280200008B415080BE080200"
+        },
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension (inlined)",
+          "kind": "short",
+          "jgRVA": "0x09927408",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B50027F33488B8B280200008B415080BB0802000000750B"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)",
+          "kind": "short",
+          "jgRVA": "0x09927619",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)",
+          "kind": "near",
+          "jgRVA": "0x0A3DC86A",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B50020F8FD4000000488B8B280200008B415080BB080200000075"
+        },
+        {
+          "_comment": "Same webRequestBlocking MV3 gate for Linux. The struct's name pointer is a relocation (0 on disk), so we find the struct via a .rela.dyn RELATIVE reloc pointing at the 'webRequestBlocking' string, then flip max version 2 -> 3. Optional.",
+          "name": "let MV3 extensions use webRequestBlocking",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x113F75F0",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        }
+      ]
+    },
+    {
+      "name": "155-macos-arm64",
+      "container": "macho-arm64",
+      "sites": [
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled",
+          "kind": "bcond",
+          "jgRVA": "0x022BD404",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::OnExtensionSystemReady",
+          "kind": "bcond",
+          "jgRVA": "0x031F4CA4",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected",
+          "kind": "bcond",
+          "jgRVA": "0x0403B248",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x068F3880",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071"
+        },
+        {
+          "_comment": "Same as pe, mac arm64 (flag byte at ext+0x24c).",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "tbz",
+          "jgRVA": "0x029206F8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "optional": true,
+          "sig": "0831493948021837E80B40F9010D40F9"
+        },
+        {
+          "_comment": "Same webRequestBlocking MV3 gate for macOS arm64. The name pointer is a chained fixup, so we find the struct via its rebase target, then flip max version 2 -> 3 in __DATA_CONST. Optional.",
+          "name": "let MV3 extensions use webRequestBlocking",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0E6206A8",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        }
+      ]
+    },
+    {
+      "name": "155-linux-arm64",
+      "container": "elf-arm64",
+      "sites": [
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x05E7E1E4",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900712C020054691641F96A224839285140B98A000037298940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x05E7E3A8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900710C020054091441F90A204839285140B98A000037298940B93F050071"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x06096308",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900718C010054891641F98A224839285140B98A000037298940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::OnExtensionSystemReady (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x06B05764",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "3F0900718C010054091541F90A214839285140B98A000037298940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)",
+          "kind": "bcond",
+          "jgRVA": "0x0A2934B4",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071"
+        },
+        {
+          "_comment": "Same webRequestBlocking MV3 gate for Linux arm64. Located via a .rela.dyn RELATIVE reloc (the name pointer is 0 on disk), then flip max version 2 -> 3. Optional.",
+          "name": "let MV3 extensions use webRequestBlocking",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x10D57318",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        }
+      ]
+    },
+    {
+      "name": "154-win-arm64",
+      "container": "pe-arm64",
+      "sites": [
+        {
+          "name": "ManifestV2Handler::OnExtensionSystemReady",
+          "kind": "bcond",
+          "jgRVA": "0x010B5620",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "5F0900718C0100542A1541F92B214839495140B98B0000374A8940B95F050071"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x01354B40",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900712C060054891641F98A224839285140B98A000037298940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x02C30AD8",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F0900710C020054291441F92A204839285140B98A000037298940B93F050071"
+        },
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension",
+          "kind": "bcond",
+          "jgRVA": "0x079DBD98",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900710C020054691641F96A224839285140B98A000037298940B93F050071"
+        },
+        {
+          "_comment": "Same as pe, arm64 (flip the tbnz bit-test to a plain branch).",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "tbz",
+          "jgRVA": "0x02CCF568",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "optional": true,
+          "sig": "0851493988011837600640F9E80F40F9"
+        }
+      ]
+    },
+    {
+      "name": "156-x86",
+      "container": "pe32",
+      "sites": [
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x011BB948",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B28020F8F840000008B8B64010000"
+        },
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x01AB4073",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837928027F288B9164010000"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x036E9AFA",
+          "jgOff": 4,
+          "expectedMatches": 3,
+          "sig": "837A28027F368B8A64010000"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x09474EB8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E28027F248B8E64010000"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+          "kind": "short",
+          "jgRVA": "0x09474FC7",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837D08027F278B4D0C31C083"
+        },
+        {
+          "name": "let MV3 extensions use webRequestBlocking",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0E6C1E60",
+          "patchOff": 104,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "48": 2,
+            "92": 0,
+            "100": 0,
+            "108": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "_comment": "Same as pe, x86 (flag byte at ext+0x17c). RVA inherited from 155 (branding-gated, DCE'd in CfT); sig is the runtime source of truth.",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "jgRVA": "0x032F4E47",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "optional": true,
+          "stockOpcode": "0x75",
+          "sig": "F6867C01000008755A8B47088945D4"
+        }
+      ]
+    },
+    {
+      "name": "156-linux",
+      "container": "elf",
+      "sites": [
+        {
+          "name": "IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)",
+          "kind": "short",
+          "jgRVA": "0x05C48780",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950027F30488B91280200"
+        },
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x06718E0D",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50020F8F91000000498B8E280200"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)",
+          "kind": "short",
+          "jgRVA": "0x09AED884",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F32554889E5488B"
+        },
+        {
+          "name": "ManifestV2Handler::MaybeReEnableExtension (inlined)",
+          "kind": "short",
+          "jgRVA": "0x09AED9C8",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837B50027F33488B8B280200"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)",
+          "kind": "short",
+          "jgRVA": "0x09AEDBD9",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83FF027F1D83FE087718B9"
+        },
+        {
+          "name": "let MV3 extensions use webRequestBlocking",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x11757C40",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        }
+      ]
     }
-   ]
-  },
-  {
-   "name": "154",
-   "container": "pe",
-   "_comment": "Early 154 (unshifted, ~8011..8029) before the +0x20 manifest field shift; verified against 154.0.8011.0. Late-154 (>=~8030) and 155 use the shifted '155' table. Core gates only: the branded-only InstallVerifier gate and 155-era webRequestBlocking are absent here.",
-   "sites": [
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
-     "kind": "short",
-     "jgRVA": "0x08D19B45",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F805"
-    },
-    {
-     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
-     "kind": "short",
-     "jgRVA": "0x0356AFA4",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837A50027F34488B8A280200008B413080BA080200000075"
-    },
-    {
-     "name": "OnExtensionSystemReady startup loop",
-     "kind": "short",
-     "jgRVA": "0x0285D443",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837950027F2D488B91280200008B423080B90802000000750C"
-    },
-    {
-     "name": "MaybeReEnableExtension",
-     "kind": "short",
-     "jgRVA": "0x08D19926",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50027F2D488B8E280200008B413080BE08020000007508"
-    },
-    {
-     "name": "UserMayInstall (inlined)",
-     "kind": "short",
-     "jgRVA": "0x097E4AB1",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50027F4E488B8F280200008B413080BF0802000000750C"
-    },
-    {
-     "name": "MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x01625CD1",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50020F8F8B000000488B8F280200008B413080BF080200000075"
-    },
-    {
-     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body, 2nd copy, diverged reg)",
-     "kind": "short",
-     "jgRVA": "0x0356B024",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837950027F34488B91280200008B423080B908020000007508"
-    }
-   ]
-  },
-  {
-   "name": "152-linux",
-   "container": "elf",
-   "sites": [
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)",
-     "kind": "short",
-     "jgRVA": "0x0985B449",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)",
-     "kind": "short",
-     "jgRVA": "0x0985B0F4",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50027F2F554889E5488B8E280200008B413080BE080200"
-    },
-    {
-     "name": "ManifestV2Handler::MaybeReEnableExtension (inlined)",
-     "kind": "short",
-     "jgRVA": "0x0985B238",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B50027F30488B8B280200008B413080BB08020000007508"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)",
-     "kind": "near",
-     "jgRVA": "0x0A256BAA",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B50020F8FD1000000488B8B280200008B413080BB080200000075"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x0599A69A",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50020F8F8E000000498B8E280200008B41304180BE0802000000"
-    }
-   ]
-  },
-  {
-   "name": "152-linux-arm64",
-   "container": "elf-arm64",
-   "_comment": "Linux aarch64 `chrome` ELF, 152.0.7977.42 beta (official arm64 .deb) - same build version as 152-win-arm64 / 152-macos-arm64, whose four gate bodies this table matches 1:1 (register allocation aside). B.cond GT->AL flip (kind bcond); shared folded bodies carry expectedMatches=2. Structurally derived (no arm64 Linux symbols) and cross-checked against those two symbol-verified tables.",
-   "sites": [
-    {
-     "name": "ManifestV2Handler::MaybeReEnableExtension (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x05D64DD8",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900712C020054691641F96A224839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x05D64F9C",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F0900710C020054091441F90A204839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x05F78874",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900718C010054891641F98A224839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::OnExtensionSystemReady (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x0696E3C8",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "3F090071EC4A0054091541F90A214839283140B98A000037296940B93F050071"
-    }
-   ]
-  },
-  {
-   "name": "152-x86",
-   "container": "pe32",
-   "sites": [
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
-     "kind": "short",
-     "jgRVA": "0x06FB7547",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"
-    },
-    {
-     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
-     "kind": "short",
-     "jgRVA": "0x0299ED6A",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "837A28027F368B8A640100008B411880BA540100000075088B"
-    },
-    {
-     "name": "OnExtensionSystemReady startup loop",
-     "kind": "short",
-     "jgRVA": "0x00A580A6",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837928027F2C8B91640100008B421880B95401000000750C8B"
-    },
-    {
-     "name": "MaybeReEnableExtension",
-     "kind": "short",
-     "jgRVA": "0x06FB736D",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E28027F248B8E640100008B411880BE540100000075088B"
-    },
-    {
-     "name": "UserMayInstall (inlined)",
-     "kind": "short",
-     "jgRVA": "0x0791012F",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F28027F458B8F640100008B411880BF5401000000750C8B"
-    },
-    {
-     "name": "MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x010851A8",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B28020F8F840000008B8B640100008B411880BB54010000007508"
-    },
-    {
-     "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "short",
-     "jgRVA": "0x032EFE77",
-     "jgOff": 7,
-     "expectedMatches": 1,
-     "optional": true,
-     "stockOpcode": "0x75",
-     "sig": "F6867C01000008755A8B47088945D4"
-    }
-   ]
-  },
-  {
-   "name": "152-macos-arm64",
-   "container": "macho-arm64",
-   "_comment": "macOS Apple Silicon slice, 152.0.7977.42 (consumer beta). Chrome 152 layout, B.cond GT->AL flip (kind bcond), symbol-verified against the official arm64 dSYM; a shared folded body covers ShouldBlockExtensionInstallation + UserMayInstall. Patched by default like the x86_64 slice.",
-   "sites": [
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled",
-     "kind": "bcond",
-     "jgRVA": "0x02218740",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F090071EC040054891641F9283140B98A2248398A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::OnExtensionSystemReady",
-     "kind": "bcond",
-     "jgRVA": "0x0320635C",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F090071AC0100542A1541F9483140B929214839C9000037496940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected",
-     "kind": "bcond",
-     "jgRVA": "0x03FFBD84",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F090071CC010054291441F9283140B92A204839CA000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x066F0E38",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F090071AC010054691641F9283140B96A224839CA000037296940B93F050071"
-    },
-    {
-     "_comment": "Same as pe, mac arm64 (flag byte at ext+0x24c).",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "tbz",
-     "jgRVA": "0x0294FDDC",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "optional": true,
-     "sig": "0831493948021837E80B40F9010D40F9"
-    }
-   ]
-  },
-  {
-   "name": "152-win-arm64",
-   "container": "pe-arm64",
-   "_comment": "Windows-on-ARM native arm64 chrome.dll (PE32+, machine 0xAA64), 152.0.7977.42 beta. Chrome 152's rearchitected ManifestV2Handler set (same gates as Windows 152 x64); arm64 flips the B.cond GT->AL (kind bcond). Symbol-verified against the arm64 chrome.dll PDB; a shared folded body covers ShouldBlockExtensionEnable + IsExtensionAffected.",
-   "sites": [
-    {
-     "name": "ManifestV2Handler::OnExtensionSystemReady",
-     "kind": "bcond",
-     "jgRVA": "0x01014CBC",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x013591BC",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F090071EC050054891641F98A224839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x02C1FD9C",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900710C020054291441F92A204839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::MaybeReEnableExtension",
-     "kind": "bcond",
-     "jgRVA": "0x07702AEC",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F0900710C020054691641F96A224839283140B98A000037296940B93F050071"
-    },
-    {
-     "_comment": "Same as pe, arm64 (flip the tbnz bit-test to a plain branch).",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "tbz",
-     "jgRVA": "0x02E82BC8",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "optional": true,
-     "sig": "085149398801183760E641F9E80F40F9"
-    }
-   ]
-  },
-  {
-   "name": "154-x86",
-   "container": "pe32",
-   "sites": [
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
-     "kind": "short",
-     "jgRVA": "0x08BBA217",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"
-    },
-    {
-     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
-     "kind": "short",
-     "jgRVA": "0x031C47CA",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "837A28027F368B8A640100008B411880BA540100000075088B"
-    },
-    {
-     "name": "OnExtensionSystemReady startup loop",
-     "kind": "short",
-     "jgRVA": "0x01B51743",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "837928027F288B91640100008B421880B95401000000750C8B"
-    },
-    {
-     "name": "MaybeReEnableExtension",
-     "kind": "short",
-     "jgRVA": "0x08BBA108",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E28027F248B8E640100008B411880BE540100000075088B"
-    },
-    {
-     "name": "UserMayInstall (inlined)",
-     "kind": "short",
-     "jgRVA": "0x093997BF",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F28027F458B8F640100008B411880BF5401000000750C8B"
-    },
-    {
-     "name": "MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x01205788",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B28020F8F840000008B8B640100008B411880BB54010000007508"
-    },
-    {
-     "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "short",
-     "jgRVA": "0x0319D797",
-     "jgOff": 7,
-     "expectedMatches": 1,
-     "optional": true,
-     "stockOpcode": "0x75",
-     "sig": "F6867C01000008755A8B47088945D4"
-    }
-   ]
-  },
-  {
-   "name": "154-linux",
-   "container": "elf",
-   "sites": [
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)",
-     "kind": "short",
-     "jgRVA": "0x0991AA29",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)",
-     "kind": "short",
-     "jgRVA": "0x0991A6D4",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50027F2F554889E5488B8E280200008B413080BE080200"
-    },
-    {
-     "name": "ManifestV2Handler::MaybeReEnableExtension (inlined)",
-     "kind": "short",
-     "jgRVA": "0x0991A818",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B50027F30488B8B280200008B413080BB08020000007508"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)",
-     "kind": "near",
-     "jgRVA": "0x0A37E1CA",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B50020F8FD1000000488B8B280200008B413080BB080200000075"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x05AB5FFA",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50020F8F8E000000498B8E280200008B41304180BE0802000000"
-    },
-    {
-     "name": "IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)",
-     "kind": "short",
-     "jgRVA": "0x053B0E40",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837950027F2D488B91280200008B423080B90802000000750C"
-    }
-   ]
-  },
-  {
-   "name": "154-linux-arm64",
-   "container": "elf-arm64",
-   "sites": [
-    {
-     "name": "ManifestV2Handler::MaybeReEnableExtension (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x05E87478",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900712C020054691641F96A224839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x05E8763C",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F0900710C020054091441F90A204839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x0609B370",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900718C010054891641F98A224839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::OnExtensionSystemReady (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x06AB7470",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "3F0900718C010054091541F90A214839283140B98A000037296940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)",
-     "kind": "bcond",
-     "jgRVA": "0x09B77244",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "7F0900718C0100544B1541F94C2148396A3140B98C0000376B6940B97F050071"
-    }
-   ]
-  },
-  {
-   "name": "155",
-   "container": "pe",
-   "sites": [
-    {
-     "name": "OnExtensionSystemReady startup loop",
-     "kind": "short",
-     "jgRVA": "0x0155EB53",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837950027F30488B91280200008B425080B90802000000750F"
-    },
-    {
-     "name": "MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x016CB234",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50020F8F8E000000488B8F280200008B415080BF080200000075"
-    },
-    {
-     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
-     "kind": "short",
-     "jgRVA": "0x03269A44",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "837A50027F37488B8A280200008B415080BA0802000000750B"
-    },
-    {
-     "name": "MaybeReEnableExtension",
-     "kind": "short",
-     "jgRVA": "0x084DEA66",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50027F30488B8E280200008B415080BE0802000000750B"
-    },
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
-     "kind": "short",
-     "jgRVA": "0x084DEC85",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83F9027F1F83FA08771AB90A0100000FA3D173104183F8050F"
-    },
-    {
-     "name": "UserMayInstall (inlined)",
-     "kind": "short",
-     "jgRVA": "0x090A7931",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F50027F51488B8F280200008B415080BF0802000000750F"
-    },
-    {
-     "_comment": "Real Chrome blocks off-store extensions ('not from the Web Store') and greys out Enable. Flips the from-webstore check to always-yes, so they install and stay on -- no 'managed by your organization' banner. Branded Chrome only.",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "short",
-     "jgRVA": "0x032F4553",
-     "jgOff": 7,
-     "expectedMatches": 1,
-     "optional": true,
-     "stockOpcode": "0x75",
-     "sig": "F68754020000087545488B5310"
-    },
-    {
-     "_comment": "Chrome only lets MV2 extensions use webRequestBlocking. This flips one byte in the feature's .rdata struct (max manifest version 2 -> 3) so MV3 can use it too, and nothing else. We find it by name, not by a code branch. Optional: if it's missing, MV2 patching still works. Only 155-era tables (155/155-x86/155-linux/155-linux-arm64/155-macos-arm64) have it (older builds lay the struct out differently).",
-     "name": "let MV3 extensions use webRequestBlocking",
-     "kind": "featurebyte",
-     "optional": true,
-     "feature": "webRequestBlocking",
-     "structRVA": "0x10228E10",
-     "patchOff": 192,
-     "stock": 2,
-     "patched": 3,
-     "verify": {
-      "96": 2,
-      "180": 0,
-      "188": 0,
-      "196": 1
-     },
-     "expectedMatches": 1
-    }
-   ]
-  },
-  {
-   "name": "155-x86",
-   "container": "pe32",
-   "sites": [
-    {
-     "name": "MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x011D9EB8",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B28020F8F840000008B8B640100008B412880BB54010000007508"
-    },
-    {
-     "name": "OnExtensionSystemReady startup loop",
-     "kind": "short",
-     "jgRVA": "0x01AFBEF3",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "837928027F288B91640100008B422880B95401000000750C8B"
-    },
-    {
-     "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
-     "kind": "short",
-     "jgRVA": "0x032F125A",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "837A28027F368B8A640100008B412880BA540100000075088B"
-    },
-    {
-     "name": "MaybeReEnableExtension",
-     "kind": "short",
-     "jgRVA": "0x08F66848",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E28027F248B8E640100008B412880BE540100000075088B"
-    },
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
-     "kind": "short",
-     "jgRVA": "0x08F66957",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837D08027F278B4D0C31C083F908771FBA0A0100000FA3CA73"
-    },
-    {
-     "name": "UserMayInstall (inlined)",
-     "kind": "short",
-     "jgRVA": "0x097626DF",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837F28027F458B8F640100008B412880BF5401000000750C8B"
-    },
-    {
-     "_comment": "Same as pe, x86 (flag byte at ext+0x17c).",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "short",
-     "jgRVA": "0x032F4E47",
-     "jgOff": 7,
-     "expectedMatches": 1,
-     "optional": true,
-     "stockOpcode": "0x75",
-     "sig": "F6867C01000008755A8B47088945D4"
-    },
-    {
-     "_comment": "Same gate as 155 win64, for 32-bit Chrome (smaller struct: max-version byte at +104). Flips webRequestBlocking's rule-1 max manifest version 2 -> 3 so MV3 can use it. Found by name in .rdata; optional.",
-     "name": "let MV3 extensions use webRequestBlocking",
-     "kind": "featurebyte",
-     "optional": true,
-     "feature": "webRequestBlocking",
-     "structRVA": "0x0E43907C",
-     "patchOff": 104,
-     "stock": 2,
-     "patched": 3,
-     "verify": {
-      "48": 2,
-      "92": 0,
-      "100": 0,
-      "108": 1
-     },
-     "expectedMatches": 1
-    }
-   ]
-  },
-  {
-   "name": "155-linux",
-   "container": "elf",
-   "sites": [
-    {
-     "name": "IsExtensionAffected / ShouldBlockExtensionEnable (member, 2nd body)",
-     "kind": "short",
-     "jgRVA": "0x041AAAE0",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837950027F30488B91280200008B425080B90802000000750F"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled (inlined, near jg)",
-     "kind": "near",
-     "jgRVA": "0x06835F7D",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50020F8F91000000498B8E280200008B41504180BE0802000000"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body; also covers OnExtensionSystemReady and MaybeReEnableExtension's calls out to it)",
-     "kind": "short",
-     "jgRVA": "0x099272C4",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837E50027F32554889E5488B8E280200008B415080BE080200"
-    },
-    {
-     "name": "ManifestV2Handler::MaybeReEnableExtension (inlined)",
-     "kind": "short",
-     "jgRVA": "0x09927408",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B50027F33488B8B280200008B415080BB0802000000750B"
-    },
-    {
-     "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers the ShouldBlockExtensionInstallation thunk, which tail-jumps here)",
-     "kind": "short",
-     "jgRVA": "0x09927619",
-     "jgOff": 3,
-     "expectedMatches": 1,
-     "sig": "83FF027F1D83FE087718B90A0100000FA3F1730E83FA050F95"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::UserMayInstall (inlined, near jg; Load-Unpacked gate)",
-     "kind": "near",
-     "jgRVA": "0x0A3DC86A",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "837B50020F8FD4000000488B8B280200008B415080BB080200000075"
-    },
-    {
-     "_comment": "Same webRequestBlocking MV3 gate for Linux. The struct's name pointer is a relocation (0 on disk), so we find the struct via a .rela.dyn RELATIVE reloc pointing at the 'webRequestBlocking' string, then flip max version 2 -> 3. Optional.",
-     "name": "let MV3 extensions use webRequestBlocking",
-     "kind": "featurebyte",
-     "optional": true,
-     "feature": "webRequestBlocking",
-     "structRVA": "0x113F75F0",
-     "patchOff": 192,
-     "stock": 2,
-     "patched": 3,
-     "verify": {
-      "96": 2,
-      "180": 0,
-      "188": 0,
-      "196": 1
-     },
-     "expectedMatches": 1
-    }
-   ]
-  },
-  {
-   "name": "155-macos-arm64",
-   "container": "macho-arm64",
-   "sites": [
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled",
-     "kind": "bcond",
-     "jgRVA": "0x022BD404",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F090071EC040054891641F9285140B98A2248398A000037298940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::OnExtensionSystemReady",
-     "kind": "bcond",
-     "jgRVA": "0x031F4CA4",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F090071AC0100542A1541F9485140B929214839C9000037498940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected",
-     "kind": "bcond",
-     "jgRVA": "0x0403B248",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F090071CC010054291441F9285140B92A204839CA000037298940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x068F3880",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F090071AC010054691641F9285140B96A224839CA000037298940B93F050071"
-    },
-    {
-     "_comment": "Same as pe, mac arm64 (flag byte at ext+0x24c).",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "tbz",
-     "jgRVA": "0x029206F8",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "optional": true,
-     "sig": "0831493948021837E80B40F9010D40F9"
-    },
-    {
-     "_comment": "Same webRequestBlocking MV3 gate for macOS arm64. The name pointer is a chained fixup, so we find the struct via its rebase target, then flip max version 2 -> 3 in __DATA_CONST. Optional.",
-     "name": "let MV3 extensions use webRequestBlocking",
-     "kind": "featurebyte",
-     "optional": true,
-     "feature": "webRequestBlocking",
-     "structRVA": "0x0E6206A8",
-     "patchOff": 192,
-     "stock": 2,
-     "patched": 3,
-     "verify": {
-      "96": 2,
-      "180": 0,
-      "188": 0,
-      "196": 1
-     },
-     "expectedMatches": 1
-    }
-   ]
-  },
-  {
-   "name": "155-linux-arm64",
-   "container": "elf-arm64",
-   "sites": [
-    {
-     "name": "ManifestV2Handler::MaybeReEnableExtension (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x05E7E1E4",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900712C020054691641F96A224839285140B98A000037298940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::IsExtensionAffected / ShouldBlockExtensionEnable (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x05E7E3A8",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F0900710C020054091441F90A204839285140B98A000037298940B93F050071"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled / UserMayInstall (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x06096308",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900718C010054891641F98A224839285140B98A000037298940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::OnExtensionSystemReady (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x06B05764",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "3F0900718C010054091541F90A214839285140B98A000037298940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler member gate (additional inlined copy; +0x228/+0x208)",
-     "kind": "bcond",
-     "jgRVA": "0x0A2934B4",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071"
-    },
-    {
-     "_comment": "Same webRequestBlocking MV3 gate for Linux arm64. Located via a .rela.dyn RELATIVE reloc (the name pointer is 0 on disk), then flip max version 2 -> 3. Optional.",
-     "name": "let MV3 extensions use webRequestBlocking",
-     "kind": "featurebyte",
-     "optional": true,
-     "feature": "webRequestBlocking",
-     "structRVA": "0x10D57318",
-     "patchOff": 192,
-     "stock": 2,
-     "patched": 3,
-     "verify": {
-      "96": 2,
-      "180": 0,
-      "188": 0,
-      "196": 1
-     },
-     "expectedMatches": 1
-    }
-   ]
-  },
-  {
-   "name": "154-win-arm64",
-   "container": "pe-arm64",
-   "sites": [
-    {
-     "name": "ManifestV2Handler::OnExtensionSystemReady",
-     "kind": "bcond",
-     "jgRVA": "0x010B5620",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "5F0900718C0100542A1541F92B214839495140B98B0000374A8940B95F050071"
-    },
-    {
-     "name": "StandardManagementPolicyProvider::MustRemainDisabled / StandardManagementPolicyProvider::UserMayInstall (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x01354B40",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900712C060054891641F98A224839285140B98A000037298940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::ShouldBlockExtensionEnable / ManifestV2Handler::IsExtensionAffected (shared body)",
-     "kind": "bcond",
-     "jgRVA": "0x02C30AD8",
-     "jgOff": 4,
-     "expectedMatches": 2,
-     "sig": "1F0900710C020054291441F92A204839285140B98A000037298940B93F050071"
-    },
-    {
-     "name": "ManifestV2Handler::MaybeReEnableExtension",
-     "kind": "bcond",
-     "jgRVA": "0x079DBD98",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "sig": "1F0900710C020054691641F96A224839285140B98A000037298940B93F050071"
-    },
-    {
-     "_comment": "Same as pe, arm64 (flip the tbnz bit-test to a plain branch).",
-     "name": "let off-store extensions install (InstallVerifier)",
-     "kind": "tbz",
-     "jgRVA": "0x02CCF568",
-     "jgOff": 4,
-     "expectedMatches": 1,
-     "optional": true,
-     "sig": "0851493988011837600640F9E80F40F9"
-    }
-   ]
-  }
- ]
+  ]
 }
