@@ -1094,6 +1094,72 @@
           "expectedMatches": 1
         }
       ]
+    },
+    {
+      "name": "157-x86",
+      "container": "pe32",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x01A32B43",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837928027F288B9164010000"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x039A279A",
+          "jgOff": 4,
+          "expectedMatches": 3,
+          "sig": "837A28027F368B8A64010000"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x09999F78",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E28027F248B8E64010000"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected (free predicate; covers install thunk)",
+          "kind": "short",
+          "jgRVA": "0x0999A087",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837D08027F278B4D0C31C083"
+        },
+        {
+          "name": "let MV3 extensions use webRequestBlocking",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0EA8DD1C",
+          "patchOff": 104,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "48": 2,
+            "92": 0,
+            "100": 0,
+            "108": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "_comment": "Same as pe, x86 (flag byte at ext+0x17c). RVA inherited from 155 (branding-gated, DCE'd in CfT); sig is the runtime source of truth.",
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "jgRVA": "0x032F4E47",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "optional": true,
+          "stockOpcode": "0x75",
+          "sig": "F6867C01000008755A8B47088945D4"
+        }
+      ]
     }
   ]
 }

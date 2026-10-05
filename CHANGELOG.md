@@ -1,5 +1,9 @@
 # Changelog
 
+## [1.14.0] - 2026-10-05
+
+- Chrome 157 support.
+
 ## [1.13.0] - 2026-09-16
 
 - Chrome 156 support.

@@ -85,10 +85,10 @@ PLATFORMS = {
     # Linux on ARM: native aarch64 `chrome` ELF (EM_AARCH64 0xB7), same bcond flip
     # as Windows/macOS arm64. Google began shipping official arm64 Linux .debs in
     # mid-2026; they share the `linux` VersionHistory feed (one version for both
-    # arches) but there is NO Chrome for Testing arm64 Linux build, so -- like
-    # win-arm64 -- there is no CfT --version fallback: use --channel stable/beta
-    # for the current build, or hand-copy an arm64 `chrome`.
-    "linux-arm64": {"api": "linux", "container": "elf-arm64", "binary": "chrome", "pe_magic": None, "machine": 0xB7, "tag": "linux-arm64", "suffix": ""},
+    # arches). Chrome for Testing now also publishes a `linux-arm64` slice, so a
+    # pinned `--version` resolves against CfT like the x86_64 ELF; the current
+    # stable/beta build still comes from the arm64 .deb installer.
+    "linux-arm64": {"api": "linux", "container": "elf-arm64", "binary": "chrome", "pe_magic": None, "machine": 0xB7, "tag": "linux-arm64", "suffix": "", "cft": "linux-arm64"},
     # macOS: CfT-only. The gate binary is the framework Mach-O inside the .app;
     # matched brand-agnostically by a "framework" name + the slice's cputype.
     "mac-arm64": {"api": "mac_arm64", "container": "macho-arm64", "binary": None, "pe_magic": None, "tag": "mac-arm64", "suffix": "", "cft": "mac-arm64", "cputype": 0x0100000C, "cft_only": True},
