@@ -1169,6 +1169,222 @@
           "sig": "F6867C01000008755A8B47088945D4"
         }
       ]
+    },
+    {
+      "name": "158",
+      "container": "pe",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x0145F0EA",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837850027F344D8B88280200"
+        },
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x01924C4E",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50020F8F8C000000488B8F280200"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x0380E084",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837A50027F37488B8A280200"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x08DBB9F6",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F30488B8E280200"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected",
+          "kind": "short",
+          "jgRVA": "0x08DBBC25",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83F9027F1F83FA08771AB9"
+        },
+        {
+          "name": "UserMayInstall (inlined)",
+          "kind": "short",
+          "jgRVA": "0x0959FC96",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50027F30488B8F280200"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x10DF8AF0",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "optional": true,
+          "jgRVA": "0x0382F186",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "sig": "F68054020000087554488B442420488B5010"
+        }
+      ]
+    },
+    {
+      "name": "158-x86",
+      "container": "pe32",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "short",
+          "jgRVA": "0x01A246A3",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837928027F288B9164010000"
+        },
+        {
+          "name": "MustRemainDisabled (inlined, near jg)",
+          "kind": "near",
+          "jgRVA": "0x01142803",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F28020F8F8D0000008B8764010000"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short",
+          "jgRVA": "0x03F0EFBA",
+          "jgOff": 4,
+          "expectedMatches": 3,
+          "sig": "837A28027F368B8A64010000"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x0A544928",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E28027F248B8E64010000"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected",
+          "kind": "short",
+          "jgRVA": "0x0A544A37",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837D08027F278B4D0C31C083"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0F22F3BC",
+          "patchOff": 104,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "48": 2,
+            "92": 0,
+            "100": 0,
+            "108": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "optional": true,
+          "jgRVA": "0x08677312",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "sig": "F6867C01000008755AA15CF35920894424148B00"
+        }
+      ]
+    },
+    {
+      "name": "158-macos-arm64",
+      "container": "macho-arm64",
+      "sites": [
+        {
+          "name": "StandardManagementPolicyProvider::MustRemainDisabled",
+          "kind": "bcond",
+          "jgRVA": "0x0247B65C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071EC040054891641F9285140B9"
+        },
+        {
+          "name": "ManifestV2Handler::OnExtensionSystemReady",
+          "kind": "bcond",
+          "jgRVA": "0x034D932C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "3F090071AC0100544B1541F9695140B9"
+        },
+        {
+          "name": "ManifestV2Handler::IsExtensionAffected",
+          "kind": "bcond",
+          "jgRVA": "0x044A7EBC",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071CC010054291441F9285140B9"
+        },
+        {
+          "name": "ManifestV2Handler::ShouldBlockExtensionInstallation / StandardManagementPolicyProvider::UserMayInstall (shared body)",
+          "kind": "bcond",
+          "jgRVA": "0x06D66454",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "1F090071AC010054691641F9285140B9"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0EC633C0",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "tbz",
+          "optional": true,
+          "jgRVA": "0x02BF1F1C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "0831493948021837E80B40F9010D40F9"
+        }
+      ]
     }
   ]
 }
