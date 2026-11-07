@@ -96,5 +96,36 @@ c_x64 = dm.parse_elf((_d / "x64").read_bytes()).container
 print(f"[9] parse_elf containers: aarch64->{c_arm} x86_64->{c_x64} (expect elf-arm64 / elf)")
 ok &= c_arm == "elf-arm64" and c_x64 == "elf"
 
-print("ALL bcond SAFETY CHECKS:", "PASS" if ok else "FAIL")
+# Chrome 159: inverted branches must select fall-through; CSEL must select WZR.
+for kind, insn, patched_insn in (
+    ("short-nop", bytes.fromhex("7E18"), b"\x90" * 2),
+    ("near-nop", bytes.fromhex("0F8E12345600"), b"\x90" * 6),
+    ("bcond-nop", W(BLE), W(NOP)),
+    ("csel", W(0x1A88C3E0), W(0x1A88E3E0)),
+    ("cbz", W(0xB4000080), W(0x14000004)),
+):
+    prefix, suffix = W(CMP2), W(MOVZ0, RET)
+    sig = prefix + insn + suffix
+    for code in (insn, patched_insn):
+        relocated = b"\xCC" * 40 + prefix + code + suffix
+        assert dm.masked_match_count(relocated, sig, 4, kind) == [40], kind
+    # Neither a half-written NOP nor a changed CSEL operand is our patch.
+    bad = bytearray(patched_insn)
+    bad[-1] ^= 1
+    assert not dm.masked_match_count(prefix + bad + suffix, sig, 4, kind), kind
+    if kind == "cbz":
+        assert not dm.masked_match_count(prefix + W(0x34000080) + suffix, sig, 4, kind), "CBZ register width must match"
+        assert not dm.masked_match_count(prefix + W(0xB4000081) + suffix, sig, 4, kind), "CBZ register must match"
+    elif kind != "csel":
+        moved = bytearray(insn)
+        moved[1 if kind == "short-nop" else 2] ^= 0x20
+        assert dm.masked_match_count(prefix + moved + suffix, sig, 4, kind) == [0], kind
+    else:
+        for word in (0x9A88C3E0, 0x1A88C000, 0x1A88D3E0):
+            wrong_sig = prefix + W(word) + suffix
+            assert not dm.masked_match_count(wrong_sig, wrong_sig, 4, kind), hex(word)
+    assert not dm.masked_match_count(sig, sig[:5], 4, kind), kind
+print("[10] Chrome 159 instruction matching, relocation, and corruption checks passed")
+
+print("ALL DERIVATION SAFETY CHECKS:", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)

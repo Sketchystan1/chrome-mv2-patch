@@ -45,11 +45,15 @@ import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from derive_milestone import open_images, masked_match_count, _masked_indices  # noqa: E402
+from derive_milestone import open_images, masked_match_count, _masked_indices, NEED  # noqa: E402
 
 PE_CONTAINERS = {"pe", "pe32", "pe-arm64"}
 ARM64_CONTAINERS = {"pe-arm64", "elf-arm64", "macho-arm64"}
 JUMP_OPCODE = {"short": (0x7F, 0xEB), "near": (0x0F, 0x90)}
+
+
+def milestones(table):
+    return table["milestones"] + table.get("milestones_v2", [])
 
 # Extension field offsets per container family, as recorded in mv2-reversing.md.
 # (manifest_version, manifest ptr, location flag)
@@ -139,7 +143,10 @@ def pc_relative_spans(site, container):
 
 
 def audit_table(table, rep):
-    entries = table["milestones"]
+    entries = milestones(table)
+    for m in table["milestones"]:
+        if any(s["kind"] in ("short-nop", "near-nop", "bcond-nop", "csel") for s in m["sites"]):
+            rep.fail("%s: new instruction kinds must use milestones_v2 (older patchers cannot apply them)" % m["name"])
     print("\n== table: %d milestone(s), %d site(s)"
           % (len(entries), sum(len(m["sites"]) for m in entries)))
 
@@ -195,10 +202,29 @@ def audit_table(table, rep):
                 rep.fail("%s: sig is not hex" % tag)
                 bad += 1
                 continue
-            need = 4 if s["kind"] in ("bcond", "cbz", "tbz") else (6 if s["kind"] == "near" else 2)
-            if s["jgOff"] + need > len(raw):
+            need = NEED.get(s["kind"], 0)
+            if not need:
+                rep.fail("%s: unknown kind %r" % (tag, s["kind"]))
+                bad += 1
+                continue
+            if s["jgOff"] < 0 or s["jgOff"] + need > len(raw):
                 rep.fail("%s: jgOff %d + %d bytes runs past a %d-byte sig"
                          % (tag, s["jgOff"], need, len(raw)))
+                bad += 1
+                continue
+            elif s["kind"] == "short-nop" and raw[s["jgOff"]] != 0x7E:
+                rep.fail("%s: short-nop requires a stock JLE" % tag)
+                bad += 1
+            elif s["kind"] == "near-nop" and raw[s["jgOff"]:s["jgOff"] + 2] != b"\x0f\x8e":
+                rep.fail("%s: near-nop requires a stock JLE" % tag)
+                bad += 1
+            elif s["kind"] == "bcond-nop" and (int.from_bytes(raw[s["jgOff"]:s["jgOff"] + 4], "little")
+                                               & 0xFF00001F) != 0x5400000D:
+                rep.fail("%s: bcond-nop requires a stock B.LE" % tag)
+                bad += 1
+            elif s["kind"] == "csel" and (int.from_bytes(raw[s["jgOff"]:s["jgOff"] + 4], "little")
+                                         & 0xFFE0FFE0) != 0x1A80C3E0:
+                rep.fail("%s: csel requires CSEL Wd,WZR,Wm,GT" % tag)
                 bad += 1
             elif (s["kind"] in JUMP_OPCODE
                   and raw[s["jgOff"]] in (0xEB, 0xE9)) or (
@@ -213,8 +239,8 @@ def audit_table(table, rep):
                 rep.fail("%s: kind bcond but the word at jgOff is not b.gt/b.al" % tag)
                 bad += 1
             elif s["kind"] == "cbz" and (int.from_bytes(raw[s["jgOff"]:s["jgOff"] + 4], "little")
-                                         & 0xFF000000) != 0x34000000:
-                rep.fail("%s: kind cbz but the word at jgOff is not a 32-bit CBZ" % tag)
+                                         & 0x7F000000) != 0x34000000:
+                rep.fail("%s: kind cbz but the word at jgOff is not a CBZ" % tag)
                 bad += 1
             elif s["kind"] == "tbz" and (int.from_bytes(raw[s["jgOff"]:s["jgOff"] + 4], "little")
                                          & 0x7E000000) != 0x36000000:
@@ -234,6 +260,11 @@ def audit_table(table, rep):
             if s["expectedMatches"] < 1:
                 rep.fail("%s: expectedMatches must be >= 1" % tag)
                 bad += 1
+            if s["kind"] in ("short-nop", "near-nop", "bcond-nop", "csel"):
+                arm = s["kind"] in ("bcond-nop", "csel")
+                if arm != (container in ARM64_CONTAINERS) or (arm and (s["jgOff"] % 4 or int(s["jgRVA"], 16) % 4)):
+                    rep.fail("%s: wrong instruction architecture or alignment" % tag)
+                    bad += 1
 
             for pos, span, what in pc_relative_spans(s, container):
                 rep.warn("%s: sig holds a %s at byte %d - build-specific, so this "
@@ -253,7 +284,7 @@ def audit_table(table, rep):
 def would_select(table, img):
     """Mirror the runtime's ranking: full beats partial, then most sites."""
     ranked = []
-    for m in table["milestones"]:
+    for m in milestones(table):
         if m["container"] != img.container:
             continue
         # Rank on required branch sites only; optional / featurebyte sites are
@@ -283,7 +314,7 @@ def flip_addresses(table, img):
     copy as a missing gate.
     """
     out = set()
-    for m in table["milestones"]:
+    for m in milestones(table):
         if m["container"] != img.container:
             continue
         for s in m["sites"]:
@@ -301,10 +332,7 @@ def flip_addresses(table, img):
 def classify_marker(text, pos, img, mv):
     """Name the shape around an uncovered flag marker, or None if it needs a human.
 
-    Every category here was confirmed by disassembly and is present in earlier
-    Chrome versions too, so none of them is a regression to chase. See
-    mv2-reversing.md section 7 - the sanctioned edit is a `jg`/`b.gt` flip and
-    nothing else.
+    Inverted and branchless predicates need the same review as taken branches.
     """
     arm = img.container in ARM64_CONTAINERS
     lo = max(0, pos - 0x40)
@@ -317,12 +345,14 @@ def classify_marker(text, pos, img, mv):
         conds = [w & 0xF for w in words if (w & 0xFF000010) == 0x54000000]
         if any((w & 0xFFC00000) == 0xB9000000 and ((w >> 10) & 0xFFF) == mv // 4 for w in words):
             return "Extension initializer (stores manifest_version)"
+        if has_cmp2 and 0xD in conds:
+            return None
         # CSEL / CCMP fold the whole check into data flow; there is no branch at all.
         if not has_bgt and any((w & 0xFFE00C00) == 0x1A800000            # CSEL (32-bit)
                                or (w & 0xFFE00C10) == 0x7A400800         # CCMP (imm)
                                or (w & 0xFFE00C10) == 0x7A400000         # CCMP (reg)
                                for w in words):
-            return "branchless csel/ccmp (no b.gt exists to flip)"
+            return None
         if has_cmp2 and conds and 0xC not in conds:
             return "b.ne/b.hs sibling (equality or inverted test, no b.gt to flip)"
         if not has_cmp2:
@@ -339,8 +369,8 @@ def classify_marker(text, pos, img, mv):
             return "no cmp,2 head (reached by an unrelated branch)"
         for i in cmp2:
             tail = seg[i + 4:i + 10]
-            if tail[:1] == b"\x7f" or tail[:2] == b"\x0f\x8f":
-                return None                      # a real jg is here - human must look
+            if tail[:1] in (b"\x7f", b"\x7e") or tail[:2] in (b"\x0f\x8f", b"\x0f\x8e"):
+                return None                      # review both branch polarities
         # cmovcc (0F 40..4F) / setcc (0F 90..9F) fold the check into data flow,
         # leaving no branch to flip.
         if any(seg[i] == 0x0F and (0x40 <= seg[i + 1] <= 0x4F or 0x90 <= seg[i + 1] <= 0x9F)
@@ -403,8 +433,7 @@ def completeness(table, img, rep):
         rep.warn("%s: %d gate marker(s) NEED REVIEW: %s"
                  % (img.container, len(unexplained),
                     ", ".join("0x%08X" % r for r in unexplained)))
-        print("        Disassemble each before adding anything; only an existing "
-              "jg/b.gt may be flipped (mv2-reversing.md section 7).")
+        print("        Disassemble both paths before adding a site (mv2-reversing.md section 5).")
     else:
         rep.ok("%s: all %d flag-anchored gate marker(s) accounted for"
                % (img.container, len(markers)))
@@ -427,7 +456,7 @@ def audit_binary(table, path, rep):
         else:
             rep.ok("%s: would select %s (%d sites, %d flip(s))"
                    % (img.container, best[0][3], best[0][1],
-                      sum(s["expectedMatches"] for m in table["milestones"]
+                      sum(s["expectedMatches"] for m in milestones(table)
                           if m["name"] == best[0][3] for s in m["sites"])))
         completeness(table, img, rep)
 

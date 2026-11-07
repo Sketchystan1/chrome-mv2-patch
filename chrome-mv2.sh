@@ -45,7 +45,7 @@
 
 set -euo pipefail
 
-readonly APP_VERSION="1.10.1"
+readonly APP_VERSION="1.16.0"
 
 # ============================================================================
 # Internal signature-token format. signatures.json (fetched from GitHub, or a
@@ -276,7 +276,13 @@ def clean(v, label):
     return v
 doc = json.load(sys.stdin)
 ms = doc.get("milestones")
-if not isinstance(ms, list) or not ms:
+if not isinstance(ms, list):
+    raise ValueError("bad milestones")
+extended = doc.get("milestones_v2", [])
+if not isinstance(extended, list):
+    raise ValueError("bad milestones_v2")
+ms = ms + extended
+if not ms:
     raise ValueError("no milestones")
 seen = set()
 for m in ms:
@@ -296,7 +302,8 @@ for m in ms:
         if snm in sn: raise ValueError("dup site %s in %s" % (snm, name))
         sn.add(snm)
         kind = s.get("kind")
-        if kind not in ("short", "near", "bcond", "cbz", "tbz", "featurebyte"):
+        if kind not in ("short", "near", "bcond", "cbz", "tbz", "featurebyte",
+                        "short-nop", "near-nop", "bcond-nop", "csel"):
             raise ValueError("bad kind in %s/%s" % (name, snm))
         if kind == "featurebyte":
             # featurebyte is a name-anchored data-byte flip (a permission feature
@@ -350,9 +357,9 @@ for m in ms:
         # x86_64 gates (elf) are cmp/jg (short/near); the arm64 gates (elf-arm64,
         # macho-arm64) are the bcond flip, the cbz rewrite, or the tbz rewrite.
         # Reject a kind that does not match the container architecture.
-        if kind in ("bcond", "cbz", "tbz") and container == "elf":
+        if kind in ("bcond", "cbz", "tbz", "bcond-nop", "csel") and container == "elf":
             raise ValueError("x86_64 milestone %s has an arm64 site %s" % (name, snm))
-        if kind not in ("bcond", "cbz", "tbz") and container in ("elf-arm64", "macho-arm64"):
+        if kind not in ("bcond", "cbz", "tbz", "bcond-nop", "csel") and container in ("elf-arm64", "macho-arm64"):
             raise ValueError("arm64 milestone %s has a non-arm64 site %s" % (name, snm))
         # Optional stockOpcode field pins the sig stock encoding at load time
         # (e.g. a near JE site carries 0x0F84). The sig bytes at jgOff remain
@@ -374,9 +381,22 @@ for m in ms:
         if not isinstance(sig, str) or not sig or len(sig) % 2 or not re.fullmatch(r"[0-9A-Fa-f]+", sig):
             raise ValueError("bad sig in %s/%s" % (name, snm))
         raw = bytes.fromhex(sig)
-        need = {"short": 2, "near": 6, "bcond": 4, "cbz": 4, "tbz": 4}[kind]
+        need = {"short": 2, "near": 6, "bcond": 4, "cbz": 4, "tbz": 4,
+                "short-nop": 2, "near-nop": 6, "bcond-nop": 4, "csel": 4}[kind]
         if off + need > len(raw):
             raise ValueError("jump past sig in %s/%s" % (name, snm))
+        if kind == "short-nop" and raw[off] != 0x7E:
+            raise ValueError("short-nop requires a stock JLE in %s/%s" % (name, snm))
+        if kind == "near-nop" and raw[off:off+2] != b"\x0f\x8e":
+            raise ValueError("near-nop requires a stock JLE in %s/%s" % (name, snm))
+        if kind in ("bcond-nop", "csel"):
+            if off % 4 or int(rva, 16) % 4:
+                raise ValueError("arm64 instruction must be word-aligned in %s/%s" % (name, snm))
+            w = int.from_bytes(raw[off:off+4], "little")
+            if kind == "bcond-nop" and (w & 0xFF00001F) != 0x5400000D:
+                raise ValueError("bcond-nop requires a stock B.LE in %s/%s" % (name, snm))
+            if kind == "csel" and (w & 0xFFE0FFE0) != 0x1A80C3E0:
+                raise ValueError("csel requires CSEL Wd,WZR,Wm,GT in %s/%s" % (name, snm))
         # Stock-opcode check: the sig bytes at jgOff must be the stock branch
         # encoding. stockOpcode overrides the default (a near JE site carries
         # 0x0F84); otherwise short must be 0x7F and near 0x0F 0x8F. Mirrors
@@ -399,8 +419,8 @@ for m in ms:
             if off % 4 != 0:
                 raise ValueError("cbz jgOff must be word-aligned in %s/%s" % (name, snm))
             w = int.from_bytes(raw[off:off+4], "little")
-            if (w & 0xFF000000) != 0x34000000:
-                raise ValueError("jgOff not a stock 32-bit CBZ in %s/%s" % (name, snm))
+            if (w & 0x7F000000) != 0x34000000:
+                raise ValueError("jgOff not a stock CBZ in %s/%s" % (name, snm))
         if kind == "tbz":
             if off % 4 != 0:
                 raise ValueError("tbz jgOff must be word-aligned in %s/%s" % (name, snm))
@@ -763,6 +783,28 @@ sig_matches_at() {
     local actual; actual=$(read_bytes_hex "$file" "$file_offset" "$sig_len")
     local sig_upper; sig_upper=$(echo "$sig_hex" | tr 'a-f' 'A-F')
     local cbz_branch_words=""
+    [[ ${#actual} -eq ${#sig_upper} ]] || return 1
+
+    if [[ "$kind" == "short-nop" || "$kind" == "near-nop" ]]; then
+        local width=2 patched_hex="9090" code
+        if [[ "$kind" == "near-nop" ]]; then width=6; patched_hex="909090909090"; fi
+        code="${actual:$(( jg_off*2 )):$(( width*2 ))}"
+        if [[ "$code" != "$patched_hex" ]]; then
+            if [[ "$kind" == "short-nop" ]]; then [[ "${code:0:2}" == "7E" ]] || return 1
+            else [[ "${code:0:4}" == "0F8E" ]] || return 1; fi
+        fi
+    elif [[ "$kind" == "bcond-nop" || "$kind" == "csel" ]]; then
+        local code sw word
+        code="${actual:$(( jg_off*2 )):8}"
+        word=$(( 16#${code:6:2}${code:4:2}${code:2:2}${code:0:2} ))
+        if [[ "$kind" == "bcond-nop" ]]; then
+            (( (word & 0xFF00001F) == 0x5400000D || word == 0xD503201F )) || return 1
+        else
+            code="${sig_upper:$(( jg_off*2 )):8}"
+            sw=$(( 16#${code:6:2}${code:4:2}${code:2:2}${code:0:2} ))
+            (( (sw & 0xFFE0FFE0) == 0x1A80C3E0 && (word == sw || word == (sw | 0x2000)) )) || return 1
+        fi
+    fi
 
     if [[ "$kind" == "bcond" ]]; then
         # validate the whole branch word first (little-endian)
@@ -790,8 +832,8 @@ sig_matches_at() {
         b2=$(( 16#${sig_upper:$(( (jg_off+2)*2 )):2} ))
         b3=$(( 16#${sig_upper:$(( (jg_off+3)*2 )):2} ))
         sw=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
-        if (( (word & 0xFF000000) == 0x34000000 )); then
-            if (( (word & 0x1F) != (sw & 0x1F) )); then return 1; fi
+        if (( (word & 0x7F000000) == 0x34000000 )); then
+            if (( (word & 0xFF00001F) != (sw & 0xFF00001F) )); then return 1; fi
         elif (( (word & 0xFC000000) == 0x14000000 )); then
             cdisp=$(( word & 0x03FFFFFF ))
             if (( (cdisp & 0x2000000) != 0 )); then cdisp=$(( cdisp - 0x4000000 )); fi
@@ -865,7 +907,9 @@ sig_matches_at() {
                 if [[ "$act_pair" != "90E9" && "$act_pair" != "${sig_upper:$i:4}" ]]; then return 1; fi
                 continue
             elif (( byte_idx >= jg_off + 1 && byte_idx <= jg_off + 5 )); then continue; fi
-        else  # bcond / cbz: the 4 word bytes are handled above
+        elif [[ "$kind" == "short-nop" || "$kind" == "near-nop" ]]; then
+            if (( byte_idx >= jg_off && byte_idx < jg_off + width )); then continue; fi
+        else  # arm64: the 4 instruction bytes are handled above
             if (( byte_idx >= jg_off && byte_idx <= jg_off + 3 )); then continue; fi
             # cbz embedded BL/B words: displacement bytes ignored (opcode validated above)
             if [[ -n "$cbz_branch_words" ]]; then
@@ -884,9 +928,15 @@ BINARY_ANCHOR_HEX=""; BINARY_ANCHOR_OFF=0
 build_binary_anchor() {
     local sig; sig=$(echo "$1" | tr 'A-F' 'a-f')
     local kind="$2" jg_off="$3"
-    local sig_bytes=$(( ${#sig} / 2 )) mask_len
-    case "$kind" in short) mask_len=2 ;; near) mask_len=6 ;; bcond|cbz|tbz) mask_len=4 ;; esac
-    local mask_end=$(( jg_off + mask_len ))
+    local sig_bytes=$(( ${#sig} / 2 )) mask_len mask_start=$jg_off
+    case "$kind" in
+        short|short-nop) mask_len=2 ;;
+        near|near-nop) mask_len=6 ;;
+        bcond|bcond-nop|cbz|tbz) mask_len=4 ;;
+        csel) mask_start=$(( jg_off + 1 )); mask_len=1 ;;
+        *) return 1 ;;
+    esac
+    local mask_end=$(( mask_start + mask_len ))
     # cbz: embedded BL (0x94) / B (0x14) words carry a build-specific displacement,
     # so they cannot anchor -- treat them as masked (high byte is sig[wpos+3]).
     local cbz_bw="" wpos hb sigU
@@ -903,7 +953,7 @@ build_binary_anchor() {
     for (( start = 0; start < sig_bytes; start++ )); do
         run_len=0
         for (( end = start; end < sig_bytes; end++ )); do
-            if (( end >= jg_off && end < mask_end )); then break; fi
+            if (( end >= mask_start && end < mask_end )); then break; fi
             if [[ -n "$cbz_bw" ]]; then
                 local ws=$(( end - (end % 4) )) bw brk=0
                 for bw in $cbz_bw; do if (( bw == ws )); then brk=1; break; fi; done
@@ -971,6 +1021,24 @@ try:
     def ok(s):
         if s < 0 or s + L > n:
             return False
+        if kind in ("short-nop", "near-nop", "bcond-nop", "csel"):
+            width = {"short-nop": 2, "near-nop": 6, "bcond-nop": 4, "csel": 4}[kind]
+            code = data[s+jg:s+jg+width]
+            if kind == "short-nop":
+                if code[:1] != b"\x7e" and code != b"\x90\x90":
+                    return False
+            elif kind == "near-nop":
+                if code[:2] != b"\x0f\x8e" and code != b"\x90" * 6:
+                    return False
+            else:
+                w = int.from_bytes(code, "little")
+                sw = int.from_bytes(sig[jg:jg+4], "little")
+                if kind == "bcond-nop":
+                    if (w & 0xFF00001F) != 0x5400000D and w != 0xD503201F:
+                        return False
+                elif (sw & 0xFFE0FFE0) != 0x1A80C3E0 or w not in (sw, sw | 0x2000):
+                    return False
+            return data[s:s+jg] == sig[:jg] and data[s+jg+width:s+L] == sig[jg+width:]
         if kind == "bcond":
             w = data[s+jg] | (data[s+jg+1] << 8) | (data[s+jg+2] << 16) | (data[s+jg+3] << 24)
             if (w & 0xFF000010) != 0x54000000:
@@ -983,8 +1051,8 @@ try:
         if kind == "cbz":
             w = data[s+jg] | (data[s+jg+1] << 8) | (data[s+jg+2] << 16) | (data[s+jg+3] << 24)
             sw = sig[jg] | (sig[jg+1] << 8) | (sig[jg+2] << 16) | (sig[jg+3] << 24)
-            if (w & 0xFF000000) == 0x34000000:
-                if (w & 0x1F) != (sw & 0x1F):
+            if (w & 0x7F000000) == 0x34000000:
+                if (w & 0xFF00001F) != (sw & 0xFF00001F):
                     return False
             elif (w & 0xFC000000) == 0x14000000:
                 if _sx(w & 0x03FFFFFF, 26) != _sx((sw >> 5) & 0x7FFFF, 19):
@@ -1393,8 +1461,12 @@ probe_slice_pass() {
                 if [[ "$s_kind" == "featurebyte" ]]; then
                     fb_rest="${s_sig#*,}"; fb_patch_rest="${fb_rest#*,}"
                     stock_hex="$(printf '%02X%02X' "${fb_rest%%,*}" "${fb_patch_rest%%,*}")"
-                elif [[ "$s_kind" == "cbz" || "$s_kind" == "tbz" ]]; then
+                elif [[ "$s_kind" == "cbz" || "$s_kind" == "tbz" || "$s_kind" == "bcond-nop" || "$s_kind" == "csel" ]]; then
                     stock_hex="${s_sig:$(( s_jgoff*2 )):8}"
+                elif [[ "$s_kind" == "near-nop" ]]; then
+                    stock_hex="${s_sig:$(( s_jgoff*2 )):12}"
+                elif [[ "$s_kind" == "short-nop" ]]; then
+                    stock_hex="${s_sig:$(( s_jgoff*2 )):4}"
                 elif [[ "$s_kind" == "near" ]]; then
                     stock_hex="${s_sig:$(( s_jgoff*2 )):4}"
                 else
@@ -1465,7 +1537,7 @@ probe_slice() {
 #   near  : stock pair (sig[jgOff], 0F 8F jg default)   -> 90 E9 (disp32 kept)
 #   bcond : B.cond word byte0 low nibble GT(0xC) -> AL(0xE); ONLY that nibble
 #           changes (b0 = (b0 & 0xF0) | 0x0E), preserving opcode and imm19.
-#   cbz   : 32-bit CBZ word 0x34xxxxxx -> unconditional B 0x14yyyyyy with the
+#   cbz   : CBZ W/X word -> unconditional B 0x14yyyyyy with the
 #           SAME resolved target: imm26 is recomputed from the sign-extended
 #           imm19 (layouts differ; the raw bits never carry over).
 # ============================================================================
@@ -1478,7 +1550,24 @@ apply_flips_slice() {
     for (( i = 0; i < ${#FLIP_OFFSETS[@]}; i++ )); do
         name="${FLIP_NAMES[$i]}"; kind="${FLIP_KINDS[$i]}"; offset="${FLIP_OFFSETS[$i]}"
         stock_hex="${FLIP_STOCK[$i]:-}"
-        if [[ "$kind" == "short" ]]; then
+        if [[ "$kind" == "short-nop" || "$kind" == "near-nop" || "$kind" == "bcond-nop" || "$kind" == "csel" ]]; then
+            local patch_hex width
+            case "$kind" in
+                short-nop) patch_hex="9090" ;;
+                near-nop) patch_hex="909090909090" ;;
+                bcond-nop) patch_hex="1F2003D5" ;;
+                csel) patch_hex="${stock_hex:0:2}$(printf '%02X' "$(( 16#${stock_hex:2:2} | 0x20 ))")${stock_hex:4:4}" ;;
+            esac
+            width=$(( ${#patch_hex} / 2 ))
+            if ! sig_matches_at "$file" "$offset" "$stock_hex" "$kind" 0; then
+                warnf "    Skipped one change - its instruction no longer matches."
+                continue
+            fi
+            cur=$(read_bytes_hex "$file" "$offset" "$width")
+            if [[ "$cur" == "$patch_hex" ]]; then already=$(( already + 1 )); continue; fi
+            printf '%b' "$(echo "$patch_hex" | sed 's/../\\x&/g')" | dd of="$file" bs=1 seek="$offset" count="$width" conv=notrunc 2>/dev/null
+            applied=$(( applied + 1 ))
+        elif [[ "$kind" == "short" ]]; then
             cur=$(read_byte "$file" "$offset")
             if (( cur == 0xEB )); then already=$(( already + 1 )); continue; fi
             sb0=$(( 16#${stock_hex:0:2} ))
@@ -1513,7 +1602,7 @@ apply_flips_slice() {
                 warnf "    Skipped one change - it didn't look the way we expected."
                 continue
             fi
-            if ! (( (word & 0xFF000000) == 0x34000000 && (word & 0x1F) == (sw & 0x1F) )); then
+            if ! (( (word & 0x7F000000) == 0x34000000 && (word & 0xFF00001F) == (sw & 0xFF00001F) )); then
                 warnf "    Skipped one change - it didn't look the way we expected."
                 continue
             fi
@@ -1592,7 +1681,20 @@ classify_flip_states_slice() {
         kind="${FLIP_KINDS[$i]}"; offset="${FLIP_OFFSETS[$i]}"
         stock_hex="${FLIP_STOCK[$i]:-}"
         o0=$(read_byte "$file" "$offset")
-        if [[ "$kind" == "short" ]]; then
+        if [[ "$kind" == "short-nop" || "$kind" == "near-nop" || "$kind" == "bcond-nop" || "$kind" == "csel" ]]; then
+            sig_matches_at "$file" "$offset" "$stock_hex" "$kind" 0 || return 1
+            if [[ "$kind" == "short-nop" || "$kind" == "near-nop" ]]; then
+                if (( o0 == 0x90 )); then STATE_PATCHED=$(( STATE_PATCHED + 1 ))
+                else STATE_STOCK=$(( STATE_STOCK + 1 )); fi
+            elif [[ "$kind" == "bcond-nop" ]]; then
+                if (( o0 == 0x1F )); then STATE_PATCHED=$(( STATE_PATCHED + 1 ))
+                else STATE_STOCK=$(( STATE_STOCK + 1 )); fi
+            else
+                o1=$(read_byte "$file" $(( offset + 1 )))
+                if (( (o1 & 0x20) != 0 )); then STATE_PATCHED=$(( STATE_PATCHED + 1 ))
+                else STATE_STOCK=$(( STATE_STOCK + 1 )); fi
+            fi
+        elif [[ "$kind" == "short" ]]; then
             sb0=$(( 16#${stock_hex:0:2} ))
             if (( o0 == sb0 )); then STATE_STOCK=$(( STATE_STOCK + 1 ))
             elif (( o0 == 0xEB )); then STATE_PATCHED=$(( STATE_PATCHED + 1 ))
@@ -1608,8 +1710,8 @@ classify_flip_states_slice() {
             b2=$(read_byte "$file" $(( offset + 2 ))); b3=$(read_byte "$file" $(( offset + 3 )))
             word=$(( b0 | (b1<<8) | (b2<<16) | (b3<<24) ))
             sw=$(( 16#${stock_hex:6:2}${stock_hex:4:2}${stock_hex:2:2}${stock_hex:0:2} ))
-            if (( (word & 0xFF000000) == 0x34000000 )); then
-                if (( (word & 0x1F) != (sw & 0x1F) )); then return 1; fi
+            if (( (word & 0x7F000000) == 0x34000000 )); then
+                if (( (word & 0xFF00001F) != (sw & 0xFF00001F) )); then return 1; fi
                 STATE_STOCK=$(( STATE_STOCK + 1 ))
             elif (( (word & 0xFC000000) == 0x14000000 )); then
                 cdisp=$(( word & 0x03FFFFFF ))

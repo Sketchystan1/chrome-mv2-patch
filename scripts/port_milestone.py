@@ -176,7 +176,7 @@ def _backoff_starts(text, cmp_pos, kind):
     back-up at all.
     """
     starts = [cmp_pos]
-    if kind != "bcond" or cmp_pos < 4:
+    if kind not in ("bcond", "bcond-nop") or cmp_pos < 4:
         return starts
     cmp_word = int.from_bytes(bytes(text[cmp_pos:cmp_pos + 4]), "little")
     rn = (cmp_word >> 5) & 0x1F                      # the register `cmp w<Rn>,#2` reads
@@ -195,7 +195,7 @@ def harden(img, cmp_pos, jg_pos, kind):
     just the one it came from.
     """
     text = img.text
-    step = 4 if kind in ("bcond", "cbz") else 1
+    step = 4 if kind in ("bcond", "bcond-nop", "csel", "cbz", "tbz") else 1
     floor = NEED[kind] + 4
     best = None
     for start in _backoff_starts(text, cmp_pos, kind):
@@ -273,7 +273,8 @@ def carry_names(sites, img, table_path, prev_name, arm, moves):
             table = json.load(handle)
     except OSError:
         return 0
-    prev = [m for m in table["milestones"] if m["name"] == prev_name]
+    prev = [m for m in table["milestones"] + table.get("milestones_v2", [])
+            if m["name"] == prev_name]
     if not prev:
         print("    note: no milestone %r to carry names from" % prev_name)
         return 0
@@ -412,10 +413,12 @@ def main():
     if args.merge:
         with open(args.signatures, encoding="utf-8") as handle:
             table = json.load(handle, object_pairs_hook=collections.OrderedDict)
-        by_name = {m["name"]: i for i, m in enumerate(table["milestones"])}
+        by_name = {m["name"]: (key, i) for key in ("milestones", "milestones_v2")
+                   for i, m in enumerate(table.get(key, []))}
         for entry in derived:
             if entry["name"] in by_name:
-                old = table["milestones"][by_name[entry["name"]]]
+                key, index = by_name[entry["name"]]
+                old = table[key][index]
                 # Carry forward any prior site the jg-gate deriver did not
                 # reproduce (matched by name): featurebyte sites (e.g.
                 # webRequestBlocking) and the ExtensionSettings /
@@ -426,7 +429,7 @@ def main():
                 if carried:
                     entry["sites"].extend(carried)
                     print("  carried %d prior site(s) into %s" % (len(carried), entry["name"]))
-                table["milestones"][by_name[entry["name"]]] = entry
+                table[key][index] = entry
                 print("replaced %s in %s" % (entry["name"], args.signatures))
             else:
                 table["milestones"].append(entry)

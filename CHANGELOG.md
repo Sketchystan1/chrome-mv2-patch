@@ -1,10 +1,14 @@
 # Changelog
 
+## [1.16.0] - 2026-11-07
+
+- Chrome 159 support.
+- New instruction forms require an updated patcher.
+
 ## [1.15.0] - 2026-10-23
 
-- Chrome 158 support (windows x64/x86, macOS arm64).
-- Fix Chrome 156/157 x86: `MustRemainDisabled` gate was missing from the 157-x86
-  table, so a stable 156/157 x86 install left MV2 extensions greyed out.
+- Chrome 158 support.
+- Fix Windows 157 x86.
 
 ## [1.14.0] - 2026-10-05
 

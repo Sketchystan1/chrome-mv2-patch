@@ -133,7 +133,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$AppVersion      = '1.12.0'
+$AppVersion      = '1.16.0'
 $SignaturesFile  = 'signatures.json'
 $SignaturesUrl   = 'https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json'
 # version.dll release: the latest GitHub release's version.dll-v<ver>.zip asset
@@ -361,8 +361,8 @@ public static class Mv2Native
     //          [jgOff+2..+5] wild
     //   bcond: the 4-byte LE arm64 B.cond word at [jgOff] - opcode 0x54 + bit4=0
     //          fixed, cond nibble in {0xC stock GT, 0xE patched AL}, imm19 wild
-    //   cbz  : the 4-byte LE arm64 word at [jgOff] is the stock 32-bit CBZ
-    //          (0x34, Rt = the sig's, imm19 wild) or the patched unconditional
+    //   cbz  : the 4-byte LE arm64 word at [jgOff] is a stock CBZ W/X
+    //          (register and width pinned, imm19 wild) or the patched unconditional
     //          B (0x14) whose resolved target equals the sig CBZ's
     static int SignExtend(int v, int bits)
     {
@@ -372,8 +372,8 @@ public static class Mv2Native
 
     static bool CbzWordOk(uint cand, uint sigWord)
     {
-        if ((cand & 0xFF000000u) == 0x34000000u)
-            return (cand & 0x1Fu) == (sigWord & 0x1Fu);
+        if ((cand & 0x7F000000u) == 0x34000000u)
+            return (cand & 0xFF00001Fu) == (sigWord & 0xFF00001Fu);
         if ((cand & 0xFC000000u) == 0x14000000u)
         {
             int dispCand = SignExtend((int)(cand & 0x03FFFFFFu), 26);
@@ -402,6 +402,37 @@ public static class Mv2Native
     public static bool SigMatchesAt(byte[] buf, long start, byte[] sig, int jgOff, int kind)
     {
         if (start < 0 || start + sig.Length > buf.LongLength) return false;
+        if (kind < 0 || kind > 9 || kind == 3) return false;
+        if (kind >= 6)
+        {
+            int width = kind == 6 ? 2 : kind == 7 ? 6 : 4;
+            if (jgOff < 0 || jgOff + width > sig.Length) return false;
+            long p = start + jgOff;
+            if (kind == 6 || kind == 7)
+            {
+                bool done = true;
+                for (int i = 0; i < width; i++) done &= buf[p + i] == 0x90;
+                bool stock = kind == 6 ? buf[p] == 0x7E : buf[p] == 0x0F && buf[p + 1] == 0x8E;
+                if (!stock && !done) return false;
+            }
+            else
+            {
+                uint word = (uint)(buf[p] | (buf[p + 1] << 8) | (buf[p + 2] << 16) | (buf[p + 3] << 24));
+                if (kind == 8)
+                {
+                    if ((word & 0xFF00001Fu) != 0x5400000Du && word != 0xD503201Fu) return false;
+                }
+                else
+                {
+                    uint stock = (uint)(sig[jgOff] | (sig[jgOff + 1] << 8) | (sig[jgOff + 2] << 16) | (sig[jgOff + 3] << 24));
+                    if ((stock & 0xFFE0FFE0u) != 0x1A80C3E0u) return false;
+                    if (word != stock && word != (stock | 0x2000u)) return false;
+                }
+            }
+            for (int k = 0; k < sig.Length; k++)
+                if ((k < jgOff || k >= jgOff + width) && buf[start + k] != sig[k]) return false;
+            return true;
+        }
         if (kind == KindBcond)
         {
             // Validate the whole branch word once (little-endian) before the byte loop.
@@ -613,13 +644,16 @@ function ConvertFrom-HexString {
 function Import-Milestones {
     $doc = Read-SignatureJson
 
-    if ($null -eq $doc.milestones -or @($doc.milestones).Count -eq 0) {
-        throw 'signature document contains no milestones'
-    }
-
     $out = @()
     $milestoneNames = @{}
-    foreach ($rm in $doc.milestones) {
+    if ($doc.milestones -isnot [array]) { throw 'milestones must be an array' }
+    $rawMilestones = @($doc.milestones)
+    if ($doc.PSObject.Properties['milestones_v2']) {
+        if ($doc.milestones_v2 -isnot [array]) { throw 'milestones_v2 must be an array' }
+        $rawMilestones += @($doc.milestones_v2)
+    }
+    if ($rawMilestones.Count -eq 0) { throw 'signature document contains no milestones' }
+    foreach ($rm in $rawMilestones) {
         $msName = [string]$rm.name
         $container = [string]$rm.container
         if ([string]::IsNullOrWhiteSpace($msName) -or $msName -match '[\r\n|]') {
@@ -657,6 +691,10 @@ function Import-Milestones {
                 'featurebyte' { $kind = 3 }      # .rdata feature-data byte overwrite
                 'cbz'         { $kind = 4 }      # Mv2Native.KindCbz (arm64 CBZ->B, same target)
                 'tbz'         { $kind = 5 }      # Mv2Native.KindTbz (arm64 TBZ/TBNZ->B, same target)
+                'short-nop'   { $kind = 6 }      # JLE -> existing fall-through
+                'near-nop'    { $kind = 7 }
+                'bcond-nop'   { $kind = 8 }      # B.LE -> existing fall-through
+                'csel'        { $kind = 9 }      # CSEL Wd,WZR,Wm,GT -> AL
                 default { throw "milestone $($rm.name) site '$($rs.name)': unknown kind '$($rs.kind)'" }
             }
             if ($kind -eq 3) {
@@ -706,10 +744,10 @@ function Import-Milestones {
                 continue
             }
             # A bcond/cbz site must sit in an arm64 PE; short/near are x86/x64 only.
-            if (($kind -eq 2 -or $kind -eq 4 -or $kind -eq 5) -and $container -ne 'pe-arm64') {
+            if (($kind -in 2,4,5,8,9) -and $container -ne 'pe-arm64') {
                 throw "milestone $msName site '$siteName': '$($rs.kind)' kind is only valid in a pe-arm64 milestone"
             }
-            if (($kind -ne 2 -and $kind -ne 4 -and $kind -ne 5) -and $container -eq 'pe-arm64') {
+            if (($kind -notin 2,4,5,8,9) -and $container -eq 'pe-arm64') {
                 throw "milestone $msName site '$siteName': pe-arm64 milestones use the 'bcond'/'cbz'/'tbz' kinds, not '$($rs.kind)'"
             }
 
@@ -719,8 +757,21 @@ function Import-Milestones {
             }
             $sig = ConvertFrom-HexString $sigText
             $jgOff = [int]$rs.jgOff
+            $jgRVA = [Convert]::ToUInt32($rs.jgRVA, 16)
             if ($jgOff -lt 0 -or $jgOff -ge $sig.Length) {
                 throw "milestone $($rm.name) site '$($rs.name)': jgOff $jgOff out of range (sig len $($sig.Length))"
+            }
+            if ($kind -ge 6) {
+                $width = if ($kind -eq 6) { 2 } elseif ($kind -eq 7) { 6 } else { 4 }
+                if ($jgOff + $width -gt $sig.Length) { throw "milestone $msName site '$siteName': instruction runs past sig" }
+                if ($kind -eq 6 -and $sig[$jgOff] -ne 0x7E) { throw 'short-nop requires a stock JLE' }
+                if ($kind -eq 7 -and ($sig[$jgOff] -ne 0x0F -or $sig[$jgOff + 1] -ne 0x8E)) { throw 'near-nop requires a stock JLE' }
+                if ($kind -ge 8) {
+                    if ($jgOff % 4 -ne 0 -or $jgRVA % 4 -ne 0) { throw 'arm64 instruction must be word-aligned' }
+                    $word = [BitConverter]::ToUInt32($sig, $jgOff)
+                    if ($kind -eq 8 -and ($word -band 0xFF00001F) -ne 0x5400000D) { throw 'bcond-nop requires a stock B.LE' }
+                    if ($kind -eq 9 -and ($word -band 0xFFE0FFE0) -ne 0x1A80C3E0) { throw 'csel requires CSEL Wd,WZR,Wm,GT' }
+                }
             }
             # Stock-opcode validation: the sig's bytes at jgOff must be the stock
             # branch encoding. A stockOpcode field overrides the default (e.g. a
@@ -776,11 +827,11 @@ function Import-Milestones {
                 if (($jgOff % 4) -ne 0) {
                     throw "milestone $msName site '$siteName': cbz jgOff must be word-aligned (4-byte steps)"
                 }
-                # Stock CBZ word (little-endian): 32-bit w-register CBZ 0x34.......
+                # Stock CBZ word (little-endian): W-register 0x34 or X-register 0xB4.
                 $w = [uint32]$sig[$jgOff] -bor ([uint32]$sig[$jgOff + 1] -shl 8) -bor `
                      ([uint32]$sig[$jgOff + 2] -shl 16) -bor ([uint32]$sig[$jgOff + 3] -shl 24)
-                if (($w -band 0xFF000000) -ne 0x34000000) {
-                    throw ("milestone $msName site '$siteName': jgOff is not a stock 32-bit CBZ word (0x{0:X8})" -f $w)
+                if (($w -band 0x7F000000) -ne 0x34000000) {
+                    throw ("milestone $msName site '$siteName': jgOff is not a stock CBZ word (0x{0:X8})" -f $w)
                 }
             }
             if ($kind -eq 5) {
@@ -806,7 +857,7 @@ function Import-Milestones {
                 Name            = $siteName
                 Kind            = $kind
                 Optional        = $optional
-                JgRVA           = [uint32]([Convert]::ToUInt32($rs.jgRVA, 16))
+                JgRVA           = $jgRVA
                 Sig             = $sig
                 JgOff           = $jgOff
                 ExpectedMatches = $expected
@@ -1085,6 +1136,10 @@ function Test-SigAt {
     param([byte[]]$Buf, [int64]$Start, [byte[]]$Sig, [int]$JgOff, [int]$Kind)
 
     if ($Start -lt 0 -or ($Start + $Sig.Length) -gt $Buf.LongLength) { return $false }
+    if ($Kind -ge 6) {
+        Initialize-NativeHelpers
+        return [Mv2Native]::SigMatchesAt($Buf, $Start, $Sig, $JgOff, $Kind)
+    }
     if ($Kind -eq 2) {
         # arm64 B.cond word (little-endian) at JgOff: 0x54 opcode + bit4=0 fixed,
         # cond nibble in {0xC stock GT, 0xE patched AL}, imm19 wild.
@@ -1095,15 +1150,15 @@ function Test-SigAt {
         if ($cond -ne 0x0C -and $cond -ne 0x0E) { return $false }
     }
     if ($Kind -eq 4) {
-        # arm64 CBZ word (little-endian) at JgOff: stock 32-bit CBZ (0x34, Rt =
-        # the sig's, imm19 wild) or patched unconditional B (0x14) with the same
+        # arm64 CBZ word at JgOff: stock CBZ W/X (register and width pinned,
+        # imm19 wild) or patched unconditional B (0x14) with the same
         # resolved target as the sig CBZ's.
         $w = [uint32]$Buf[$Start + $JgOff] -bor ([uint32]$Buf[$Start + $JgOff + 1] -shl 8) -bor `
              ([uint32]$Buf[$Start + $JgOff + 2] -shl 16) -bor ([uint32]$Buf[$Start + $JgOff + 3] -shl 24)
         $sw = [uint32]$Sig[$JgOff] -bor ([uint32]$Sig[$JgOff + 1] -shl 8) -bor `
               ([uint32]$Sig[$JgOff + 2] -shl 16) -bor ([uint32]$Sig[$JgOff + 3] -shl 24)
         $ok = $false
-        if (($w -band 0xFF000000) -eq 0x34000000 -and (($w -band 0x1F) -eq ($sw -band 0x1F))) {
+        if (($w -band 0x7F000000) -eq 0x34000000 -and (($w -band 0xFF00001F) -eq ($sw -band 0xFF00001F))) {
             $ok = $true
         } elseif (($w -band 0xFC000000) -eq 0x14000000) {
             $dc = [int]($w -band 0x03FFFFFF)
@@ -1376,7 +1431,28 @@ function Invoke-PatchMilestones {
         $ms    = $best.Ms.Name
         if ($f.Relocated) { $res.Relocated = $true }
 
-        if ($f.Site.Kind -eq 0) {
+        if ($f.Site.Kind -ge 6) {
+            $width = if ($f.Site.Kind -eq 6) { 2 } elseif ($f.Site.Kind -eq 7) { 6 } else { 4 }
+            if ($f.Site.Kind -le 7) {
+                $newBytes = [byte[]](@(0x90) * $width)
+            } elseif ($f.Site.Kind -eq 8) {
+                $newBytes = [byte[]]@(0x1F,0x20,0x03,0xD5)
+            } else {
+                $newBytes = [byte[]]$f.Site.Sig[$f.Site.JgOff..($f.Site.JgOff + 3)]
+                $newBytes[1] = $newBytes[1] -bor 0x20
+            }
+            if (-not (Test-SigAt -Buf $Buf -Start ($f.JgRaw - $f.Site.JgOff) -Sig $f.Site.Sig -JgOff $f.Site.JgOff -Kind $f.Site.Kind)) {
+                Write-Warn 'Skipped one change - its instruction no longer matches.'
+                continue
+            }
+            $done = $true
+            for ($bi = 0; $bi -lt $width; $bi++) { $done = $done -and ($Buf[$f.JgRaw + $bi] -eq $newBytes[$bi]) }
+            $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = $newBytes }
+            if ($done) { $already++; $res.Already++; continue }
+            $res.Stock++
+            if ($Apply) { [Array]::Copy($newBytes, 0, $Buf, [int64]$f.JgRaw, $width) }
+            $applied++; $res.Flips++
+        } elseif ($f.Site.Kind -eq 0) {
             $cur = $Buf[$f.JgRaw]
             if ($cur -eq 0xEB) {
                 $already++; $res.Already++
@@ -1427,7 +1503,7 @@ function Invoke-PatchMilestones {
             $applied++; $res.Flips++
             $res.Written += [pscustomobject]@{ RVA = $jgRVA; Off = [int64]$f.JgRaw; Bytes = [byte[]]@($f.Site.Patched) }
         } elseif ($f.Site.Kind -eq 4) {
-            # cbz (arm64): rewrite the 32-bit CBZ word to the unconditional B with
+            # cbz (arm64): rewrite the CBZ W/X instruction to the unconditional B with
             # the SAME resolved target - imm26 is recomputed from the sign-extended
             # imm19 (the field layouts differ, so the raw bits never carry over).
             $w = [uint32]$Buf[$f.JgRaw] -bor ([uint32]$Buf[$f.JgRaw + 1] -shl 8) -bor `
@@ -1448,7 +1524,7 @@ function Invoke-PatchMilestones {
                 Write-Host ("    {0} Skipped one change - it didn't look the way we expected." -f $script:TagWarn)
                 continue
             }
-            if (-not ((($w -band 0xFF000000) -eq 0x34000000) -and (($w -band 0x1F) -eq ($sw -band 0x1F)))) {
+            if (-not ((($w -band 0x7F000000) -eq 0x34000000) -and (($w -band 0xFF00001F) -eq ($sw -band 0xFF00001F)))) {
                 Write-Host ("    {0} Skipped one change - it didn't look the way we expected." -f $script:TagWarn)
                 continue
             }

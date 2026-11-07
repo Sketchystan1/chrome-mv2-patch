@@ -5,7 +5,10 @@ Windows: `version.dll` that Chrome loads at startup and patches MV2 switch in me
 See [`mv2-reversing.md`](mv2-reversing.md) for details.
 
 ## Windows
-### Chrome 152-158 x64, x86, ARM
+### Chrome 152-159 x64, x86, ARM
+
+Chrome 159 requires `version.dll` **1.16.0 or later** and the updated signatures.
+Run the installer again to replace an older DLL; `update` refreshes signatures only.
 
 Run in terminal:
 
@@ -24,7 +27,7 @@ powershell "irm github.com/Sketchystan1/chrome-mv2-patch/raw/master/chrome-mv2.p
 ## Linux, macOS
 <details>
   <summary>Work in Progress</summary>
-    Chrome 152-158 x64, ARM, macOS ARM
+    Chrome 152-159 x64, ARM, macOS ARM (159 requires chrome-mv2.sh 1.16.0 or later)
 
     curl -sL github.com/Sketchystan1/chrome-mv2-patch/raw/master/chrome-mv2.sh | sudo bash
 </details>

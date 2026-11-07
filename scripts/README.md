@@ -3,7 +3,7 @@
 Cross-platform, dependency-free tooling to fetch symbols for, derive, and verify
 the Chrome MV2 gate signatures used by `../chrome-mv2.ps1` (Windows) and
 `../chrome-mv2.sh` (Linux + macOS). The canonical editable table is `../signatures.json`.
-Works for any future Chrome version on x86, x86-64, and arm64:
+Supported containers on x86, x86-64, and arm64:
 64-bit PE `chrome.dll` (container `pe`), 32-bit PE `chrome.dll` (container
 `pe32`), 64-bit **arm64** PE `chrome.dll` on Windows-on-ARM (container
 `pe-arm64`, the same `bcond` flip as macOS arm64), the ELF `chrome` on Linux —
@@ -13,6 +13,13 @@ Intel x86_64 support was dropped in v1.10.0).
 Replaces the old single-build `port152/` workspace.
 
 Full rationale: [`../mv2-reversing.md`](../mv2-reversing.md) §"Porting to a new version".
+
+Chrome 159 introduces inverted JLE/B.LE checks and a CSEL predicate. The automatic
+finder still finds JG/B.GT only; review these new forms from source and disassembly.
+The matcher, hardener, verifier, and audit support `short-nop`, `near-nop`,
+`bcond-nop`, and `csel`, plus 64-bit CBZ. Put 159 tables in `milestones_v2` so older
+DLLs ignore them. Both arrays are read by updated engines and verification tools.
+Windows requires `version.dll` 1.16.0 or later; updating JSON alone is insufficient.
 
 | Script | What it does | Deps |
 | :--- | :--- | :--- |
@@ -26,28 +33,17 @@ Full rationale: [`../mv2-reversing.md`](../mv2-reversing.md) §"Porting to a new
 
 The test suite is Python too and lives flat in this folder (no subfolder):
 `run_tests.py` (entry point) drives `test_linux.py` (ELF), `test_macos.py`
-(Mach-O), `test_windows.py` (PE, Windows-only), and `test_derive.py`
+(Mach-O), `test_windows.py` (PE, Windows-only), `test_memory.py` (the production C++
+memory engine, with MSVC/Detours), and `test_derive.py`
 (arm64 finder unit checks); `make_macho_fixture.py` builds a synthetic universal
 Mach-O and `_testutil.py` holds the shared fixture builders/helpers. Run all of
 it with `python scripts/run_tests.py`.
 
-The steps are independent (each uses its own tmp dir and only reads the shared
-tables) and spawn/IO-bound rather than CPU-bound — the harness itself does almost
-no computation, it waits on child processes — so they run **concurrently in two
-waves**. Wave 1 is the fast, deterministic set (table audits, the PowerShell PE
-suite, and the pure-Python universal port that already covers PE + ELF + Mach-O);
-if anything there fails the run stops before wave 2 starts, so a real regression
-still fails in seconds. Wave 2 is the bash black-box tests (`test_linux.py` /
-`test_macos.py`), which shell out to `chrome-mv2.sh`; on a Windows host they go
-through the git-bash/WSL launcher where every patch/restore/check spawn is slow
-(`test_linux.py` can exceed a few minutes) and the environment is fragile — that
-slowness/failure is a WSL artifact, not a table defect (those tests use synthetic
-fixtures, never `signatures.json`). Parallelizing the waves cut the fast run from
-~91s to ~53s here; because the cost is spawn/IO latency, not compute, rewriting
-the harness in a faster language would not help (it would spawn the same bash).
-Use `python scripts/run_tests.py --fast` (or `MV2_TEST_FAST=1`) to skip the bash
-black-box pair; CI still runs them on native Linux/macOS, and `test_pyport.py`
-covers the same ELF/Mach-O patch logic cross-platform via the `MV2_TEST_*` toggles.
+Checks run concurrently in two waves: table/engine checks first, then the Bash
+ELF/Mach-O tests. Use `--fast` to skip the slower Bash wave. On Windows, put Git
+Bash on PATH before the WSL launcher because the fixtures use `/c/...` paths.
+`test_memory.py` skips when MSVC or the Detours sources are unavailable; run
+`mv2-mem-patch-win/build.bat` first.
 
 
 ## Verify the shipping table still fits a build

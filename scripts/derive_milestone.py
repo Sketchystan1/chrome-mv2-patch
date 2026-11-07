@@ -294,9 +294,11 @@ def _cbz_branch_words(sig, jg_off):
 
 
 def _masked_indices(jg_off, kind, sig=None):
-    if kind == "short":
+    if kind in ("short", "short-nop"):
         return {jg_off, jg_off + 1}
-    if kind in ("bcond", "cbz", "tbz"):
+    if kind == "csel":
+        return {jg_off + 1}
+    if kind in ("bcond", "bcond-nop", "cbz", "tbz"):
         # the whole 4-byte little-endian branch word is special (bit-masked in full_ok)
         m = {jg_off, jg_off + 1, jg_off + 2, jg_off + 3}
         if kind == "cbz" and sig is not None:
@@ -315,8 +317,8 @@ def _sign_extend(v, bits):
 def _cbz_word_ok(cand_word, sig_word):
     """True when cand_word is the stock CBZ (0x34, Rt pinned to the sig's) or the
     patched unconditional B (0x14) whose resolved target equals the sig CBZ's."""
-    if (cand_word & 0xFF000000) == 0x34000000:
-        return (cand_word & 0x1F) == (sig_word & 0x1F)
+    if (cand_word & 0x7F000000) == 0x34000000:
+        return (cand_word & 0xFF00001F) == (sig_word & 0xFF00001F)
     if (cand_word & 0xFC000000) == 0x14000000:
         disp_cand = _sign_extend(cand_word & 0x03FFFFFF, 26)
         disp_ref = _sign_extend((sig_word >> 5) & 0x7FFFF, 19)
@@ -358,11 +360,31 @@ def _longest_fixed_run(n, masked):
 def masked_match_count(text, sig, jg_off, kind, cap=None):
     """Offsets in .text where sig matches under per-encoding masking."""
     n = len(sig)
+    if kind not in NEED or jg_off < 0 or jg_off + NEED[kind] > n:
+        return []
     masked = _masked_indices(jg_off, kind, sig)
     anchor_off, anchor_len = _longest_fixed_run(n, masked)
     anchor = bytes(sig[anchor_off:anchor_off + anchor_len])
 
     def full_ok(r):
+        if kind in ("short-nop", "near-nop", "bcond-nop", "csel"):
+            size = {"short-nop": 2, "near-nop": 6, "bcond-nop": 4, "csel": 4}[kind]
+            code = bytes(text[r + jg_off:r + jg_off + size])
+            if kind == "short-nop":
+                if code[:1] != b"\x7e" and code != b"\x90\x90":
+                    return False
+            elif kind == "near-nop":
+                if code[:2] != b"\x0f\x8e" and code != b"\x90" * 6:
+                    return False
+            elif kind == "bcond-nop":
+                word = int.from_bytes(code, "little")
+                if (word & 0xFF00001F) != 0x5400000D and word != 0xD503201F:
+                    return False
+            else:
+                word = int.from_bytes(code, "little")
+                stock = int.from_bytes(bytes(sig[jg_off:jg_off + 4]), "little")
+                if (stock & 0xFFE0FFE0) != 0x1A80C3E0 or word not in (stock, stock | 0x2000):
+                    return False
         # arm64 B.cond: validate the 4-byte little-endian branch word once. Accept
         # only the stock GT (0xC) or the flipped AL (0xE) condition; the opcode
         # (0x54) and bit[4]=0 are fixed (bit[4]=1 would be BC.cond), and imm19 is
@@ -373,7 +395,7 @@ def masked_match_count(text, sig, jg_off, kind, cap=None):
                 return False
             if (w & 0xF) not in (0x0C, 0x0E):
                 return False
-        # arm64 CBZ->B: the word is either the stock 32-bit CBZ (Rt pinned,
+        # arm64 CBZ->B: the word is either the stock CBZ W/X (register/width pinned,
         # imm19 wild) or the patched unconditional B with the same target.
         if kind == "cbz":
             w = int.from_bytes(bytes(text[r + jg_off:r + jg_off + 4]), "little")
@@ -596,9 +618,11 @@ def find_gates_for(img):
 # Default signature window past the cmp, matching the shipping entries (24-32B).
 # Long enough to span the follow-up type/location check, so the anchor is a
 # distinctive fixed run and the masked count is meaningful.
-SIGLEN = {"short": 25, "near": 28, "bcond": 32, "cbz": 32, "tbz": 32}
+SIGLEN = {"short": 25, "near": 28, "bcond": 32, "cbz": 32, "tbz": 32,
+          "short-nop": 25, "near-nop": 28, "bcond-nop": 32, "csel": 16}
 # Minimum bytes that must follow jg_off inside the signature (the jump itself).
-NEED = {"short": 2, "near": 6, "bcond": 4, "cbz": 4, "tbz": 4}
+NEED = {"short": 2, "near": 6, "bcond": 4, "cbz": 4, "tbz": 4,
+        "short-nop": 2, "near-nop": 6, "bcond-nop": 4, "csel": 4}
 
 
 def build_site(img, cmp_pos, jg_pos, kind, name):
@@ -1108,7 +1132,8 @@ def cmd_verify(img, json_path):
     how the runtime scripts pick the best-matching milestone to apply."""
     doc = json.loads(Path(json_path).read_text(encoding="utf-8"))
     text = img.text
-    candidates = [ms for ms in doc.get("milestones", []) if ms.get("container") == img.container]
+    candidates = [ms for ms in doc.get("milestones", []) + doc.get("milestones_v2", [])
+                  if ms.get("container") == img.container]
     if not candidates:
         print(f"# no '{img.container}' milestones in {json_path} to verify against this binary")
         return 1

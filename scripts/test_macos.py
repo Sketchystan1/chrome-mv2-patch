@@ -39,6 +39,29 @@ SIGS = {"milestones": [
 
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="chrome-mv2-macos-tests-"))
+    for kind, code, patched in (("bcond-nop", "8D000054", "1F2003D5"),
+                                ("csel", "E0C3881A", "E0E3881A")):
+        fixture, table = tmp / kind, tmp / (kind + ".json")
+        x64_off, arm_off = T.make_fat_macho(fixture)
+        sig = bytes.fromhex("1F090071" + code + "00008052C0035FD6")
+        data = bytearray(fixture.read_bytes())
+        data[arm_off - 4:arm_off - 4 + len(sig)] = sig
+        fixture.write_bytes(data)
+        before = T.sha256(fixture)
+        table.write_text(json.dumps({"milestones": [], "milestones_v2": [{
+            "name": "159-test", "container": "macho-arm64", "sites": [{
+                "name": "gate", "kind": kind, "jgRVA": "0x100000084", "jgOff": 4,
+                "expectedMatches": 1, "sig": sig.hex()}]}]}))
+        result = cmd("patch", fixture, table)
+        A.true(result.returncode == 0, kind + " patches the fat slice: " + result.stdout + result.stderr)
+        A.eq(fixture.read_bytes()[arm_off:arm_off + 4], bytes.fromhex(patched), kind + " writes all four bytes")
+        A.eq(T.byte_at(fixture, x64_off), 0x7F, "Intel slice stays intact")
+        after = T.sha256(fixture)
+        A.true(cmd("patch", fixture, table).returncode == 0, kind + " rerun succeeds")
+        A.eq(T.sha256(fixture), after, kind + " is idempotent")
+        A.true(cmd("restore", fixture, table).returncode == 0, kind + " restores")
+        A.eq(T.sha256(fixture), before, "fat framework restores exactly")
+
     sigs = tmp / "sigs.json"
     sigs.write_text(json.dumps(SIGS))
     target = tmp / "fixture-fat"

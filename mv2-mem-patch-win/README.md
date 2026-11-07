@@ -6,12 +6,22 @@ A small `version.dll` that Chrome loads at startup and patches Chrome's MV2 swit
 **in memory** — `chrome.dll` on disk is never touched, so DRM (Widevine) still works.
 The fix re-applies every launch on its own. Works on x64, x86, and ARM64.
 
+Chrome 159 requires version.dll **1.16.0 or later** and the updated
+`signatures.json`. Older DLLs safely ignore its `milestones_v2` tables. Run the
+installer again to replace the DLL; the `update` command refreshes signatures only.
+
 ## Build
 
 Needs Visual Studio 
 
 ```bat
 build.bat
+```
+
+Engine regression checks (MSVC x64 and the fetched Detours sources):
+
+```bat
+python ..\scripts\test_memory.py
 ```
 
 ## Install

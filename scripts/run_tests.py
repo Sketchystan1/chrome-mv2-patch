@@ -9,16 +9,15 @@ available. Each step's non-zero exit fails the run.
 
 Execution: the steps are independent (each uses its own tmp dir and only reads
 the shared tables), so they run CONCURRENTLY in two waves. Wave 1 is the fast,
-deterministic set (table audits, the PowerShell PE suite, and the pure-Python
-universal port that already exercises PE + ELF + Mach-O); if anything there
+deterministic set (table audits, the PowerShell PE suite, and the Windows memory
+engine); if anything there
 fails, the run stops before the slow wave starts, so a real regression still
 fails in seconds. Wave 2 is the bash black-box tests (test_linux.py /
 test_macos.py), which shell out to chrome-mv2.sh: on a Windows host each of the
 ~35 patch/restore/check spawns goes through the git-bash/WSL launcher and is
 slow (test_linux.py can exceed several minutes) and the environment is fragile.
---fast (or MV2_TEST_FAST=1) skips wave 2; CI still runs it on native
-Linux/macOS runners, and test_pyport.py covers the same ELF/Mach-O patch logic
-cross-platform via the MV2_TEST_* env toggles.
+--fast (or MV2_TEST_FAST=1) skips wave 2. The Bash fixtures also run on Windows
+with Git Bash and on native Linux/macOS.
 
 The steps are spawn/IO-bound, not CPU-bound (the harness itself does almost no
 computation - it waits on child processes), so running them on threads and
@@ -81,17 +80,14 @@ def main():
     # Table audits are seconds and catch defects no per-binary test can see - two
     # milestones with identical signature sets make the patcher decline every
     # build they match. The Windows PE suite
-    # shells to pwsh; the universal Python patcher's black-box suite covers
-    # PE + ELF + Mach-O on any OS via the test env toggles (the fast path that
-    # exercises ELF/Mach-O without shelling to bash).
+    # shells to pwsh; the memory engine suite compiles the production C++.
     steps = [
         ("derivation unit checks (arm64 bcond safety)",
          py + [str(HERE / "test_derive.py")]),
         ("audit signatures.json",
          py + [str(HERE / "audit_signatures.py"), str(REPO / "signatures.json")]),
         ("Windows PE (chrome-mv2.ps1)", py + [str(HERE / "test_windows.py")]),
-        ("compile chrome-mv2.py", py + ["-m", "py_compile", str(REPO / "chrome-mv2.py")]),
-        ("Universal Python (chrome-mv2.py)", py + [str(HERE / "test_pyport.py")]),
+        ("Windows memory engine", py + [str(HERE / "test_memory.py")]),
     ]
 
     # Syntax check for the shell patcher. Use the resolved bash (T.BASH): a bare

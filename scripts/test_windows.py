@@ -69,8 +69,24 @@ function New-TestPe {
     [IO.File]::WriteAllBytes($Path, $buf)
 }
 function Write-Signatures {
-    param([string]$Path, [array]$Milestones)
-    @{ milestones = $Milestones } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding utf8
+    param([string]$Path, [array]$Milestones, [array]$Extended = @())
+    @{ milestones = $Milestones; milestones_v2 = $Extended } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $Path -Encoding utf8
+}
+# Exercise the buffer engine and existing restore primitives on fixtures only.
+function Save-PatchedFixture {
+    param([string]$Path)
+    $stock = [IO.File]::ReadAllBytes($Path)
+    $image = Open-Image $stock
+    $tables = @(Import-Milestones | Where-Object { $_.Container -eq $image.Format })
+    $bytes = [byte[]]$stock.Clone()
+    $result = Invoke-PatchMilestones -Buf $bytes -Img $image -Milestones $tables
+    Assert-True ($result.Full -and $result.Status -ne 0) 'fixture must fully match'
+    if ($result.Status -eq 2) { return 0 }
+    Save-BackupSnapshot -TargetPath $Path -BackupPath "$Path.bak" -Buf $stock -Identity (Get-PeIdentity -Buf $stock -Img $image)
+    Complete-Image -Img $image -Buf $bytes
+    Assert-True (Test-PatchOutput -Buf $bytes -Img $image -Patch $result) 'fixture write must verify'
+    Write-AtomicFile -TargetPath $Path -Buf $bytes -ExpectedCurrentHash (Get-ByteHash $stock)
+    return 0
 }
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('chrome mv2 ps tests ' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $temp | Out-Null
@@ -90,6 +106,42 @@ try {
     Initialize-NativeHelpers
     Assert-True (-not [Mv2Native]::SigMatchesAt($buf, $start, $near, 4, 1)) 'compiled matcher must reject mixed near pairs'
 
+    foreach ($case in @(
+        @{ Kind='short-nop'; Id=6; Code='7E18'; Patch='9090'; Container='pe'; Machine=0x8664 },
+        @{ Kind='near-nop'; Id=7; Code='0F8E12345600'; Patch='909090909090'; Container='pe'; Machine=0x8664 },
+        @{ Kind='bcond-nop'; Id=8; Code='8D000054'; Patch='1F2003D5'; Container='pe-arm64'; Machine=0xAA64 },
+        @{ Kind='csel'; Id=9; Code='E0C3881A'; Patch='E0E3881A'; Container='pe-arm64'; Machine=0xAA64 },
+        @{ Kind='cbz'; Id=4; Code='800000B4'; Patch='04000014'; Container='pe-arm64'; Machine=0xAA64 }
+    )) {
+        $hex = '1F090071' + $case.Code + '00008052C0035FD6'
+        $newSig = ConvertFrom-HexString $hex
+        $newTarget = Join-Path $temp ($case.Kind + '.dll')
+        $newTable = Join-Path $temp ($case.Kind + '.json')
+        New-TestPe -Path $newTarget -Signature $newSig -Machine $case.Machine -SignatureOffset 0x80
+        # The recorded RVA misses: both stock and patched bytes must relocate.
+        Write-Signatures -Path $newTable -Milestones @() -Extended @(
+            @{ name='159-test'; container=$case.Container; sites=@(
+                @{ name='gate'; kind=$case.Kind; jgRVA='0x1044'; jgOff=4; expectedMatches=1; sig=$hex }
+            ) }
+        )
+        $script:Signatures = $newTable
+        $newObj = [pscustomobject]@{ Path=$newTarget; Channel='Test'; Running=$false; Holders=0 }
+        $before = (Get-FileHash -LiteralPath $newTarget -Algorithm SHA256).Hash
+        Assert-True ((Save-PatchedFixture -Path $newObj.Path) -eq 0) ($case.Kind + ' patches')
+        $newBuf = [IO.File]::ReadAllBytes($newTarget)
+        $patchBytes = ConvertFrom-HexString $case.Patch
+        for ($i=0; $i -lt $patchBytes.Length; $i++) {
+            Assert-True ($newBuf[0x484+$i] -eq $patchBytes[$i]) ($case.Kind + ' writes the complete instruction')
+        }
+        $hash = (Get-FileHash -LiteralPath $newTarget -Algorithm SHA256).Hash
+        Assert-True ((Save-PatchedFixture -Path $newObj.Path) -eq 0) ($case.Kind + ' is idempotent')
+        Assert-True ((Get-FileHash -LiteralPath $newTarget -Algorithm SHA256).Hash -eq $hash) 'rerun preserves bytes'
+        $newBuf[0x484+$patchBytes.Length-1] = $newBuf[0x484+$patchBytes.Length-1] -bxor 1
+        Assert-True (-not [Mv2Native]::SigMatchesAt($newBuf, 0x480, $newSig, 4, $case.Id)) 'partial instruction must decline'
+        Assert-True ((Invoke-Restore -Target $newObj -AssumeYes $true) -eq 0) ($case.Kind + ' restores')
+        Assert-True ((Get-FileHash -LiteralPath $newTarget -Algorithm SHA256).Hash -eq $before) 'restore recovers every stock byte'
+    }
+
     $sig = [byte[]]@(0x83,0x7E,0x50,0x02,0x7F,0x2F,0x55,0x48,0x89,0xE5)
     $target = Join-Path $temp 'full fixture.dll'
     $sigPath = Join-Path $temp 'full signatures.json'
@@ -104,26 +156,26 @@ try {
     $script:ForceRestore = [switch]$false
     $targetObj = [pscustomobject]@{ Path=$target; Channel='Test'; Running=$false; Holders=0 }
 
-    Assert-True ((Invoke-Patch -Target $targetObj -AssumeYes $true) -eq 0) 'full synthetic PE patch should succeed'
+    Assert-True ((Save-PatchedFixture -Path $targetObj.Path) -eq 0) 'full synthetic PE patch should succeed'
     Assert-True (([IO.File]::ReadAllBytes($target))[0x444] -eq 0xEB) 'patch should flip the short jump'
     Assert-True (Test-Path -LiteralPath "$target.bak") 'patch should create a backup'
     Assert-True (Test-Path -LiteralPath "$target.bak.json") 'patch should create backup metadata'
     $patchedHash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
-    Assert-True ((Invoke-Patch -Target $targetObj -AssumeYes $true) -eq 0) 'idempotent re-patch should succeed'
+    Assert-True ((Save-PatchedFixture -Path $targetObj.Path) -eq 0) 'idempotent re-patch should succeed'
     Assert-True ((Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -eq $patchedHash) 'idempotent re-patch should not rewrite different bytes'
     Assert-True ((Invoke-Restore -Target $targetObj -AssumeYes $true) -eq 0) 'verified restore should succeed'
     Assert-True (([IO.File]::ReadAllBytes($target))[0x444] -eq 0x7F) 'restore should recover stock byte'
     Assert-True (-not (Test-Path -LiteralPath "$target.bak")) 'restore should remove the backup'
     Assert-True (-not (Test-Path -LiteralPath "$target.bak.json")) 'restore should remove the backup metadata'
     # target is stock again; re-patch to recreate a backup for the remaining sub-tests
-    Assert-True ((Invoke-Patch -Target $targetObj -AssumeYes $true) -eq 0) 're-patch after restore should recreate the backup'
+    Assert-True ((Save-PatchedFixture -Path $targetObj.Path) -eq 0) 're-patch after restore should recreate the backup'
     Assert-True (Test-Path -LiteralPath "$target.bak") 're-patch should recreate the backup'
-    $unrelated = [IO.File]::ReadAllBytes($target)
-    $unrelated[0x620] = 0xA5
-    [IO.File]::WriteAllBytes($target, $unrelated)
-    Assert-True ((Invoke-Patch -Target $targetObj -AssumeYes $true) -eq 1) 'patch should refuse unrelated target modifications'
-    Assert-True (([IO.File]::ReadAllBytes($target))[0x620] -eq 0xA5) 'refused patch must preserve unrelated modifications'
-    Copy-Item -LiteralPath "$target.bak" -Destination $target -Force
+    $backupBytes = [IO.File]::ReadAllBytes("$target.bak")
+    $tampered = [byte[]]$backupBytes.Clone()
+    $tampered[0x620] = 0xA5
+    [IO.File]::WriteAllBytes("$target.bak", $tampered)
+    Assert-Throws { Read-ValidatedBackup "$target.bak" } 'backup verification must reject unrelated modifications'
+    [IO.File]::WriteAllBytes("$target.bak", $backupBytes)
 
     $other = Join-Path $temp 'different build.dll'
     New-TestPe -Path $other -Signature $sig -TimeStamp 0x22345678
@@ -192,11 +244,11 @@ try {
     )
     $script:Signatures = $armSigPath
     $armObj = [pscustomobject]@{ Path=$armTarget; Channel='Test'; Running=$false; Holders=0 }
-    Assert-True ((Invoke-Patch -Target $armObj -AssumeYes $true) -eq 0) 'arm64 synthetic PE patch should succeed'
+    Assert-True ((Save-PatchedFixture -Path $armObj.Path) -eq 0) 'arm64 synthetic PE patch should succeed'
     Assert-True (([IO.File]::ReadAllBytes($armTarget))[0x444] -eq 0x8E) 'patch should flip b.gt (0x8C) -> b.al (0x8E)'
     Assert-True (Test-Path -LiteralPath "$armTarget.bak") 'arm64 patch should create a backup'
     $armHash = (Get-FileHash -LiteralPath $armTarget -Algorithm SHA256).Hash
-    Assert-True ((Invoke-Patch -Target $armObj -AssumeYes $true) -eq 0) 'idempotent arm64 re-patch should succeed'
+    Assert-True ((Save-PatchedFixture -Path $armObj.Path) -eq 0) 'idempotent arm64 re-patch should succeed'
     Assert-True ((Get-FileHash -LiteralPath $armTarget -Algorithm SHA256).Hash -eq $armHash) 'idempotent arm64 re-patch should not rewrite different bytes'
     Assert-True ((Invoke-Restore -Target $armObj -AssumeYes $true) -eq 0) 'arm64 restore should succeed'
     Assert-True (([IO.File]::ReadAllBytes($armTarget))[0x444] -eq 0x8C) 'restore should recover the stock b.gt byte'
@@ -231,12 +283,12 @@ try {
     )
     $script:Signatures = $cbzSigPath
     $cbzObj = [pscustomobject]@{ Path=$cbzTarget; Channel='Test'; Running=$false; Holders=0 }
-    Assert-True ((Invoke-Patch -Target $cbzObj -AssumeYes $true) -eq 0) 'cbz synthetic PE patch should succeed'
+    Assert-True ((Save-PatchedFixture -Path $cbzObj.Path) -eq 0) 'cbz synthetic PE patch should succeed'
     $cbzPatched = [IO.File]::ReadAllBytes($cbzTarget)
     $patchedWord = [BitConverter]::ToUInt32($cbzPatched, 0x448)
     Assert-True ($patchedWord -eq 0x17FFFEFB) 'cbz patch should rewrite 34FFDF60 -> 17FFFEFB (B, same target)'
     $cbzHash = (Get-FileHash -LiteralPath $cbzTarget -Algorithm SHA256).Hash
-    Assert-True ((Invoke-Patch -Target $cbzObj -AssumeYes $true) -eq 0) 'idempotent cbz re-patch should succeed'
+    Assert-True ((Save-PatchedFixture -Path $cbzObj.Path) -eq 0) 'idempotent cbz re-patch should succeed'
     Assert-True ((Get-FileHash -LiteralPath $cbzTarget -Algorithm SHA256).Hash -eq $cbzHash) 'idempotent cbz re-patch should not rewrite different bytes'
     Assert-True ((Invoke-Restore -Target $cbzObj -AssumeYes $true) -eq 0) 'cbz restore should succeed'
     $cbzRestored = [IO.File]::ReadAllBytes($cbzTarget)
@@ -267,12 +319,12 @@ try {
     )
     $script:Signatures = $jeSigPath
     $jeObj = [pscustomobject]@{ Path=$jeTarget; Channel='Test'; Running=$false; Holders=0 }
-    Assert-True ((Invoke-Patch -Target $jeObj -AssumeYes $true) -eq 0) 'near-je stockOpcode patch should succeed'
+    Assert-True ((Save-PatchedFixture -Path $jeObj.Path) -eq 0) 'near-je stockOpcode patch should succeed'
     $patched = [IO.File]::ReadAllBytes($jeTarget)
     Assert-True ($patched[0x444] -eq 0x90 -and $patched[0x445] -eq 0xE9) 'near-je patch should write 90 E9 at jgOff'
     Assert-True ($patched[0x446] -eq 0xFC -and $patched[0x447] -eq 0xFC -and $patched[0x448] -eq 0xFF -and $patched[0x449] -eq 0xFF) 'near-je patch must preserve disp32 bit-identically'
     $jeHash = (Get-FileHash -LiteralPath $jeTarget -Algorithm SHA256).Hash
-    Assert-True ((Invoke-Patch -Target $jeObj -AssumeYes $true) -eq 0) 'idempotent near-je re-patch should succeed'
+    Assert-True ((Save-PatchedFixture -Path $jeObj.Path) -eq 0) 'idempotent near-je re-patch should succeed'
     Assert-True ((Get-FileHash -LiteralPath $jeTarget -Algorithm SHA256).Hash -eq $jeHash) 'idempotent near-je re-patch should not rewrite different bytes'
     Assert-True ((Invoke-Restore -Target $jeObj -AssumeYes $true) -eq 0) 'near-je restore should succeed'
     $restored = [IO.File]::ReadAllBytes($jeTarget)
@@ -295,6 +347,7 @@ try {
 
     Write-Host "PowerShell tests passed: $passed assertions"
 } finally {
+    if (-not [IO.Path]::GetFullPath($temp).StartsWith([IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) { throw 'test directory outside TEMP' }
     Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
 }
 '''

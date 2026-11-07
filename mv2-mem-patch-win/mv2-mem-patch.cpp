@@ -11,8 +11,8 @@
 //    which would otherwise kill Chrome's child processes with
 //    STATUS_INVALID_IMAGE_HASH while a non-Microsoft DLL is in the process.
 // 3. ntdll!LdrLoadDll is hooked. When chrome.dll is mapped, its on-disk
-//    .text is scanned against signatures.json and every MV2 gate (jg) is
-//    flipped to jmp in the loaded image — synchronously on Chrome's own
+//    .text is scanned against signatures.json and each MV2 predicate is forced
+//    to its existing not-affected outcome — synchronously on Chrome's own
 //    loading thread, before any chrome.dll code can execute. Any featurebyte
 //    sites (a .rdata data byte, e.g. webRequestBlocking for MV3) are flipped too.
 // 4. The signatures source is a compile-time constant (kDefaultSigUrl, a GitHub
@@ -184,10 +184,13 @@ struct Site {
   int kind = 0;  // 0 = short jg (7F->EB), 1 = near jg (0F8F->90E9),
                  // 2 = AArch64 b.cond (cond nibble GT 0xC -> AL 0xE),
                  // 3 = AArch64 tbz/tbnz -> unconditional B (same target),
-                 // 4 = featurebyte: flip one .rdata data byte (not a branch)
+                 // 4 = featurebyte: flip one .rdata data byte (not a branch),
+                 // 6/7 = short/near JLE -> NOPs, 8 = B.LE -> NOP,
+                 // 9 = CSEL Wd,WZR,Wm,GT -> AL
   std::vector<BYTE> sig;
   int jgOff    = 0;
   int expected = 1;
+  bool optional = false;
   // kind 4 only: find a named feature's struct in .rdata and flip stock->patched.
   std::string feature;
   long long structRVA = 0;  // fast-path hint; the name scan is the real locator
@@ -349,6 +352,8 @@ struct JParser {
 };
 
 static std::vector<BYTE> HexToBytes(const std::string& h) {
+  if (h.empty() || h.size() % 2 || h.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos)
+    throw std::runtime_error("invalid signature hex");
   std::vector<BYTE> b(h.size() / 2);
   for (size_t i = 0; i < b.size(); i++)
     b[i] = (BYTE)strtoul(h.substr(i * 2, 2).c_str(), nullptr, 16);
@@ -362,7 +367,12 @@ static std::vector<Milestone> ParseMilestones(const JV& doc,
   std::vector<Milestone> out;
   const JV* ms = doc.get("milestones");
   if (!ms || ms->t != JV::ARR) return out;
-  for (const JV& m : ms->arr) {
+  std::vector<JV> entries = ms->arr;
+  if (const JV* extended = doc.get("milestones_v2")) {
+    if (extended->t != JV::ARR) throw std::runtime_error("bad milestones_v2");
+    entries.insert(entries.end(), extended->arr.begin(), extended->arr.end());
+  }
+  for (const JV& m : entries) {
     const JV* cont = m.get("container");
     if (!cont || cont->str != container) continue;
     Milestone mo;
@@ -374,6 +384,7 @@ static std::vector<Milestone> ParseMilestones(const JV& doc,
       std::string ks = kd ? kd->str : "short";
       s.expected =
           sd.get("expectedMatches") ? (int)sd.get("expectedMatches")->num : 1;
+      if (const JV* optional = sd.get("optional")) s.optional = optional->b;
       if (ks == "featurebyte") {  // .rdata data byte, not a code branch
         const JV *ft = sd.get("feature"), *po = sd.get("patchOff"),
                  *st = sd.get("stock"), *pa = sd.get("patched");
@@ -394,15 +405,36 @@ static std::vector<Milestone> ParseMilestones(const JV& doc,
         mo.featureSites.push_back(std::move(s));
         continue;
       }
-      s.kind = (ks == "tbz") ? 3 : (ks == "bcond") ? 2 : (ks == "near") ? 1 : 0;
+      s.kind = ks == "short" ? 0 : ks == "near" ? 1 : ks == "bcond" ? 2 :
+               ks == "tbz" ? 3 : ks == "short-nop" ? 6 : ks == "near-nop" ? 7 :
+               ks == "bcond-nop" ? 8 : ks == "csel" ? 9 : -1;
+      if (s.kind < 0) throw std::runtime_error("unsupported signature kind");
       s.sig  = HexToBytes(sd.get("sig") ? sd.get("sig")->str : "");
       s.jgOff = sd.get("jgOff") ? (int)sd.get("jgOff")->num : 0;
-      // Bytes the matcher touches at/after jgOff: short 2, near 6, bcond/tbz 4.
-      int need = (s.kind == 2 || s.kind == 3) ? 4 : (s.kind == 1) ? 6 : 2;
+      // Complete instruction width: short 2, near 6, arm64 4.
+      int need = (s.kind == 1 || s.kind == 7) ? 6 :
+                 (s.kind == 0 || s.kind == 6) ? 2 : 4;
       if (s.sig.size() < 2 || s.jgOff < 0 ||
           (long long)s.jgOff + need > (long long)s.sig.size() ||
           s.expected < 1)
-        continue;
+        throw std::runtime_error("invalid signature bounds");
+      // shortcut: this scanner requires two fixed prefix bytes; add anchor selection before shipping a site without them.
+      if (s.jgOff < 2) throw std::runtime_error("signature needs a fixed prefix");
+      if (s.kind >= 6) {
+        bool arm = s.kind >= 8;
+        if (arm != (cont->str == "pe-arm64")) throw std::runtime_error("wrong signature architecture");
+        const BYTE* p = s.sig.data() + s.jgOff;
+        if ((s.kind == 6 && p[0] != 0x7E) ||
+            (s.kind == 7 && (p[0] != 0x0F || p[1] != 0x8E)))
+          throw std::runtime_error("expected stock JLE");
+        if (arm) {
+          unsigned w = 0;
+          memcpy(&w, p, 4);
+          if (s.jgOff % 4 || (s.kind == 8 && (w & 0xFF00001Fu) != 0x5400000Du) ||
+              (s.kind == 9 && (w & 0xFFE0FFE0u) != 0x1A80C3E0u))
+            throw std::runtime_error("invalid arm64 instruction");
+        }
+      }
       mo.sites.push_back(std::move(s));
     }
     if (!mo.sites.empty() || !mo.featureSites.empty())
@@ -711,6 +743,30 @@ static unsigned TbPatchWord(unsigned w) {             // TBZ/TBNZ -> B, same tar
 static bool SigAt(const BYTE* b, size_t n, long long start,
                   const std::vector<BYTE>& sig, int jgOff, int kind) {
   if (start < 0 || start + (long long)sig.size() > (long long)n) return false;
+  if (kind >= 6 && kind <= 9) {
+    int width = kind == 6 ? 2 : kind == 7 ? 6 : 4;
+    if (jgOff < 0 || (size_t)(jgOff + width) > sig.size()) return false;
+    const BYTE* p = b + start + jgOff;
+    if (kind <= 7) {
+      bool done = true;
+      for (int i = 0; i < width; i++) done &= p[i] == 0x90;
+      bool stock = kind == 6 ? p[0] == 0x7E : p[0] == 0x0F && p[1] == 0x8E;
+      if (!stock && !done) return false;
+    } else {
+      unsigned w = 0, sw = 0;
+      memcpy(&w, p, 4);
+      memcpy(&sw, sig.data() + jgOff, 4);
+      if (kind == 8) {
+        if ((w & 0xFF00001Fu) != 0x5400000Du && w != 0xD503201Fu) return false;
+      } else if ((sw & 0xFFE0FFE0u) != 0x1A80C3E0u || (w != sw && w != (sw | 0x2000u))) {
+        return false;
+      }
+    }
+    for (size_t k = 0; k < sig.size(); k++)
+      if (((int)k < jgOff || (int)k >= jgOff + width) && b[start + k] != sig[k]) return false;
+    return true;
+  }
+  if (kind < 0 || kind > 3) return false;
   for (size_t k = 0; k < sig.size(); k++) {
     BYTE p = b[start + k];
     if ((int)k == jgOff) {
@@ -833,51 +889,36 @@ static bool Locate(const BYTE* buf, size_t bufN, const Image& img,
   long long textEnd = std::min(img.textRaw + img.textSize, (long long)bufN);
   for (long long i = img.textRaw; i < textEnd; i++) {
     for (const Job& j : byFirst[(unsigned char)buf[i]]) {
-      if (i + 1 < textEnd && buf[i + 1] == j.s->sig[1] &&
+      if (i + (long long)j.s->sig.size() <= textEnd && buf[i + 1] == j.s->sig[1] &&
+          (img.machine != IMAGE_FILE_MACHINE_ARM64 || (i + j.s->jgOff) % 4 == 0) &&
+          hits[j.ms][j.si].size() <= (size_t)j.s->expected &&
           SigAt(buf, bufN, i, j.s->sig, j.s->jgOff, j.s->kind))
         hits[j.ms][j.si].push_back(i + j.s->jgOff);
     }
   }
 
-  auto flatOffs =
-      [](const std::vector<std::pair<Site, std::vector<long long>>>& per) {
-        std::vector<long long> v;
-        for (auto& kv : per)
-          for (long long o : kv.second) v.push_back(o);
-        std::sort(v.begin(), v.end());
-        return v;
-      };
-
-  int fullSites = 0, partOk = 0, fullCount = 0;
-  int winFullM = -1, winPartM = -1;  // winning milestone, for its featureSites
-  std::vector<std::pair<Site, std::vector<long long>>> fullPer, partPer;
-  std::vector<long long> fullOffs;
+  int fullSites = 0, fullCount = 0;
+  int winFullM = -1;
+  std::vector<std::pair<Site, std::vector<long long>>> fullPer;
   for (int m = 0; m < (int)milestones.size(); m++) {
     const Milestone& ms = milestones[m];
     std::vector<std::pair<Site, std::vector<long long>>> per;
-    int ok = 0;
+    int ok = 0, required = 0;
     for (int si = 0; si < (int)ms.sites.size(); si++) {
       auto& h = hits[m][si];
-      if ((int)h.size() == ms.sites[si].expected) ok++;
-      per.emplace_back(ms.sites[si], std::move(h));
+      bool matched = (int)h.size() == ms.sites[si].expected;
+      if (!ms.sites[si].optional) { required++; if (matched) ok++; }
+      if (matched) per.emplace_back(ms.sites[si], std::move(h));
     }
-    if (!ms.sites.empty() && ok == (int)ms.sites.size()) {
-      if (fullSites == 0 || (int)ms.sites.size() > fullSites) {
-        fullSites = (int)ms.sites.size();
+    if (required > 0 && ok == required) {
+      if (fullSites == 0 || required > fullSites) {
+        fullSites = required;
         fullPer   = per;
         fullCount = 1;
-        fullOffs  = flatOffs(per);
         winFullM  = m;
-      } else if ((int)ms.sites.size() == fullSites) {
-        // Two equal-size full matches are only ambiguous if they target
-        // DIFFERENT bytes. Tables reused verbatim across version labels resolve
-        // to the same gate offsets — keep the first winner instead of declining.
-        if (flatOffs(per) != fullOffs) fullCount++;
+      } else if (required == fullSites) {
+        fullCount++;
       }
-    } else if (ok > 0 && fullSites == 0 && ok > partOk) {
-      partOk   = ok;
-      partPer  = per;
-      winPartM = m;
     }
   }
 
@@ -901,21 +942,12 @@ static bool Locate(const BYTE* buf, size_t bufN, const Image& img,
     *out = std::move(fullPer);
     return true;
   }
-  if (partOk > 0) {
-    addFeatures(partPer, winPartM);
-    if (fullMatch) *fullMatch = false;
-    *out = std::move(partPer);
-    return true;
-  }
   return false;
 }
 
-// Decide the write from the 2 current bytes at the branch. len is 1 for
-// Decide the write from the current bytes at the branch. len is 1 for
-// short/bcond, 2 for near, 4 for tbz. stock = still a taken conditional; done =
-// already forced. Mirrors the scripts and the mv2-launcher core.
+// Decide the complete write from the current instruction; done means idempotent.
 struct ApplyRes {
-  BYTE patch[4];
+  BYTE patch[6];
   int  len;
   bool stock;
   bool done;
@@ -923,7 +955,22 @@ struct ApplyRes {
 
 static ApplyRes ComputeApply(int kind, const BYTE* cur, const BYTE* stock) {
   ApplyRes r{};
-  if (kind == 0) {  // short cond (stock[0], e.g. 7F jg / 75 jne) -> EB
+  if (kind >= 6 && kind <= 9) {
+    r.len = kind == 6 ? 2 : kind == 7 ? 6 : 4;
+    if (kind <= 7) {
+      memset(r.patch, 0x90, r.len);
+      r.stock = kind == 6 ? cur[0] == 0x7E : cur[0] == 0x0F && cur[1] == 0x8E;
+    } else {
+      unsigned w = 0, sw = 0;
+      memcpy(&w, cur, 4);
+      memcpy(&sw, stock, 4);
+      unsigned patched = kind == 8 ? 0xD503201Fu : sw | 0x2000u;
+      r.stock = kind == 8 ? (w & 0xFF00001Fu) == 0x5400000Du :
+                           (sw & 0xFFE0FFE0u) == 0x1A80C3E0u && w == sw;
+      memcpy(r.patch, &patched, 4);
+    }
+    r.done = memcmp(cur, r.patch, r.len) == 0;
+  } else if (kind == 0) {  // short cond (stock[0], e.g. 7F jg / 75 jne) -> EB
     r.stock    = cur[0] == stock[0];
     r.done     = cur[0] == 0xEB;
     r.patch[0] = 0xEB;
@@ -940,7 +987,7 @@ static ApplyRes ComputeApply(int kind, const BYTE* cur, const BYTE* stock) {
     r.done     = lo == 0x0E;
     r.patch[0] = (BYTE)((cur[0] & 0xF0) | 0x0E);
     r.len      = 1;
-  } else {  // kind == 3: AArch64 TBZ/TBNZ -> unconditional B (same target)
+  } else if (kind == 3) {  // AArch64 TBZ/TBNZ -> unconditional B (same target)
     unsigned w = (unsigned)cur[0] | ((unsigned)cur[1] << 8) |
                  ((unsigned)cur[2] << 16) | ((unsigned)cur[3] << 24);
     r.stock    = (w & 0x7E000000u) == 0x36000000u;
@@ -978,26 +1025,20 @@ static void ApplyInProcess(
         continue;
       }
       BYTE* addr = chromeDllBase + img.textRVA + (jgFileOff - img.textRaw);
-      BYTE cur[4] = {addr[0], addr[1], addr[2], addr[3]};
       // Stock opcode(s) taken from the sig itself (jg 7F, jne 75, near 0F 8F,
       // ...), so non-jg gates like InstallVerifier flip correctly.
-      BYTE stock[2] = {
-          site.sig[site.jgOff],
-          site.jgOff + 1 < (int)site.sig.size() ? site.sig[site.jgOff + 1]
-                                                : (BYTE)0};
-      ApplyRes a = ComputeApply(site.kind, cur, stock);
+      ApplyRes a = ComputeApply(site.kind, addr, site.sig.data() + site.jgOff);
       if (!a.stock) {
         if (!a.done) DBG(L"unexpected gate bytes — skipped");
         continue;
       }
       // PAGE_READWRITE, not RWX: the write needs no execute right, and RWX
       // on .text is a loud EDR signal.
-      BYTE* page = (BYTE*)((ULONG_PTR)addr & ~(ULONG_PTR)0xFFF);
       DWORD old = 0;
-      if (!VirtualProtect(page, 0x1000, PAGE_READWRITE, &old)) continue;
+      if (!VirtualProtect(addr, a.len, PAGE_READWRITE, &old)) continue;
       memcpy(addr, a.patch, a.len);
       DWORD tmp = 0;
-      VirtualProtect(page, 0x1000, old, &tmp);
+      VirtualProtect(addr, a.len, old, &tmp);
       FlushInstructionCache(GetCurrentProcess(), addr, a.len);
     }
   }
@@ -1044,8 +1085,8 @@ static bool SeedViaCurl(const std::wstring& url, const std::wstring& outPath,
 
   DWORD curlSecs = timeoutMs / 1000;
   if (curlSecs == 0) curlSecs = 1;  // curl --max-time takes whole seconds
-  wchar_t secs[16];
-  wsprintfW(secs, L"%lu", curlSecs);
+  // USER32 imports prevent sandboxed renderers from loading this proxy.
+  std::wstring secs = std::to_wstring(curlSecs);
 
   // Download to a temp sibling and rename on success, so a killed/partial curl
   // never leaves a truncated file the next scan would try to parse.
@@ -1135,9 +1176,8 @@ static void PatchChromeDll(HMODULE chromeDll) {
     // Read the gate table from the first store that yields a match for THIS
     // chrome.dll, trying in order: the configured / Application-dir path, the
     // Application-dir signatures.json, then the per-user fallback store the URL
-    // refresh writes when the Application dir is read-only. A full match wins
-    // immediately; a partial one is kept only until something better turns up,
-    // so a stale Application-dir file never shadows a fresh fallback download.
+    // refresh writes when the Application dir is read-only. The first full match
+    // wins; a stale Application-dir file cannot shadow a matching fallback.
     std::wstring userStore = FallbackStorePath();
     std::wstring candidates[3] = {readPath, localStore, userStore};
 

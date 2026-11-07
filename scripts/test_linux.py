@@ -36,6 +36,34 @@ FULL_SIG = {"milestones": [{"name": "test-elf", "container": "elf", "sites": [
 
 def main():
     tmp = Path(tempfile.mkdtemp(prefix="chrome-mv2-bash-tests-"))
+    for kind, code, patched_code, machine in (
+        ("short-nop", "7E18", "9090", 0x3E),
+        ("near-nop", "0F8E12345600", "909090909090", 0x3E),
+        ("bcond-nop", "8D000054", "1F2003D5", 0xB7),
+        ("csel", "E0C3881A", "E0E3881A", 0xB7),
+        ("cbz", "800000B4", "04000014", 0xB7),
+    ):
+        fixture, table = tmp / kind, tmp / (kind + ".json")
+        sig = "1F090071" + code + "00008052C0035FD6"
+        T.make_elf(fixture, sig, machine=machine)
+        table.write_text(json.dumps({"milestones": [], "milestones_v2": [{
+            "name": "159-test", "container": "elf" if machine == 0x3E else "elf-arm64",
+            "sites": [{"name": "gate", "kind": kind, "jgRVA": "0x00400084",
+                       "jgOff": 4, "expectedMatches": 1, "sig": sig}]}]}))
+        before = T.sha256(fixture)
+        result = patch(fixture, table)
+        A.true(result.returncode == 0, kind + " relocates and patches: " + result.stdout + result.stderr)
+        data = fixture.read_bytes()
+        expected = bytes.fromhex(patched_code)
+        A.eq(data[0x144:0x144 + len(expected)], expected, kind + " writes the complete instruction")
+        A.true(patch(fixture, table).returncode == 0, kind + " rerun succeeds")
+        A.eq(fixture.read_bytes(), data, kind + " rerun preserves bytes")
+        T.poke(fixture, 0x144 + len(expected) - 1, expected[-1] ^ 1)
+        A.true(check(fixture, table).returncode != 0, kind + " rejects a partial instruction")
+        fixture.write_bytes(data)
+        A.true(restore(fixture, table).returncode == 0, kind + " restores")
+        A.eq(T.sha256(fixture), before, kind + " restore recovers all bytes")
+
     target = tmp / "full fixture chrome"
     sigs = tmp / "full signatures.json"
     T.make_elf(target, "837E50027F2F554889E5")

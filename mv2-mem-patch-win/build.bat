@@ -19,8 +19,8 @@ if not defined WHAT set "WHAT=all"
 rem ---- Version (single source of truth for VERSIONINFO + artifact names) -----
 rem Keep in sync with CHANGELOG.md. MV2_VER is the dotted string; MV2_VERC is the
 rem comma numeric for FILEVERSION/PRODUCTVERSION. Passed to rc.exe via /D defines.
-set "MV2_VER=1.11.1"
-set "MV2_VERC=1,11,1,0"
+set "MV2_VER=1.16.0"
+set "MV2_VERC=1,16,0,0"
 
 rem ---- Detours source (fetch only what is missing; folds in get-detours) -----
 set "SRC=detours\src"
@@ -134,7 +134,7 @@ rc /nologo /fo "%OBJ%\version.res" /DMV2_VER_STR=\"%MV2_VER%.0\" /DMV2_VERC=%MV2
 if errorlevel 1 ( echo   [fail] %ARCH%: resource compile failed. & endlocal & exit /b 1 )
 
 link /nologo /DLL /OUT:%OBJ%\version.dll /IMPLIB:%OBJ%\version.lib ^
-  /DYNAMICBASE /MANIFEST:NO /MACHINE:%MACH% kernel32.lib user32.lib winhttp.lib ^
+  /DYNAMICBASE /MANIFEST:NO /MACHINE:%MACH% kernel32.lib winhttp.lib ^
   %OBJ%\detours.obj %OBJ%\disasm.obj %OBJ%\image.obj %OBJ%\modules.obj ^
   %OBJ%\%DISOL%.obj %OBJ%\mv2-mem-patch.obj %OBJ%\version.res
 if errorlevel 1 ( echo   [fail] %ARCH%: link failed. & endlocal & exit /b 1 )

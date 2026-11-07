@@ -1246,7 +1246,8 @@
           "jgRVA": "0x0382F186",
           "jgOff": 7,
           "expectedMatches": 1,
-          "sig": "F68054020000087554488B442420488B5010"
+          "sig": "F68054020000087554488B442420488B5010",
+          "stockOpcode": "0x75"
         }
       ]
     },
@@ -1318,7 +1319,8 @@
           "jgRVA": "0x08677312",
           "jgOff": 7,
           "expectedMatches": 1,
-          "sig": "F6867C01000008755AA15CF35920894424148B00"
+          "sig": "F6867C01000008755AA15CF35920894424148B00",
+          "stockOpcode": "0x75"
         }
       ]
     },
@@ -1386,5 +1388,609 @@
         }
       ]
     }
-  ]
+  ],
+  "milestones_v2": [
+    {
+      "name": "159",
+      "container": "pe",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "near-nop",
+          "jgRVA": "0x01271E84",
+          "jgOff": 5,
+          "expectedMatches": 1,
+          "sig": "41837950020F8E7E0400004C8B41084D85C0"
+        },
+        {
+          "name": "MustRemainDisabled",
+          "kind": "short-nop",
+          "jgRVA": "0x01AA356A",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50027E3831FF807C243700"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short-nop",
+          "jgRVA": "0x037F8104",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837A50027E0331C0C3488B8228020000"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short-nop",
+          "jgRVA": "0x08D5F0BE",
+          "jgOff": 16,
+          "expectedMatches": 1,
+          "sig": "84C075084883C4205B5F5EC3837E50027E3A"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected",
+          "kind": "short",
+          "jgRVA": "0x08D5F2F5",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83F9027F1F83FA08771AB90A010000"
+        },
+        {
+          "name": "UserMayInstall",
+          "kind": "near-nop",
+          "jgRVA": "0x09528AB0",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50020F8EEF0000004C8DB42450020000"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x110D20A0",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "optional": true,
+          "jgRVA": "0x037F7FB6",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "sig": "F68054020000087560488B442420488B5010",
+          "stockOpcode": "0x75"
+        }
+      ],
+      "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher."
+    },
+    {
+      "name": "159-dcheck",
+      "container": "pe",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "near-nop",
+          "jgRVA": "0x08203BC6",
+          "jgOff": 13,
+          "expectedMatches": 1,
+          "sig": "498B4F384885C9741E837950020F8ED6000000"
+        },
+        {
+          "name": "OnExtensionSystemReady diagnostic path",
+          "kind": "near",
+          "jgRVA": "0x08203C9C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950020F8FFE000000488B9128020000"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short",
+          "jgRVA": "0x082049C2",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027F32488B8E28020000"
+        },
+        {
+          "name": "ManagementSetEnabledFunction::CheckManifestV2Deprecation",
+          "kind": "short",
+          "jgRVA": "0x087105D7",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B50027F36488B8B28020000"
+        },
+        {
+          "name": "ExtensionInfoGenerator::FillExtensionInfo",
+          "kind": "short-nop",
+          "jgRVA": "0x09423929",
+          "jgOff": 5,
+          "expectedMatches": 1,
+          "sig": "41837F50027E0431C0EB3B498B8728020000"
+        },
+        {
+          "name": "ExtensionService::CheckManagementPolicy",
+          "kind": "near-nop",
+          "jgRVA": "0x0950EF7A",
+          "jgOff": 13,
+          "expectedMatches": 1,
+          "sig": "488B4B384885C9741A837950020F8ED6000000"
+        },
+        {
+          "name": "ExtensionService::CheckManagementPolicy diagnostic path",
+          "kind": "short",
+          "jgRVA": "0x0950F054",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950027F3A488B9128020000"
+        },
+        {
+          "name": "UserMayInstall",
+          "kind": "near-nop",
+          "jgRVA": "0x0956A2B5",
+          "jgOff": 9,
+          "expectedMatches": 1,
+          "sig": "4885FF740F837F50020F8EDA000000"
+        },
+        {
+          "name": "UserMayInstall diagnostic path",
+          "kind": "short",
+          "jgRVA": "0x0956A393",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837F50027F36488B8F28020000"
+        },
+        {
+          "name": "MustRemainDisabled",
+          "kind": "short-nop",
+          "jgRVA": "0x0956B380",
+          "jgOff": 9,
+          "expectedMatches": 1,
+          "sig": "4885C07406837F50027E07"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x1DB09C50",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "optional": true,
+          "jgRVA": "0x081F6C1D",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "sig": "F6868402000008752E488B5710",
+          "stockOpcode": "0x75"
+        }
+      ],
+      "_comment": "Chrome 159.0.8148.1 Windows Canary (DCHECK)."
+    },
+    {
+      "name": "159-x86",
+      "container": "pe32",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "near-nop",
+          "jgRVA": "0x01566C54",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837A28020F8E1B0300008B4B0485C90F8517020000"
+        },
+        {
+          "name": "MustRemainDisabled",
+          "kind": "short-nop",
+          "jgRVA": "0x01806E53",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B28027E2F31C0807DEF00"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "short-nop",
+          "jgRVA": "0x03159C0B",
+          "jgOff": 4,
+          "expectedMatches": 2,
+          "sig": "837A28027E0731C05E5DC20400"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short-nop",
+          "jgRVA": "0x0780E18D",
+          "jgOff": 8,
+          "expectedMatches": 1,
+          "sig": "84C0742E837E28027E2D"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected",
+          "kind": "short",
+          "jgRVA": "0x0780E367",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837D08027F278B4D0C31C083F908"
+        },
+        {
+          "name": "UserMayInstall",
+          "kind": "near-nop",
+          "jgRVA": "0x07E99FFE",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837828020F8ED00000008D9EC8000000"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0E574874",
+          "patchOff": 104,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "48": 2,
+            "92": 0,
+            "100": 0,
+            "108": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "short",
+          "optional": true,
+          "jgRVA": "0x03159AEE",
+          "jgOff": 7,
+          "expectedMatches": 1,
+          "sig": "F6807C0100000875588B45D88B5808",
+          "stockOpcode": "0x75"
+        }
+      ],
+      "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher."
+    },
+    {
+      "name": "159-linux",
+      "container": "elf",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "near-nop",
+          "jgRVA": "0x07235F16",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837950020F8E0A010000488B46084885C0"
+        },
+        {
+          "name": "MustRemainDisabled",
+          "kind": "short-nop",
+          "jgRVA": "0x0727C6B2",
+          "jgOff": 5,
+          "expectedMatches": 1,
+          "sig": "41837E50027E3E4531F6807DE700"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected",
+          "kind": "short-nop",
+          "jgRVA": "0x0A4764B4",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837E50027E0331C0C3554889E5"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "short-nop",
+          "jgRVA": "0x0A476603",
+          "jgOff": 11,
+          "expectedMatches": 1,
+          "sig": "5B415E415F5DC3837B50027E2E"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected",
+          "kind": "short",
+          "jgRVA": "0x0A476829",
+          "jgOff": 3,
+          "expectedMatches": 1,
+          "sig": "83FF027F1D83FE087718B90A010000"
+        },
+        {
+          "name": "UserMayInstall",
+          "kind": "near-nop",
+          "jgRVA": "0x0ABB00D1",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "837B50020F8E660100004C8D65C04C89FF"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x12527940",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        }
+      ],
+      "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher."
+    },
+    {
+      "name": "159-macos-arm64",
+      "container": "macho-arm64",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "bcond-nop",
+          "jgRVA": "0x0348D730",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F090071ED120054C80640F9080700B5"
+        },
+        {
+          "name": "MustRemainDisabled",
+          "kind": "bcond-nop",
+          "jgRVA": "0x024C1914",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900714D01005414008052E87FC039"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected",
+          "kind": "bcond-nop",
+          "jgRVA": "0x04493BE0",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900716D00005400008052C0035FD6"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "bcond-nop",
+          "jgRVA": "0x06DB4280",
+          "jgOff": 8,
+          "expectedMatches": 1,
+          "sig": "685240B91F0900710D020054940E40F9"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected",
+          "kind": "csel",
+          "jgRVA": "0x06DB44E8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F080071E0C3881AC0035FD6"
+        },
+        {
+          "name": "UserMayInstall",
+          "kind": "bcond-nop",
+          "jgRVA": "0x074577D0",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900714D1E0054A24301D1E00315AA"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0EF69798",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "tbz",
+          "optional": true,
+          "jgRVA": "0x02BCB9D0",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "0831493948021837E80B40F9010D40F9"
+        }
+      ],
+      "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher. Verified on branded and Chrome for Testing builds."
+    },
+    {
+      "name": "159-win-arm64",
+      "container": "pe-arm64",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "bcond-nop",
+          "jgRVA": "0x012EDAC4",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "7F090071ED2100540A0540F96A1600B5"
+        },
+        {
+          "name": "MustRemainDisabled",
+          "kind": "bcond-nop",
+          "jgRVA": "0x0167C71C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900716D020054F4031F2AE85FC039"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected (shared body)",
+          "kind": "bcond-nop",
+          "jgRVA": "0x02FCA370",
+          "jgOff": 8,
+          "expectedMatches": 2,
+          "sig": "285040B91F0900716D000054E0031F2A"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "bcond-nop",
+          "jgRVA": "0x07ECAA84",
+          "jgOff": 8,
+          "expectedMatches": 1,
+          "sig": "685240B91F0900710D020054940E40F9"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected",
+          "kind": "bcond-nop",
+          "jgRVA": "0x07ECACB8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0800716D000054E0031F2AC0035FD6"
+        },
+        {
+          "name": "UserMayInstall",
+          "kind": "bcond-nop",
+          "jgRVA": "0x0864AEC8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900710D170054A24301D1E00315AA"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x0FADB520",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        },
+        {
+          "name": "let off-store extensions install (InstallVerifier)",
+          "kind": "tbz",
+          "optional": true,
+          "jgRVA": "0x02FCA280",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "0851493988011837A02642F9E80F40F9"
+        }
+      ],
+      "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher."
+    },
+    {
+      "name": "159-linux-arm64",
+      "container": "elf-arm64",
+      "sites": [
+        {
+          "name": "OnExtensionSystemReady startup loop",
+          "kind": "bcond-nop",
+          "jgRVA": "0x0AAED790",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "7F090071CD0900540A0540F9CA0200B5"
+        },
+        {
+          "name": "MustRemainDisabled",
+          "kind": "bcond-nop",
+          "jgRVA": "0x0B13651C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900718D020054F4031F2AE87FC039"
+        },
+        {
+          "name": "ShouldBlockExtensionEnable / IsExtensionAffected",
+          "kind": "bcond-nop",
+          "jgRVA": "0x05EF4058",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900716D000054E0031F2AC0035FD6"
+        },
+        {
+          "name": "MaybeReEnableExtension",
+          "kind": "bcond-nop",
+          "jgRVA": "0x05EF3CB0",
+          "jgOff": 8,
+          "expectedMatches": 1,
+          "sig": "685240B91F090071CD010054800E40F9"
+        },
+        {
+          "name": "manifest_v2_util::IsExtensionAffected",
+          "kind": "bcond-nop",
+          "jgRVA": "0x05EF40A8",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0800716D000054E0031F2AC0035FD6"
+        },
+        {
+          "name": "UserMayInstall",
+          "kind": "bcond-nop",
+          "jgRVA": "0x0678BF14",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "1F0900716D0D0054A26300D1E00315AA"
+        },
+        {
+          "name": "ManagementSetEnabledFunction::CheckManifestV2Deprecation (predicate guard)",
+          "kind": "cbz",
+          "jgRVA": "0x061260B0",
+          "jgOff": 0,
+          "expectedMatches": 1,
+          "sig": "800000B4885240B91F090071ED110054",
+          "_comment": "CBZ X0 -> existing false path, skipping only the inlined MV2 predicate. The following B.LE signature alone also matches unrelated code."
+        },
+        {
+          "name": "ExtensionService::CheckManagementPolicy",
+          "kind": "bcond-nop",
+          "jgRVA": "0x0676576C",
+          "jgOff": 4,
+          "expectedMatches": 1,
+          "sig": "3F090071ED540054A9A37AA90B10A052"
+        },
+        {
+          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
+          "kind": "featurebyte",
+          "optional": true,
+          "feature": "webRequestBlocking",
+          "structRVA": "0x11C0DCC0",
+          "patchOff": 192,
+          "stock": 2,
+          "patched": 3,
+          "verify": {
+            "96": 2,
+            "180": 0,
+            "188": 0,
+            "196": 1
+          },
+          "expectedMatches": 1
+        }
+      ],
+      "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher."
+    }
+  ],
+  "_comment_v2": "Chrome 159 needs new instruction kinds. Updated patchers read both arrays; legacy patchers ignore milestones_v2. Windows requires version.dll 1.16.0 or later."
 }
