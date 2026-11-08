@@ -604,24 +604,6 @@
           "optional": true,
           "stockOpcode": "0x75",
           "sig": "F68754020000087545488B5310"
-        },
-        {
-          "_comment": "Chrome only lets MV2 extensions use webRequestBlocking. This flips one byte in the feature's .rdata struct (max manifest version 2 -> 3) so MV3 can use it too, and nothing else. We find it by name, not by a code branch. Optional: if it's missing, MV2 patching still works. Only 155-era tables (155/155-x86/155-linux/155-linux-arm64/155-macos-arm64) have it (older builds lay the struct out differently).",
-          "name": "let MV3 extensions use webRequestBlocking",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x10228E10",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         }
       ]
     },
@@ -687,24 +669,6 @@
           "optional": true,
           "stockOpcode": "0x75",
           "sig": "F6867C01000008755A8B47088945D4"
-        },
-        {
-          "_comment": "Same gate as 155 win64, for 32-bit Chrome (smaller struct: max-version byte at +104). Flips webRequestBlocking's rule-1 max manifest version 2 -> 3 so MV3 can use it. Found by name in .rdata; optional.",
-          "name": "let MV3 extensions use webRequestBlocking",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0E43907C",
-          "patchOff": 104,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "48": 2,
-            "92": 0,
-            "100": 0,
-            "108": 1
-          },
-          "expectedMatches": 1
         }
       ]
     },
@@ -759,24 +723,6 @@
           "jgOff": 4,
           "expectedMatches": 1,
           "sig": "837B50020F8FD4000000488B8B280200008B415080BB080200000075"
-        },
-        {
-          "_comment": "Same webRequestBlocking MV3 gate for Linux. The struct's name pointer is a relocation (0 on disk), so we find the struct via a .rela.dyn RELATIVE reloc pointing at the 'webRequestBlocking' string, then flip max version 2 -> 3. Optional.",
-          "name": "let MV3 extensions use webRequestBlocking",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x113F75F0",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         }
       ]
     },
@@ -825,24 +771,6 @@
           "expectedMatches": 1,
           "optional": true,
           "sig": "0831493948021837E80B40F9010D40F9"
-        },
-        {
-          "_comment": "Same webRequestBlocking MV3 gate for macOS arm64. The name pointer is a chained fixup, so we find the struct via its rebase target, then flip max version 2 -> 3 in __DATA_CONST. Optional.",
-          "name": "let MV3 extensions use webRequestBlocking",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0E6206A8",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         }
       ]
     },
@@ -889,24 +817,6 @@
           "jgOff": 4,
           "expectedMatches": 1,
           "sig": "7F0900718C0100544B1541F94C2148396A5140B98C0000376B8940B97F050071"
-        },
-        {
-          "_comment": "Same webRequestBlocking MV3 gate for Linux arm64. Located via a .rela.dyn RELATIVE reloc (the name pointer is 0 on disk), then flip max version 2 -> 3. Optional.",
-          "name": "let MV3 extensions use webRequestBlocking",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x10D57318",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         }
       ]
     },
@@ -1003,23 +913,6 @@
           "sig": "837D08027F278B4D0C31C083"
         },
         {
-          "name": "let MV3 extensions use webRequestBlocking",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0E6C1E60",
-          "patchOff": 104,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "48": 2,
-            "92": 0,
-            "100": 0,
-            "108": 1
-          },
-          "expectedMatches": 1
-        },
-        {
           "_comment": "Same as pe, x86 (flag byte at ext+0x17c). RVA inherited from 155 (branding-gated, DCE'd in CfT); sig is the runtime source of truth.",
           "name": "let off-store extensions install (InstallVerifier)",
           "kind": "short",
@@ -1075,23 +968,6 @@
           "jgOff": 3,
           "expectedMatches": 1,
           "sig": "83FF027F1D83FE087718B9"
-        },
-        {
-          "name": "let MV3 extensions use webRequestBlocking",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x11757C40",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         }
       ]
     },
@@ -1139,23 +1015,6 @@
           "jgOff": 4,
           "expectedMatches": 1,
           "sig": "837F28020F8F8B0000008B8F64010000"
-        },
-        {
-          "name": "let MV3 extensions use webRequestBlocking",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0EA8DD1C",
-          "patchOff": 104,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "48": 2,
-            "92": 0,
-            "100": 0,
-            "108": 1
-          },
-          "expectedMatches": 1
         },
         {
           "_comment": "Same as pe, x86 (flag byte at ext+0x17c). RVA inherited from 155 (branding-gated, DCE'd in CfT); sig is the runtime source of truth.",
@@ -1223,23 +1082,6 @@
           "sig": "837F50027F30488B8F280200"
         },
         {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x10DF8AF0",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
-        },
-        {
           "name": "let off-store extensions install (InstallVerifier)",
           "kind": "short",
           "optional": true,
@@ -1296,23 +1138,6 @@
           "sig": "837D08027F278B4D0C31C083"
         },
         {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0F22F3BC",
-          "patchOff": 104,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "48": 2,
-            "92": 0,
-            "100": 0,
-            "108": 1
-          },
-          "expectedMatches": 1
-        },
-        {
           "name": "let off-store extensions install (InstallVerifier)",
           "kind": "short",
           "optional": true,
@@ -1359,23 +1184,6 @@
           "jgOff": 4,
           "expectedMatches": 2,
           "sig": "1F090071AC010054691641F9285140B9"
-        },
-        {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0EC633C0",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         },
         {
           "name": "let off-store extensions install (InstallVerifier)",
@@ -1441,23 +1249,6 @@
           "jgOff": 4,
           "expectedMatches": 1,
           "sig": "837F50020F8EEF0000004C8DB42450020000"
-        },
-        {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x110D20A0",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         },
         {
           "name": "let off-store extensions install (InstallVerifier)",
@@ -1557,23 +1348,6 @@
           "sig": "4885C07406837F50027E07"
         },
         {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x1DB09C50",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
-        },
-        {
           "name": "let off-store extensions install (InstallVerifier)",
           "kind": "short",
           "optional": true,
@@ -1639,23 +1413,6 @@
           "sig": "837828020F8ED00000008D9EC8000000"
         },
         {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0E574874",
-          "patchOff": 104,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "48": 2,
-            "92": 0,
-            "100": 0,
-            "108": 1
-          },
-          "expectedMatches": 1
-        },
-        {
           "name": "let off-store extensions install (InstallVerifier)",
           "kind": "short",
           "optional": true,
@@ -1719,23 +1476,6 @@
           "jgOff": 4,
           "expectedMatches": 1,
           "sig": "837B50020F8E660100004C8D65C04C89FF"
-        },
-        {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x12527940",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         }
       ],
       "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher."
@@ -1791,23 +1531,6 @@
           "jgOff": 4,
           "expectedMatches": 1,
           "sig": "1F0900714D1E0054A24301D1E00315AA"
-        },
-        {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0EF69798",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         },
         {
           "name": "let off-store extensions install (InstallVerifier)",
@@ -1872,23 +1595,6 @@
           "jgOff": 4,
           "expectedMatches": 1,
           "sig": "1F0900710D170054A24301D1E00315AA"
-        },
-        {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x0FADB520",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         },
         {
           "name": "let off-store extensions install (InstallVerifier)",
@@ -1970,23 +1676,6 @@
           "jgOff": 4,
           "expectedMatches": 1,
           "sig": "3F090071ED540054A9A37AA90B10A052"
-        },
-        {
-          "name": "webRequestBlocking permission feature rule 1 (max_manifest_version 2->3; grants MV3)",
-          "kind": "featurebyte",
-          "optional": true,
-          "feature": "webRequestBlocking",
-          "structRVA": "0x11C0DCC0",
-          "patchOff": 192,
-          "stock": 2,
-          "patched": 3,
-          "verify": {
-            "96": 2,
-            "180": 0,
-            "188": 0,
-            "196": 1
-          },
-          "expectedMatches": 1
         }
       ],
       "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher."

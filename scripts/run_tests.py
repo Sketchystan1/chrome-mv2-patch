@@ -84,6 +84,8 @@ def main():
     steps = [
         ("derivation unit checks (arm64 bcond safety)",
          py + [str(HERE / "test_derive.py")]),
+        ("Windows signature-free discovery (optional analysis dependencies)",
+         py + [str(HERE / "test_scan_windows.py")]),
         ("audit signatures.json",
          py + [str(HERE / "audit_signatures.py"), str(REPO / "signatures.json")]),
         ("Windows PE (chrome-mv2.ps1)", py + [str(HERE / "test_windows.py")]),

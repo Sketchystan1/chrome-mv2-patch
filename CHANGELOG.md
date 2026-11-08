@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Remove the optional MV3 `webRequestBlocking` permission patches from all tables.
+- Add experimental Windows x64 MV2 discovery without a signature table or debug symbols.
+
 ## [1.16.0] - 2026-11-07
 
 - Chrome 159 support.

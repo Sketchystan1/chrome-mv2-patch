@@ -1,8 +1,10 @@
 # scripts — MV2 gate derivation toolkit
 
-Cross-platform, dependency-free tooling to fetch symbols for, derive, and verify
+Cross-platform tooling to fetch symbols for, derive, and verify
 the Chrome MV2 gate signatures used by `../chrome-mv2.ps1` (Windows) and
 `../chrome-mv2.sh` (Linux + macOS). The canonical editable table is `../signatures.json`.
+The core analysis tools use the Python standard library; the experimental
+Windows scanner additionally uses Capstone and Z3.
 Supported containers on x86, x86-64, and arm64:
 64-bit PE `chrome.dll` (container `pe`), 32-bit PE `chrome.dll` (container
 `pe32`), 64-bit **arm64** PE `chrome.dll` on Windows-on-ARM (container
@@ -14,8 +16,9 @@ Replaces the old single-build `port152/` workspace.
 
 Full rationale: [`../mv2-reversing.md`](../mv2-reversing.md) §"Porting to a new version".
 
-Chrome 159 introduces inverted JLE/B.LE checks and a CSEL predicate. The automatic
-finder still finds JG/B.GT only; review these new forms from source and disassembly.
+Chrome 159 introduces inverted JLE/B.LE checks and a CSEL predicate. The
+`derive_milestone.py` finder still finds JG/B.GT only; review these new forms from
+source and disassembly.
 The matcher, hardener, verifier, and audit support `short-nop`, `near-nop`,
 `bcond-nop`, and `csel`, plus 64-bit CBZ. Put 159 tables in `milestones_v2` so older
 DLLs ignore them. Both arrays are read by updated engines and verification tools.
@@ -28,14 +31,16 @@ Windows requires `version.dll` 1.16.0 or later; updating JSON alone is insuffici
 | `fetch_chrome_binary.py` | Download the stock, gate-bearing binary itself — a channel's current `chrome.dll` (PE64/PE32), Linux `chrome` (ELF), or the macOS universal framework Mach-O (`mac-arm64`, always via Chrome for Testing) — unwrap it and drop it in `_scratch/`, named after the version the **binary** reports (release feeds have advertised a different one). `--version` falls back to Chrome for Testing. | stdlib + 7-Zip |
 | `fetch_symbols.py` | Download the symbols matching a binary — PDB (PE) from the Chromium symbol server, `chrome.debug` (ELF) streamed from the per-version zip, or the macOS dSYM's symtab streamed from `dl.google.com/…/dsym/` (emits `nm`-style names directly). Verifies build identity and discards a mismatch: Chrome-for-Testing builds have no published symbols, and a version's Linux `debug-info` zip belongs to the *official* build. Saves to `_scratch/` (gitignored). | stdlib only |
 | `derive_milestone.py` | The low-level finder: gate sites (`cmp <mv>,2 ; jg`, short **and** near, plus arm64 `bcond`), an unfiltered candidate report, and `--verify` for an existing table. `port_milestone.py` wraps it. | stdlib only |
+| `scan_windows.py` | Experimental Windows x64 discovery without a maintained table or symbols: infer field relationships, follow both branch outcomes, and check the local predicate with Z3. Reports unresolved candidates; optional `--plan` generates current-binary windows for a reviewed runtime experiment. | Capstone + z3-solver |
 | `symbols_from_elf.py` | Linux: dump an ELF's `.symtab` as `nm -S`-style lines, fast and low-memory — a stand-in for `nm -SC` on the multi-GB `chrome.debug` (see note in step 2). | stdlib only |
 | `symbols_from_pdb.py` | Windows only: name gate functions from a PDB via `dbghelp`. Optional — used to filter/name candidates. Official `win-arm64` PDBs are published too (multi-GB). | Windows + PDB |
 
 The test suite is Python too and lives flat in this folder (no subfolder):
 `run_tests.py` (entry point) drives `test_linux.py` (ELF), `test_macos.py`
 (Mach-O), `test_windows.py` (PE, Windows-only), `test_memory.py` (the production C++
-memory engine, with MSVC/Detours), and `test_derive.py`
-(arm64 finder unit checks); `make_macho_fixture.py` builds a synthetic universal
+memory engine, with MSVC/Detours), `test_derive.py`
+(arm64 finder unit checks), and `test_scan_windows.py`
+(skipped unless Capstone and Z3 are installed); `make_macho_fixture.py` builds a synthetic universal
 Mach-O and `_testutil.py` holds the shared fixture builders/helpers. Run all of
 it with `python scripts/run_tests.py`.
 
@@ -193,26 +198,74 @@ instruction idiom matches modulo register allocation). The shipped
 `151-linux-arm64` / `152-linux-arm64` entries were derived this way from the
 fetched arm64 `.deb`, `--verify`ed, and confirmed on real aarch64 Linux hardware.
 
-## Permission-feature data patches (`featurebyte`, Chrome 155+ pe/x64)
+## Signature-free Windows research
 
-Beyond the MV2 branch flip, the tables can carry a **`featurebyte`** site: a
-name-anchored `.rdata` data-byte overwrite that changes one field of a compiled
-permission-feature `SimpleFeatureData` struct. The shipped use is granting
-`webRequestBlocking` to MV3 extensions by flipping that feature's rule-1
-`max_manifest_version` from 2 to 3 (see mv2-reversing.md §9).
+`scan_windows.py` accepts a Windows x64 `chrome.exe` or `chrome.dll` and reads
+neither `signatures.json` nor debug symbols. It follows basic blocks, recovers
+field relationships, and uses Z3 to check the decoded MV2 predicate's routing.
+Its optional analysis dependencies are Capstone and `z3-solver`:
 
-Derive/emit the site for a feature (PE x64 only):
-
-```
-python scripts/derive_milestone.py <chrome.dll> --feature webRequestBlocking
+```powershell
+uv run --with capstone --with z3-solver scripts/scan_windows.py <chrome.exe> --json scan-report.json
+uv run --with capstone --with z3-solver scripts/test_scan_windows.py
 ```
 
-It finds the feature's rule-1 struct (extension_types size 2, a set
-`max_manifest_version`, no location/min), and prints the site dict
-(`structRVA`, `patchOff`, `stock`/`patched`, `verify`). Add it to the target
-milestone as an **`optional`** site so a miss never blocks MV2, then
-`--verify` (reports it as `feat opt`) and `audit_signatures.py --binary`. The
-representation is new in Chrome 155; 154 and earlier do not carry these structs.
+The recognizer uses the source contract in Chromium's
+[`manifest_v2_util.cc`](https://chromium.googlesource.com/chromium/src/+/refs/tags/157.0.8103.39/extensions/browser/manifest_v2_util.cc)
+and [`Extension::GetType()`](https://chromium.googlesource.com/chromium/src/+/refs/tags/157.0.8103.39/extensions/common/extension.cc):
+
+```text
+manifest_version < 3
+&& (converted_user_script || type in {1, 3, 8})
+&& location not in {5, 10}
+```
+
+It finds signed 32-bit comparisons with 2 or 3, follows JG/JLE/JGE/JL outcomes,
+and checks equality chains or the `0x10A` type mask. It derives field offsets
+from their data flow. Windows unwind metadata supplies function ranges; small
+leaf predicates use aligned padding. Neither requires a PDB. The decoder follows
+blocks after RET and handles partial registers, conditional moves and Boolean
+returns. Missing type-range guards and wrong location polarity fail the solver
+check. The investigated CSP selectors are excluded.
+
+This is a read-only research tool. A successful local predicate proof does not
+prove complete enforcement coverage or the purpose of every caller. Candidates
+that pass the prescreen but cannot be verified are reported as unresolved;
+different instruction forms or missing function boundaries can escape that
+prescreen entirely. Analysis is bounded, calls are opaque, and the enum values
+still depend on Chromium's source contract. Every report explicitly sets
+`complete_enforcement_coverage_proven` to `false`.
+
+`--plan FILE` generates JSON compatible with the existing runtime, containing
+byte windows derived from the current binary. No maintained signature table is
+read. Plan export declines unresolved candidates, unverified extra matches and
+branch forms the runtime cannot apply. Check the plan's `binary_sha256` against
+the tested DLL before use: the existing runtime does not enforce this additional
+hash field. A reviewed local experiment must configure the runtime to read this
+file without its normal remote table refresh. The default installers still use
+`signatures.json`. No permission-feature or InstallVerifier patches are generated.
+
+**Measured on stripped Chromium 157.0.8103.39, Windows x64 (2026-11-08):** the
+supplied `chrome.exe` resolved to `157.0.8103.39/chrome.dll`. The scanner found
+5,765 branch heads, verified seven predicates and left no unresolved prescreened
+candidates. The generated plan contains six windows covering seven decisions.
+A sandboxed launch of a scratch copy rejected MV2 stock, then ran both MV2 and
+MV3 with that plan. The original and copied `chrome.dll` hashes stayed unchanged.
+A packed MV2 extension installed through the non-policy external provider also
+passed disable/enable and restart checks. Removing the plan restored its
+unsupported-manifest disabled state. MV2 request blocking worked with the core
+plan alone. The test proxy redirected only the external-extension registry
+source to a temporary subtree; no extension was registered with installed
+browsers, and the subtree was removed afterward.
+
+Other local Windows scans illustrate the limits: 153.0.8010.37 verified seven
+predicates but left two candidates unresolved; 156.0.8060.2 verified seven with
+none unresolved; 159.0.8148.0 verified six and left two unresolved. The latter
+includes a startup loop whose hoisted type mask cannot be established across
+an opaque call. The 153 and 159 results therefore decline plan export.
+
+The optional MV3 `webRequestBlocking` patches were removed from all shipping
+tables. Custom `featurebyte` descriptors remain supported by the existing engines.
 
 The masking and match-count rules mirror both runtime scripts:
 `Find-AffectedJgSites` / `Invoke-PatchMilestones` in `chrome-mv2.ps1` and

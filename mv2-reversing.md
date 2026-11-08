@@ -217,7 +217,14 @@ with standard C++ and links without USER32; the renderer sandbox stays enabled.
 ## 5. Porting to a new Chrome version
 
 Bounded and cross-platform; re-check code generation and polarity. Toolkit in
-`scripts/` (dependency-free; see `scripts/README.md`).
+`scripts/` (core tools use the standard library; see `scripts/README.md`).
+
+For Windows x64 research without a maintained table or symbols,
+`scripts/scan_windows.py` uses Capstone and Z3 to recognize the local predicate
+and infer field relationships. It can generate a current-binary runtime plan,
+but does not prove complete enforcement coverage or caller purpose. It remains
+separate from the shipping installer; see the measured results and limitations
+in `scripts/README.md` under "Signature-free Windows research".
 
 1. **Fetch** the stock binary (`fetch_chrome_binary.py --platform … [--channel|--version]`)
    and, where published, symbols (`fetch_symbols.py`): PDB (PE, incl. arm64),
@@ -375,7 +382,6 @@ the `jne` gate applies, and it gained the `tbz` kind for arm64.
 > table — it required the policy route that triggers the managed banner, which Route
 > A avoids. It remains supported by the engines for custom tables but ships in no
 > milestone. (The historical Gate-B `cbz` masking lesson in §6 still applies to the
-> `cbz` kind generally.) The `featurebyte` `.rdata` patch (Gate A, MV3
-> `webRequestBlocking`) was dropped in v1.10.0's table rework and re-added to the
-> `155` table only — the 152/154 feature layout differs, so the current
-> `SimpleFeatureData` offsets find no rule-1 struct there.
+> `cbz` kind generally.) The optional `featurebyte` patches granting
+> `webRequestBlocking` to MV3 were removed from all shipping tables on
+> 2026-11-08. MV2's normal permission support is independent of those patches.
