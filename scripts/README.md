@@ -37,8 +37,8 @@ Windows requires `version.dll` 1.16.0 or later; updating JSON alone is insuffici
 
 The test suite is Python too and lives flat in this folder (no subfolder):
 `run_tests.py` (entry point) drives `test_linux.py` (ELF), `test_macos.py`
-(Mach-O), `test_windows.py` (PE, Windows-only), `test_memory.py` (the production C++
-memory engine, with MSVC/Detours), `test_derive.py`
+(Mach-O), `test_windows.py` (PE, Windows-only), `test_memory.py` (the legacy C++
+table-based memory engine, with MSVC/Detours headers), `test_derive.py`
 (arm64 finder unit checks), and `test_scan_windows.py`
 (skipped unless Capstone and Z3 are installed); `make_macho_fixture.py` builds a synthetic universal
 Mach-O and `_testutil.py` holds the shared fixture builders/helpers. Run all of
@@ -47,8 +47,20 @@ it with `python scripts/run_tests.py`.
 Checks run concurrently in two waves: table/engine checks first, then the Bash
 ELF/Mach-O tests. Use `--fast` to skip the slower Bash wave. On Windows, put Git
 Bash on PATH before the WSL launcher because the fixtures use `/c/...` paths.
-`test_memory.py` skips when MSVC or the Detours sources are unavailable; run
+`test_memory.py` skips when MSVC or the Detours headers are unavailable; run
 `mv2-mem-patch-win/build.bat` first.
+
+The compact DLL's CMake tests and diagnostic scanner use
+`mv2-mem-patch-win/out/<arch>/`; see its [build instructions](../mv2-mem-patch-win/README.md).
+`check_autoscan_matrix.py` and `test_autoscan_runtime.py` use the x64 tools there
+by default, with the runtime DLL at `mv2-mem-patch-win/build/x64/version.dll`.
+
+On an x64 Windows host with MSVC ARM64 tools and WSLC, run
+`python scripts/test_memory.py --arm64`. This cross-compiles the legacy engine tests
+and runs them with `linaro/wine-arm64:10.2` (Wine + QEMU). It also executes the ARM64
+`bcond`, `bcond-nop`, `csel`, and `tbz` predicates before and after patching, checks
+repeat application and memory protection, and fails if its prerequisites are missing.
+The default test suite still runs x64; browser MV2 runtime testing is separate.
 
 
 ## Verify the shipping table still fits a build
@@ -227,6 +239,10 @@ leaf predicates use aligned padding. Neither requires a PDB. The decoder follows
 blocks after RET and handles partial registers, conditional moves and Boolean
 returns. Missing type-range guards and wrong location polarity fail the solver
 check. The investigated CSP selectors are excluded.
+
+The separate [native Windows x64 DLL](../mv2-mem-patch-win/AUTOSCAN.md) builds on
+this research and performs discovery at startup without an exported JSON plan.
+Its compiler coverage and validation results differ from this Python prototype.
 
 This is a read-only research tool. A successful local predicate proof does not
 prove complete enforcement coverage or the purpose of every caller. Candidates

@@ -1,0 +1,43 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": { "major": 3, "minor": 24, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "release",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/out/${presetName}",
+      "toolset": { "value": "host=x64", "strategy": "external" },
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" },
+      "condition": { "type": "equals", "lhs": "${hostSystemName}", "rhs": "Windows" }
+    },
+    {
+      "name": "x64",
+      "displayName": "x64 Release",
+      "inherits": "release",
+      "architecture": { "value": "x64", "strategy": "external" }
+    },
+    {
+      "name": "x86",
+      "displayName": "x86 Release",
+      "inherits": "release",
+      "architecture": { "value": "x86", "strategy": "external" }
+    },
+    {
+      "name": "arm64",
+      "displayName": "ARM64 Release",
+      "inherits": "release",
+      "architecture": { "value": "arm64", "strategy": "external" }
+    }
+  ],
+  "buildPresets": [
+    { "name": "x64", "configurePreset": "x64", "targets": ["version"], "jobs": 4 },
+    { "name": "x86", "configurePreset": "x86", "targets": ["version"], "jobs": 4 },
+    { "name": "arm64", "configurePreset": "arm64", "targets": ["version"], "jobs": 4 }
+  ],
+  "testPresets": [
+    { "name": "x64", "configurePreset": "x64", "output": { "outputOnFailure": true } },
+    { "name": "x86", "configurePreset": "x86", "output": { "outputOnFailure": true } },
+    { "name": "arm64", "configurePreset": "arm64", "output": { "outputOnFailure": true } }
+  ]
+}

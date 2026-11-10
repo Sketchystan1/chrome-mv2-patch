@@ -1,11 +1,11 @@
 # Manually builds the Windows version.dll proxy (x64/x86/arm64) and publishes
 # version.dll-v<ver>.zip (x64/, x86/, arm64/ folders inside) to a release
 # tagged v<ver>. <ver> is the DLL's ProductVersion, whose single source of
-# truth is build.bat's MV2_VER. chrome-mv2.ps1 finds the asset by following the
+# truth is CMakeLists.txt's project version. chrome-mv2.ps1 finds the asset by following the
 # releases/latest redirect to the tag (api.github.com is avoided - it
 # rate-limits by IP).
 # (GitHub also auto-attaches "Source code" links to every release - the whole
-# repo, minus gitignored detours/ and build/ - which cannot be scoped or
+# repo, minus gitignored build/ and out/ - which cannot be scoped or
 # disabled.)
 #
 # Manual runs only: Actions tab -> "Build Windows version.dll" -> Run workflow.
@@ -27,21 +27,15 @@ jobs:
       - uses: actions/checkout@v4
 
       # windows-latest ships VS 2022 with the C++ workload; build.bat finds it
-      # via vswhere and calls vcvarsall itself. arm64 is skipped cleanly if the
-      # ARM64 cross tools are not on the image.
+      # via vswhere and calls vcvarsall itself. All requested target tools are required.
       - name: Build version.dll (x64/x86/arm64)
         shell: cmd
         run: |
           call mv2-mem-patch-win\build.bat all
-          if not exist mv2-mem-patch-win\build\x64\version.dll (
-            if not exist mv2-mem-patch-win\build\x86\version.dll (
-              echo No version.dll was built. & exit /b 1
-            )
-          )
+          if errorlevel 1 exit /b 1
 
       # Zip the arch dirs with bsdtar (Compress-Archive writes backslash entry
-      # separators, which non-Windows unzip tools mishandle). An arch whose
-      # toolchain is missing is skipped with a warning, but x64 must be present.
+      # separators, which non-Windows unzip tools mishandle).
       - name: Package version.dll-v<ver>.zip
         id: package
         shell: pwsh
@@ -56,7 +50,7 @@ jobs:
               Copy-Item $src (Join-Path $root $a) -Force
               $built += $a
             } else {
-              Write-Host "::warning::no version.dll for $a (toolchain missing?)"
+              throw "no version.dll for $a"
             }
           }
           if ($built -notcontains 'x64') { throw 'no x64 version.dll - refusing to release' }
@@ -66,7 +60,9 @@ jobs:
           Write-Host "packaging $zip ($($built -join ', '))"
           $outDir = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          tar -a -cf (Join-Path $outDir $zip) -C $root @built
+          Copy-Item 'mv2-mem-patch-win/out/x64/Detours-LICENSE.md' $root
+          tar -a -cf (Join-Path $outDir $zip) -C $root @built Detours-LICENSE.md
+          if ($LASTEXITCODE) { throw 'release packaging failed' }
           "version=v$ver" >> $env:GITHUB_OUTPUT
 
       # No release name or body: the release is just the version-stamped zips

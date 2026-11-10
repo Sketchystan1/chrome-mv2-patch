@@ -1,0 +1,65 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <span>
+#include <string_view>
+
+namespace autoscan {
+template<class T, size_t Capacity> struct FixedList {
+  std::array<T, Capacity> items{};
+  size_t count = 0;
+  bool push_back(const T& value) { if (count == Capacity) return false; items[count++] = value; return true; }
+  size_t size() const { return count; }
+  bool empty() const { return !count; }
+  auto begin() { return items.begin(); }
+  auto end() { return items.begin() + count; }
+  auto begin() const { return items.begin(); }
+  auto end() const { return items.begin() + count; }
+  auto& operator[](size_t i) { return items[i]; }
+  const auto& operator[](size_t i) const { return items[i]; }
+  auto& front() { return items[0]; }
+  const auto& front() const { return items[0]; }
+  auto& back() { return items[count - 1]; }
+  const auto& back() const { return items[count - 1]; }
+};
+using HashValue = std::array<char, 64>;
+enum OptionalGate : uint8_t { Core, InstallVerifier, CrxDownload };
+struct Gate {
+  uint32_t compare = 0, rva = 0, function = 0, affected = 0, unaffected = 0, exit = 0;
+  unsigned kind = 0, width = 0, decoded = 0;
+  std::array<uint8_t, 6> stock{}, patch{};
+  std::array<int64_t, 5> fields{};  // version, manifest pointer, type, location, converted flag
+  bool freePredicate = false;
+  OptionalGate optional = Core;
+};
+struct Issue { uint32_t rva; std::string_view reason; };
+struct Report {
+  HashValue sha256{};
+  std::string_view error, installVerifier, crxDownload;
+  unsigned heads = 0, screened = 0, rejected = 0;
+  FixedList<Gate, 64> gates;
+  FixedList<Issue, 64> unresolved;
+  bool ready() const { return error.empty() && !gates.empty() && unresolved.empty(); }
+};
+
+struct ImageInfo { uint32_t textRva, textRaw, textSize, imageSize; };
+
+HashValue Hash(std::span<const uint8_t> bytes);
+ImageInfo Inspect(std::span<const uint8_t> bytes);
+// The caller keeps these bytes locked and unchanged for this object's lifetime.
+class StockImage {
+  std::span<const uint8_t> bytes_;
+  ImageInfo info_;
+  HashValue sha256_;
+ public:
+  explicit StockImage(std::span<const uint8_t> bytes) : bytes_(bytes), info_(Inspect(bytes)), sha256_(Hash(bytes)) {}
+  auto bytes() const { return bytes_; }
+  const auto& info() const { return info_; }
+  const auto& sha256() const { return sha256_; }
+};
+
+// Analysis alone has no identity: the helper binds it to the parent's locked shared mapping.
+Report Analyze(std::span<const uint8_t> bytes);
+Report Discover(std::span<const uint8_t> bytes);
+}  // namespace autoscan

@@ -1,0 +1,879 @@
+{
+  "recorded_at": "2026-11-10T13:08:40+03:00",
+  "host": "Windows x64",
+  "compiler": "MSVC 19.51.36260.0",
+  "configuration": "Release",
+  "size_limit_bytes_exclusive": 150000,
+  "complete_enforcement_coverage_proven": false,
+  "detours": {
+    "version": "4.0.1",
+    "commit": "e4bfd6b03e50de46b47abfbd1e46b384f0c5f833",
+    "archive_sha256": "d24f5dd1f977c33301ebd9f3be064e938a7908954df15b31235c9ca6691cb356",
+    "shipped_usage": "Unchanged import enumeration with atomic pointer swaps; inline-hook engine excluded."
+  },
+  "compiler_flags": [
+    "/O1",
+    "/Os",
+    "/GL",
+    "/GS-",
+    "/GR-",
+    "/EHs-c-",
+    "/Gw",
+    "/Gy",
+    "/MD"
+  ],
+  "linker_flags": [
+    "/LTCG",
+    "/OPT:REF",
+    "/OPT:ICF",
+    "/INCREMENTAL:NO"
+  ],
+  "allocation_guarantee": "Project-owned code and storage only; Windows, loader and UCRT internals may allocate.",
+  "build_command": ".\\mv2-mem-patch-win\\build.bat all",
+  "artifacts": [
+    {
+      "architecture": "x64",
+      "binary": "version.dll",
+      "bytes": 97792,
+      "sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b",
+      "machine": "0x8664",
+      "rwx_sections": false,
+      "forbidden_imports": [],
+      "dynamic_crt": true,
+      "imports": [
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "bcrypt.dll",
+        "CRYPT32.dll",
+        "KERNEL32.dll",
+        "VCRUNTIME140.dll"
+      ],
+      "path": "build/x64/version.dll"
+    },
+    {
+      "architecture": "x64",
+      "binary": "mv2-scan.exe",
+      "bytes": 71680,
+      "sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+      "machine": "0x8664",
+      "rwx_sections": false,
+      "forbidden_imports": [],
+      "dynamic_crt": true,
+      "imports": [
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-locale-l1-1-0.dll",
+        "api-ms-win-crt-math-l1-1-0.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "bcrypt.dll",
+        "KERNEL32.dll",
+        "VCRUNTIME140.dll"
+      ],
+      "path": "out/x64/mv2-scan.exe"
+    },
+    {
+      "architecture": "x86",
+      "binary": "version.dll",
+      "bytes": 76288,
+      "sha256": "1ba0afeb7efa4e72bc6a0a553d42a7eae5e2c6f268b2d366a85933c0219c2101",
+      "machine": "0x14c",
+      "rwx_sections": false,
+      "forbidden_imports": [],
+      "dynamic_crt": true,
+      "imports": [
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "bcrypt.dll",
+        "CRYPT32.dll",
+        "KERNEL32.dll",
+        "VCRUNTIME140.dll"
+      ],
+      "path": "build/x86/version.dll"
+    },
+    {
+      "architecture": "x86",
+      "binary": "mv2-scan.exe",
+      "bytes": 50176,
+      "sha256": "eb3ba2d27a774275fbec17d4ff5681a0965bd4903af43b832e069522ae9c1be3",
+      "machine": "0x14c",
+      "rwx_sections": false,
+      "forbidden_imports": [],
+      "dynamic_crt": true,
+      "imports": [
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-locale-l1-1-0.dll",
+        "api-ms-win-crt-math-l1-1-0.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "bcrypt.dll",
+        "KERNEL32.dll",
+        "VCRUNTIME140.dll"
+      ],
+      "path": "out/x86/mv2-scan.exe"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "version.dll",
+      "bytes": 73728,
+      "sha256": "701dd4e5eb411315f8e37f7232fd3fde632f91d308dc3993dd866e1e58725c52",
+      "machine": "0xaa64",
+      "rwx_sections": false,
+      "forbidden_imports": [],
+      "dynamic_crt": true,
+      "imports": [
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "bcrypt.dll",
+        "CRYPT32.dll",
+        "KERNEL32.dll",
+        "VCRUNTIME140.dll"
+      ],
+      "path": "build/arm64/version.dll"
+    },
+    {
+      "architecture": "arm64",
+      "binary": "mv2-scan.exe",
+      "bytes": 48128,
+      "sha256": "cf0f2bd9054e1f4b0673430d2330f27ddff5840659cb4c975d761463ce5d907f",
+      "machine": "0xaa64",
+      "rwx_sections": false,
+      "forbidden_imports": [],
+      "dynamic_crt": true,
+      "imports": [
+        "api-ms-win-crt-heap-l1-1-0.dll",
+        "api-ms-win-crt-locale-l1-1-0.dll",
+        "api-ms-win-crt-math-l1-1-0.dll",
+        "api-ms-win-crt-runtime-l1-1-0.dll",
+        "api-ms-win-crt-stdio-l1-1-0.dll",
+        "api-ms-win-crt-string-l1-1-0.dll",
+        "bcrypt.dll",
+        "KERNEL32.dll",
+        "VCRUNTIME140.dll"
+      ],
+      "path": "out/arm64/mv2-scan.exe"
+    }
+  ],
+  "native_tests": [
+    {
+      "architecture": "x64",
+      "passed": true,
+      "tests": [
+        {
+          "name": "compact-modules",
+          "checks": 184
+        },
+        {
+          "name": "native-proxy-abi",
+          "checks": 23
+        },
+        {
+          "name": "native-scanner",
+          "checks": 255
+        },
+        {
+          "name": "proxy-exports",
+          "checks": 19
+        }
+      ]
+    },
+    {
+      "architecture": "x86",
+      "passed": true,
+      "tests": [
+        {
+          "name": "compact-modules",
+          "checks": 184
+        },
+        {
+          "name": "native-proxy-abi",
+          "checks": 23
+        }
+      ]
+    }
+  ],
+  "static_scan": {
+    "passed": true,
+    "images": 23,
+    "core_gates": 166,
+    "optional_gates": 41,
+    "install_verifier_gates": 21,
+    "crx_download_gates": 20,
+    "comparison": "All core details except decoded-instruction counts match prior hash-bound reviewed results, and every previously recognized InstallVerifier address is preserved. The 20 CRX download gates match independently disassembled allow-reason stores and InstallCrx calls. The DCHECK 159.0.8148.1 download layout is skipped.",
+    "results": [
+      {
+        "architecture": "x64",
+        "version": "152.0.7977.82",
+        "image_sha256": "a4cd690ba8b767c1b1ce4569056f7c9d079c21e84c2b08daa41704f254a984cb",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "153.0.8010.52",
+        "image_sha256": "f43d7232b11d76783c225110c6719507e293797b1d5ac423b383f963ed8abb57",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "154.0.8037.92",
+        "image_sha256": "76249ef0bfc397679308ccca2e8e663b00dd4698353c0930d38d7fbeb840d6ef",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "155.0.8059.84",
+        "image_sha256": "76c3aab15d57de1547ca65c8c7b23e1d0e9f2330c435f01c662c212f3c5b5259",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "156.0.8078.80",
+        "image_sha256": "f9a55d001f5e2dfeb51a65a71f1298e24822302f4274d0b510a792d543d5c32d",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "157.0.8103.38",
+        "image_sha256": "ae889a659d24ad44e75b6b2fc1fdde1067badaf56b232f19968688db00efbd1c",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "158.0.8127.18",
+        "image_sha256": "c6b849fa1d8e4b2ddd8a8322e767b0baf00eaa3ccb3cfbe681d86daded6019ed",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "159.0.8150.0",
+        "image_sha256": "6fe8b5a58ae966b0166aa97dae20e1b6b69237c7b16147a4a0ff2d37a029a824",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "153.0.8010.37 reference",
+        "image_sha256": "0da572d5d7675bba023ad3702e3d406d1da1c922d3d848b8de68b20f2369f0fc",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "154.0.8011.0 early layout",
+        "image_sha256": "bda37c829879f4ab5f73c44e3a3b2b48144bab19cd9b1e95e4ee227c699da6c1",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "154.0.8030.0 reference",
+        "image_sha256": "410535aa2302be8ae1febdf552cbfe86cd33451cc336aa956257482d4078bda7",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "154.0.8035.0 reference",
+        "image_sha256": "ee738af8f81cc57b91c2e40a6c995a22108f6390ff6653b84e7c772adfa2ee7f",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "154.0.8037.17 branded",
+        "image_sha256": "3c58bedf1926c9a60009928682500bc5c19da877568f378b599e526edac62ce5",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "155.0.8038.0 reference",
+        "image_sha256": "0d58b04aebd216b139b4d338f2dcb2980780aa8b20b2ae15e9fef10b4069bfb4",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "155.0.8050.0 reference",
+        "image_sha256": "0d2fa912673922d8417fc340380547d005817528046603e51426436ed1886882",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "156.0.8060.2 reference",
+        "image_sha256": "beba07ae2926c38df41fa270e7ab39c0198f82d3a0bd95d43cacc0a41ccffe75",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "157.0.8083.0 reference",
+        "image_sha256": "572ed9c9b98c8cd2d837483418bef981168669f883a617e1a63efedf45db00b8",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "159.0.8148.0 CfT",
+        "image_sha256": "7533c0e1f754acc41c68aedde41a843919a3f6ffcaa584ea4e7a3c1f017d61b0",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "159.0.8148.1 DCHECK",
+        "image_sha256": "ae231acb188b19d5a880adb3224634a21a420de91b45defda81e4a076af8c3b1",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 10,
+        "optional_gates": 1,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 0,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "157.0.8103.39 user Chromium",
+        "image_sha256": "82939be5f5b6043e72336bb6386a69cb3126302cc36a604d4cb1e2dee829eeb8",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x64",
+        "version": "159.0.8153.0 Official Canary x64",
+        "image_sha256": "01b6e13ca5a810905ff878c657c14c335b368f26a02450f93d320ee606032429",
+        "scanner_sha256": "ace737557378a8604733d9f55188eaa7e8072458dc314d60473c53c28c329755",
+        "core_gates": 7,
+        "optional_gates": 2,
+        "install_verifier_gates": 1,
+        "crx_download_gates": 1,
+        "passed": true
+      },
+      {
+        "architecture": "x86",
+        "version": "153.0.8010.37 x86",
+        "image_sha256": "1c2ba5274e183126f3f258e9828e85f07d8386ad541e86228f79cb9bf3f324c4",
+        "scanner_sha256": "eb3ba2d27a774275fbec17d4ff5681a0965bd4903af43b832e069522ae9c1be3",
+        "core_gates": 8,
+        "optional_gates": 0,
+        "install_verifier_gates": 0,
+        "crx_download_gates": 0,
+        "passed": true
+      },
+      {
+        "architecture": "x86",
+        "version": "154.0.8037.17 x86",
+        "image_sha256": "70fb97c7bcf3683d901e0695e92655e50e063c6f43cbd6261f3524538d01c39c",
+        "scanner_sha256": "eb3ba2d27a774275fbec17d4ff5681a0965bd4903af43b832e069522ae9c1be3",
+        "core_gates": 8,
+        "optional_gates": 0,
+        "install_verifier_gates": 0,
+        "crx_download_gates": 0,
+        "passed": true
+      }
+    ]
+  },
+  "runtime": [
+    {
+      "version": "159.0.8153.0 Official Canary x64",
+      "source_sha256": "01b6e13ca5a810905ff878c657c14c335b368f26a02450f93d320ee606032429",
+      "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b",
+      "passed": true,
+      "registry_cleanup": true,
+      "disk_unchanged": true,
+      "phases": [
+        {
+          "phase": "stock",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 9,
+          "mv2_running": false,
+          "mv2_request_blocking": false,
+          "mv3_running": true,
+          "extension_state": "not_installed",
+          "suspicious_install": null,
+          "enable_denied": false
+        },
+        {
+          "phase": "core-only",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 9,
+          "mv2_running": false,
+          "mv2_request_blocking": false,
+          "mv3_running": true,
+          "extension_state": "DISABLED",
+          "suspicious_install": true,
+          "enable_denied": true,
+          "cache_reused": false,
+          "dll_sha256": "6476af305d88dffac498bbef48deccf41beb1486e5634831954a18db23fc9765"
+        },
+        {
+          "phase": "patched",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 7,
+          "mv2_running": true,
+          "mv2_request_blocking": true,
+          "mv3_running": true,
+          "extension_state": "ENABLED",
+          "suspicious_install": false,
+          "enable_denied": false,
+          "cache_reused": false,
+          "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b"
+        },
+        {
+          "phase": "restart",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 7,
+          "mv2_running": true,
+          "mv2_request_blocking": true,
+          "mv3_running": true,
+          "extension_state": "ENABLED",
+          "suspicious_install": false,
+          "enable_denied": false,
+          "cache_reused": true,
+          "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b"
+        },
+        {
+          "phase": "restore",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 6,
+          "mv2_running": false,
+          "mv2_request_blocking": false,
+          "mv3_running": true,
+          "extension_state": "DISABLED",
+          "suspicious_install": false,
+          "enable_denied": true
+        }
+      ]
+    },
+    {
+      "version": "159.0.8148.1 DCHECK",
+      "source_sha256": "ae231acb188b19d5a880adb3224634a21a420de91b45defda81e4a076af8c3b1",
+      "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b",
+      "passed": true,
+      "registry_cleanup": true,
+      "disk_unchanged": true,
+      "phases": [
+        {
+          "phase": "stock",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 11,
+          "sandboxed_renderers": 9,
+          "mv2_running": false,
+          "mv2_request_blocking": false,
+          "mv3_running": true,
+          "extension_state": "not_installed",
+          "suspicious_install": null,
+          "enable_denied": false
+        },
+        {
+          "phase": "patched",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 11,
+          "sandboxed_renderers": 10,
+          "mv2_running": true,
+          "mv2_request_blocking": true,
+          "mv3_running": true,
+          "extension_state": "ENABLED",
+          "suspicious_install": false,
+          "enable_denied": false,
+          "cache_reused": false,
+          "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b"
+        },
+        {
+          "phase": "restart",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 11,
+          "sandboxed_renderers": 7,
+          "mv2_running": true,
+          "mv2_request_blocking": true,
+          "mv3_running": true,
+          "extension_state": "ENABLED",
+          "suspicious_install": false,
+          "enable_denied": false,
+          "cache_reused": true,
+          "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b"
+        },
+        {
+          "phase": "restore",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 11,
+          "sandboxed_renderers": 6,
+          "mv2_running": false,
+          "mv2_request_blocking": false,
+          "mv3_running": true,
+          "extension_state": "DISABLED",
+          "suspicious_install": false,
+          "enable_denied": true
+        }
+      ]
+    },
+    {
+      "version": "157.0.8103.39 user Chromium",
+      "source_sha256": "82939be5f5b6043e72336bb6386a69cb3126302cc36a604d4cb1e2dee829eeb8",
+      "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b",
+      "passed": true,
+      "registry_cleanup": true,
+      "disk_unchanged": true,
+      "phases": [
+        {
+          "phase": "stock",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 8,
+          "mv2_running": false,
+          "mv2_request_blocking": false,
+          "mv3_running": true,
+          "extension_state": "not_installed",
+          "suspicious_install": null,
+          "enable_denied": false
+        },
+        {
+          "phase": "patched",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 9,
+          "mv2_running": true,
+          "mv2_request_blocking": true,
+          "mv3_running": true,
+          "extension_state": "ENABLED",
+          "suspicious_install": false,
+          "enable_denied": false,
+          "cache_reused": false,
+          "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b"
+        },
+        {
+          "phase": "restart",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 7,
+          "mv2_running": true,
+          "mv2_request_blocking": true,
+          "mv3_running": true,
+          "extension_state": "ENABLED",
+          "suspicious_install": false,
+          "enable_denied": false,
+          "cache_reused": true,
+          "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b"
+        },
+        {
+          "phase": "restore",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 6,
+          "mv2_running": false,
+          "mv2_request_blocking": false,
+          "mv3_running": true,
+          "extension_state": "DISABLED",
+          "suspicious_install": false,
+          "enable_denied": true
+        }
+      ]
+    }
+  ],
+  "arm64": {
+    "cross_build_passed": true,
+    "native_execution_tested": false,
+    "metadata_validation": "PE and unwind constructors run against real ARM64 files on the x64 host; this does not execute ARM64 instructions or the native ARM64 scanner.",
+    "images": [
+      {
+        "version": "159.0.8148.0",
+        "sha256": "31a75d30af6f80c0bdb0dbd730893483979f7492fa560bc031d54f83a1bd7cd2",
+        "pe_and_unwind_validation_passed": true
+      },
+      {
+        "version": "154.0.8037.17",
+        "sha256": "194ad41a0ec22bee9d18648a928137699a51fe7f8dd23613a5fb3744a9dfec63",
+        "pe_and_unwind_validation_passed": true
+      }
+    ],
+    "evidence_retained_from_record": "2026-11-10T01:19:39+03:00",
+    "metadata_validation_refreshed": false
+  },
+  "limits": [
+    "x86 function boundaries are heuristic; unsupported compiler forms can escape candidate prescreening.",
+    "Bounded intervals and instruction support do not prove complete enforcement coverage.",
+    "No native ARM64 execution hardware was available.",
+    "W^X and pointer swaps do not guarantee antivirus allowlisting.",
+    "DRM behavior and enterprise deployment were not tested."
+  ],
+  "build_layout": {
+    "verified": true,
+    "files": [
+      "arm64/version.dll",
+      "x64/version.dll",
+      "x86/version.dll"
+    ],
+    "intermediates": "out/<arch>/"
+  },
+  "packaging_check": {
+    "passed": true,
+    "archive": "version.dll-crx-download-local.zip",
+    "sha256": "3a8bf84b4a81b18085417f002e537b85c64fcf7988cc55c0cec3efcf9a7047b4",
+    "files": [
+      "Detours-LICENSE.md",
+      "arm64/version.dll",
+      "x64/version.dll",
+      "x86/version.dll"
+    ]
+  },
+  "legacy_memory_test": {
+    "command": "python scripts/test_memory.py",
+    "passed": true,
+    "evidence_retained_from_record": "2026-11-10T01:19:39+03:00",
+    "refreshed": false
+  },
+  "validation_scope": "Native tests, artifact inspection, packaging, 23 scans, three MV2/MV3 browser lifecycles and two manual CRX installation lifecycles use the current artifact hashes. No off-store launch flag was used. Canary also passed upgrading a profile blocked by a pinned older DLL. ARM64 cross-build passed; prior ARM64 PE/unwind and legacy-memory evidence is explicitly retained without claiming a new run. Runtime startup timings are diagnostic, not performance benchmarks.",
+  "offstore": {
+    "automatic": true,
+    "launch_flag_required": false,
+    "supported_architectures": [
+      "x64"
+    ],
+    "verified_version": "159.0.8153.0 Official Canary x64",
+    "applies_to": "All off-store extensions in this browser process",
+    "cache_protocol": 4,
+    "wire_plan_bytes": 1532,
+    "blocked_profile_upgrade_tested": true,
+    "cache_reuse_tested": true
+  },
+  "crx_download": {
+    "automatic": true,
+    "launch_flag_required": false,
+    "supported_architectures": [
+      "x64"
+    ],
+    "bypassed_requirement": "Chrome Web Store publisher proof for manually opened downloads",
+    "preserved_checks": [
+      "CRX3 developer proof",
+      "signature and archive integrity",
+      "installation confirmation"
+    ],
+    "install_routes": [
+      "Chrome Downloads open action",
+      "native file drop on chrome://extensions with Developer mode"
+    ],
+    "runtime_method": "Isolated off-screen browser copies and fresh profiles. CDP invokes the Downloads keep/open handlers with an input gesture; UIAutomation confirms installation. A test-only hook on the browser UI thread supplies CF_HDROP through Chrome's native OLE drag-enter/over/drop handler; no physical pointer movement is simulated.",
+    "unrecognized_layout": "159.0.8148.1 DCHECK skips the download gate; core and InstallVerifier checks still pass.",
+    "runtime": [
+      {
+        "version": "157.0.8103.39 user Chromium",
+        "binary_sha256": "82939be5f5b6043e72336bb6386a69cb3126302cc36a604d4cb1e2dee829eeb8",
+        "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b",
+        "passed": true,
+        "registry_cleanup": true,
+        "disk_unchanged": true,
+        "before_dll_sha256": "7413644d534e5030357f3f425818ebac8a695d417c399adf268121b400ecc9c7",
+        "phases": [
+          {
+            "phase": "before",
+            "cases": [
+              {
+                "file": "valid.crx",
+                "rejected": "CRX_REQUIRED_PROOF_MISSING"
+              }
+            ],
+            "exit_code": 0
+          },
+          {
+            "phase": "patched",
+            "cases": [
+              {
+                "file": "tampered.crx",
+                "rejected": "CRX_SIGNATURE_VERIFICATION_FAILED"
+              },
+              {
+                "file": "missing-proof.crx",
+                "rejected": "CRX_REQUIRED_PROOF_MISSING"
+              },
+              {
+                "file": "valid.crx",
+                "installed": "ENABLED"
+              }
+            ],
+            "exit_code": 0
+          },
+          {
+            "phase": "drag",
+            "cases": [],
+            "drag_installed": "ENABLED",
+            "sandboxed_renderers": 7,
+            "exit_code": 0,
+            "native_drop_handler_passed": true
+          },
+          {
+            "phase": "restore",
+            "cases": [
+              {
+                "file": "valid.crx",
+                "rejected": "CRX_REQUIRED_PROOF_MISSING"
+              }
+            ],
+            "exit_code": 0
+          }
+        ]
+      },
+      {
+        "version": "159.0.8153.0 Official Canary x64",
+        "binary_sha256": "01b6e13ca5a810905ff878c657c14c335b368f26a02450f93d320ee606032429",
+        "dll_sha256": "d24274cc76a94bdf3dabe14be3f9c0f833330a6d2f8d24ca323c7ac7aadd516b",
+        "passed": true,
+        "registry_cleanup": true,
+        "disk_unchanged": true,
+        "before_dll_sha256": "7413644d534e5030357f3f425818ebac8a695d417c399adf268121b400ecc9c7",
+        "phases": [
+          {
+            "phase": "before",
+            "cases": [
+              {
+                "file": "valid.crx",
+                "rejected": "CRX_REQUIRED_PROOF_MISSING"
+              }
+            ],
+            "exit_code": 0
+          },
+          {
+            "phase": "patched",
+            "cases": [
+              {
+                "file": "tampered.crx",
+                "rejected": "CRX_SIGNATURE_VERIFICATION_FAILED"
+              },
+              {
+                "file": "missing-proof.crx",
+                "rejected": "CRX_REQUIRED_PROOF_MISSING"
+              },
+              {
+                "file": "valid.crx",
+                "installed": "ENABLED"
+              }
+            ],
+            "exit_code": 0
+          },
+          {
+            "phase": "drag",
+            "cases": [],
+            "drag_installed": "ENABLED",
+            "sandboxed_renderers": 8,
+            "exit_code": 0,
+            "native_drop_handler_passed": true
+          },
+          {
+            "phase": "restore",
+            "cases": [
+              {
+                "file": "valid.crx",
+                "rejected": "CRX_REQUIRED_PROOF_MISSING"
+              }
+            ],
+            "exit_code": 0
+          }
+        ]
+      }
+    ]
+  }
+}

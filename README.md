@@ -7,7 +7,15 @@ See [`mv2-reversing.md`](mv2-reversing.md) for details.
 ## Windows
 ### Chrome 152-159 x64, x86, ARM
 
-Chrome 159 requires `version.dll` **1.16.0 or later** and the updated signatures.
+[Compact Windows DLL without signatures.json](mv2-mem-patch-win/README.md):
+build this branch for x64, x86 or ARM64 with `build.bat` or Visual Studio.
+The local x64 build enables [off-store extensions](mv2-mem-patch-win/README.md#off-store-extensions)
+automatically on recognized versions, with no extra launch flag.
+It also supports [installing downloaded CRX files](mv2-mem-patch-win/README.md#installing-downloaded-crx-files)
+without Web Store publisher proof on recognized download-gate layouts.
+
+The installer below downloads the published table-based release. Chrome 159
+requires `version.dll` **1.16.0 or later** and the updated signatures.
 Run the installer again to replace an older DLL; `update` refreshes signatures only.
 
 Run in terminal:

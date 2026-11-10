@@ -1,23 +1,19 @@
 // version.rc - Windows VERSIONINFO for the mv2-mem-patch version.dll proxy.
 //
-// SINGLE SOURCE OF TRUTH for the version is build.bat (MV2_VER / MV2_VERC),
-// which passes it here via rc.exe /D defines:
-//   /DMV2_VER_STR=\"1.11.1.0\"  /DMV2_VERC=1,11,1,0  /DMV2_PROD=\"1.11.1\"
-// The #ifndef fallbacks below mirror the current release so that a bare
-// `rc version.rc` (no /D defines) still compiles.
+// CMakeLists.txt supplies the project version through the MV2_* defines.
 //
 // Branding is HONEST and deliberately does NOT impersonate Microsoft: an
 // unsigned DLL claiming Microsoft identity is both deceptive and an AV red flag.
 #include <windows.h>
 
 #ifndef MV2_VERC
-#define MV2_VERC 1,11,1,0
+#define MV2_VERC 1,16,0,0
 #endif
 #ifndef MV2_VER_STR
-#define MV2_VER_STR "1.11.1.0"
+#define MV2_VER_STR "1.16.0.0"
 #endif
 #ifndef MV2_PROD
-#define MV2_PROD "1.11.1"
+#define MV2_PROD "1.16.0"
 #endif
 
 VS_VERSION_INFO VERSIONINFO

@@ -1,5 +1,5 @@
 """Safety checks for the arm64 bcond finder/masker in derive_milestone.py."""
-import struct, sys
+import json, struct, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import derive_milestone as dm
@@ -126,6 +126,23 @@ for kind, insn, patched_insn in (
             assert not dm.masked_match_count(wrong_sig, wrong_sig, 4, kind), hex(word)
     assert not dm.masked_match_count(sig, sig[:5], 4, kind), kind
 print("[10] Chrome 159 instruction matching, relocation, and corruption checks passed")
+
+# Real InstallVerifier fragments: its following pointer load changes across builds.
+table = json.loads((Path(__file__).resolve().parent.parent / "signatures.json").read_text())
+decoys = bytes.fromhex(
+    "881F40F90851493968011837"  # another IsFromStore caller
+    "880A40F908514939C8041837"
+    "881E40F90851493928011837")
+for milestone in table["milestones"] + table.get("milestones_v2", []):
+    if milestone["name"] not in ("154-win-arm64", "159-win-arm64"):
+        continue
+    site = next(s for s in milestone["sites"] if s["kind"] == "tbz")
+    for load in ("60E641F9", "600640F9", "60B647F9", "A09647F9", "A02642F9", "A0BE42F9"):
+        fragment = bytes.fromhex("E80B40F90851493988011837" + load + "E80F40F9")
+        text = b"\xCC" * 8 + fragment + decoys
+        hits = dm.masked_match_count(text, bytes.fromhex(site["sig"]), site["jgOff"], "tbz")
+        assert [p + site["jgOff"] for p in hits] == [16], (milestone["name"], load, hits)
+print("[11] ARM64 InstallVerifier survives pointer-load changes and rejects other callers")
 
 print("ALL DERIVATION SAFETY CHECKS:", "PASS" if ok else "FAIL")
 sys.exit(0 if ok else 1)

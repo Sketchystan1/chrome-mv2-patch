@@ -80,7 +80,7 @@ def main():
     # Table audits are seconds and catch defects no per-binary test can see - two
     # milestones with identical signature sets make the patcher decline every
     # build they match. The Windows PE suite
-    # shells to pwsh; the memory engine suite compiles the production C++.
+    # shells to pwsh; the memory suite compiles the legacy table-based C++ engine.
     steps = [
         ("derivation unit checks (arm64 bcond safety)",
          py + [str(HERE / "test_derive.py")]),
@@ -89,7 +89,7 @@ def main():
         ("audit signatures.json",
          py + [str(HERE / "audit_signatures.py"), str(REPO / "signatures.json")]),
         ("Windows PE (chrome-mv2.ps1)", py + [str(HERE / "test_windows.py")]),
-        ("Windows memory engine", py + [str(HERE / "test_memory.py")]),
+        ("Legacy Windows memory engine", py + [str(HERE / "test_memory.py")]),
     ]
 
     # Syntax check for the shell patcher. Use the resolved bash (T.BASH): a bare

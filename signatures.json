@@ -861,10 +861,10 @@
           "name": "let off-store extensions install (InstallVerifier)",
           "kind": "tbz",
           "jgRVA": "0x02CCF568",
-          "jgOff": 4,
+          "jgOff": 8,
           "expectedMatches": 1,
           "optional": true,
-          "sig": "0851493988011837600640F9E80F40F9"
+          "sig": "E80B40F90851493988011837"
         }
       ]
     },
@@ -1601,9 +1601,9 @@
           "kind": "tbz",
           "optional": true,
           "jgRVA": "0x02FCA280",
-          "jgOff": 4,
+          "jgOff": 8,
           "expectedMatches": 1,
-          "sig": "0851493988011837A02642F9E80F40F9"
+          "sig": "E80B40F90851493988011837"
         }
       ],
       "_comment": "Chrome 159.0.8148.0. Source and disassembly reviewed; requires the 1.16.0 patcher."

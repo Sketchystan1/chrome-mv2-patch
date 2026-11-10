@@ -1,4 +1,5 @@
-// Compile with the same Detours objects as the DLL; DllMain is not run by this EXE.
+// The engine test EXE does not install the legacy DLL's process hooks.
+#define MV2_ENGINE_TEST
 #include "../mv2-mem-patch-win/mv2-mem-patch.cpp"
 #include <cassert>
 #include <cstdio>
@@ -78,6 +79,38 @@ int main() {
   assert(VirtualQuery(mem + 0x2000, &info, sizeof(info)) && info.Protect == PAGE_EXECUTE_READ);
   VirtualFree(mem, 0, MEM_RELEASE);
 
-  std::puts("Memory patcher tests passed");
+#if defined(_M_ARM64)
+  // Execute both outcomes before patching, then verify the existing false outcome wins.
+  const struct { int kind, offset, unaffected; const char* code; } gates[] = {
+    {2, 4, 3, "1F0800716C00005420008052C0035FD600008052C0035FD6"},
+    {8, 4, 3, "1F0800716D00005400008052C0035FD620008052C0035FD6"},
+    {9, 8, 3, "280080521F080071E0C3881AC0035FD6"},
+    {3, 0, 8, "6000183720008052C0035FD600008052C0035FD6"},
+  };
+  for (const auto& gate : gates) {
+    Site s;
+    s.kind = gate.kind;
+    s.jgOff = gate.offset;
+    s.sig = HexToBytes(gate.code);
+    mem = (BYTE*)VirtualAlloc(nullptr, 0x1000, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    assert(mem);
+    memcpy(mem, s.sig.data(), s.sig.size());
+    assert(VirtualProtect(mem, 0x1000, PAGE_EXECUTE_READ, &old));
+    assert(FlushInstructionCache(GetCurrentProcess(), mem, s.sig.size()));
+    auto predicate = reinterpret_cast<int (*)(int)>(mem);
+    assert(predicate(2) == 1 && predicate(gate.unaffected) == 0);
+    Image arm;
+    arm.machine = IMAGE_FILE_MACHINE_ARM64;
+    arm.textSize = 0x1000;
+    ApplyInProcess(mem, arm, {{s, {s.jgOff}}});
+    assert(predicate(2) == 0 && predicate(gate.unaffected) == 0);
+    ApplyInProcess(mem, arm, {{s, {s.jgOff}}});
+    assert(predicate(2) == 0);
+    assert(VirtualQuery(mem, &info, sizeof(info)) && info.Protect == PAGE_EXECUTE_READ);
+    VirtualFree(mem, 0, MEM_RELEASE);
+  }
+  std::puts("ARM64 bcond, bcond-nop, csel and tbz execution passed");
+#endif
+  std::printf("Memory patcher tests passed (%s)\n", kHostContainer);
   return 0;
 }

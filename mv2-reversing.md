@@ -338,6 +338,10 @@ Enforcement is compiled **only on Windows and macOS** (like the old Gate B); on 
 already work. All sites are **`optional`** (additive to MV2 re-enable — a build where
 the site does not match must never fail the core patch).
 
+This branch's compact Windows x64 DLL automatically applies every verified optional
+gate, without an extra launch flag; see [launch instructions](mv2-mem-patch-win/README.md#off-store-extensions).
+The table-based release behavior is unchanged.
+
 | container | kind | flip |
 | :--- | :--- | :--- |
 | pe (x64) | `short` (`stockOpcode 0x75`) | `test byte[ext+0x254],8 ; jne <verified>` → `jne`→`jmp` |
@@ -376,6 +380,23 @@ and is a shifted (155-family) branded build. The
 **`mv2-mem-patch-win`** DLL applies these in-process — its short-flip path was fixed
 to honor `stockOpcode` (use the sig's own byte at `jgOff`, not a hardcoded `0x7F`) so
 the `jne` gate applies, and it gained the `tbz` kind for arm64.
+
+**Windows ARM64 anchor correction (2026-11-10).** The `154-win-arm64` and
+`159-win-arm64` InstallVerifier signatures now end at the `tbnz`, anchored by
+`ldr x8,[sp,#0x10]; ldrb w8,[x8,#0x254]`. The following pointer load's register and
+member offset vary between builds, causing the old signatures to miss 157, 158,
+and later 159. The new 12-byte window has eight fixed prefix bytes and matches
+exactly once in branded 153, 154, 157, 158 and both tested 159 builds. Both branch
+outcomes retain the same source meaning: the taken path short-circuits
+`IsFromStore()` to its existing verified path. The DLL's `tbz` rewrite is unchanged.
+
+Under WSLC with `linaro/wine-arm64:10.2`, the legacy table-based ARM64 DLL applies all
+required and optional sites on 157.0.8103.51, 158.0.8127.18 and 159.0.8153.0.
+On 159, a real MV2 CRX installed through the non-policy external registry provider
+can be enabled, runs its background script, and blocks a selected request after
+restart. Removing the DLL disables it again and stops the blocking. Disk DLL
+hashes stay unchanged. These Wine/QEMU checks run without the browser sandbox;
+native Windows ARM64 sandbox and DRM behavior still need hardware testing.
 
 > **Removed: Gate B.** "Gate B" (skip `FilterSensitivePolicies` to
 > honor off-store `ExtensionSettings` on unmanaged Chrome) was removed from every

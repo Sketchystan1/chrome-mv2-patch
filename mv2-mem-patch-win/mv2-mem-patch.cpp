@@ -1301,6 +1301,7 @@ static LONG NTAPI HookLdrLoadDll(PCWSTR searchPath, ULONG* dllChars,
 
 // ---------------------------------------------------------------------------
 
+#ifndef MV2_ENGINE_TEST
 BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID) {
   if (reason != DLL_PROCESS_ATTACH) return TRUE;
   DisableThreadLibraryCalls(hModule);
@@ -1329,3 +1330,4 @@ BOOL WINAPI DllMain(HINSTANCE hModule, DWORD reason, LPVOID) {
 
   return TRUE;
 }
+#endif

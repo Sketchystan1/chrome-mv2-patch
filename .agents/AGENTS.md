@@ -7,7 +7,7 @@ changing any patching logic. This file is the short operating contract.
 
 ## Repository shape
 
-The platform scripts and Windows memory DLL share one signature model. Do not
+The platform scripts and legacy Windows memory engine share one signature model. Do not
 reintroduce the removed Go or Python patchers:
 
 - `chrome-mv2.ps1` — installs the Windows memory DLL; retains the PE buffer engine
@@ -19,6 +19,12 @@ reintroduce the removed Go or Python patchers:
   dropped in v1.10.0.
 - `scripts/*.py` — derivation/verification only; they never patch an install.
 - `mv2-mem-patch-win` — Windows in-process patcher, built with its own `build.bat`.
+
+This branch's Windows DLL (`build.bat` or Visual Studio) uses compact native
+discovery on x86, x64 and ARM64 without signature tables. DLLs go in `build/`;
+generated files, dependencies and test tools go in ignored `out/`. See
+[`mv2-mem-patch-win/AUTOSCAN.md`](../mv2-mem-patch-win/AUTOSCAN.md) for its bounded
+proof and runtime contract. Existing installers download the published release.
 
 The patch re-enables MV2 by flipping the `IsExtensionAffected` branch at each
 inlined site, using per-milestone, container-tagged tables, applying only a
@@ -51,7 +57,7 @@ or hidden extensions. See `mv2-reversing.md` §6 before changing the byte strate
 
 Keep platform behavior in its owning script (`ps1` = PE strip-Authenticode +
 checksum; `sh` = ELF atomic-replace / Mach-O fat parse + inside-out ad-hoc
-`codesign`). All engines implement the same contract:
+`codesign`). All table-based engines implement the same contract:
 
 - Validate signature data and image bounds; probe the recorded RVA, then relocate
   with a masked `.text` scan.
@@ -127,8 +133,10 @@ python scripts/audit_signatures.py --binary <stock binary>   # selection + ties 
 The audit is the stronger check: `--verify` only asks whether recorded sites match,
 while `audit --binary` reports which milestone the runtime selects, whether anything
 ties, and whether a gate in the binary is covered by nothing. Real-macOS runtime
-proof (re-sign → launch → MV2 A/B → restore, Apple Silicon) and Windows ARM64 DLL
-execution need native hardware; the current workflow only builds the Windows DLLs.
+proof (re-sign → launch → MV2 A/B → restore, Apple Silicon) and native Windows ARM64
+browser behavior still need target hardware. `python scripts/test_memory.py --arm64`
+runs the legacy table-based engine and patched ARM64 instructions under WSLC with
+Wine/QEMU on x64 Windows. The release workflow only builds the Windows DLLs.
 
 Read-only diagnostics: `./chrome-mv2.sh check <path> --quiet` /
 `.\chrome-mv2.ps1 check <path> -Quiet`. Do not hand-patch a live install while
