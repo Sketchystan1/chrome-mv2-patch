@@ -195,7 +195,13 @@ class Boundaries {
     if (at == pe_.text.rva) return true;
     auto b = pe_.at(at - 1, 1); return !b.empty() && (b[0] == 0xcc || b[0] == 0x90);
   }
+  // One immutable PE view owns the cached trim result.
+  mutable Range trimSource_{}, trimResult_{};
   Range trim(Range range) const {
+    if (range.begin == trimSource_.begin && range.end == trimSource_.end) return trimResult_;
+    trimSource_ = range; trimResult_ = trimUncached(range); return trimResult_;
+  }
+  Range trimUncached(Range range) const {
     if (arm_) {
       uint32_t word = 0;
       while (range.end - range.begin >= 4 && pe_.rvaRead(range.end - 4, word) && word == 0xd4200000) range.end -= 4;

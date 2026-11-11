@@ -7,6 +7,26 @@
 #include <intrin.h>
 
 namespace {
+struct PendingView { const uint8_t* view = nullptr; HMODULE module = nullptr; };
+PendingView pendingView;
+LONG cleanupActive = 0;
+void CALLBACK releaseView(PTP_CALLBACK_INSTANCE instance, void*) {
+  CallbackMayRunLong(instance);
+  auto task = pendingView;
+  UnmapViewOfFile(task.view);
+  InterlockedExchange(&cleanupActive, 0);
+  FreeLibraryWhenCallbackReturns(instance, task.module);
+}
+bool queueView(const uint8_t* view) {
+  if (InterlockedCompareExchange(&cleanupActive, 1, 0)) return false;
+  HMODULE module = nullptr;
+  if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&releaseView), &module)) {
+    InterlockedExchange(&cleanupActive, 0); return false;
+  }
+  pendingView = {view, module};
+  if (TrySubmitThreadpoolCallback(releaseView, nullptr, nullptr)) return true;
+  FreeLibrary(module); InterlockedExchange(&cleanupActive, 0); return false;
+}
 struct Handle {
   HANDLE value = nullptr;
   explicit Handle(HANDLE h = nullptr) : value(h) {}
@@ -18,7 +38,8 @@ struct Handle {
 struct View {
   const uint8_t* data = nullptr;
   explicit View(HANDLE mapping, size_t size) : data(static_cast<const uint8_t*>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, size))) {}
-  ~View() { if (data) UnmapViewOfFile(data); }
+  void close() { if (data) UnmapViewOfFile(data); data = nullptr; }
+  ~View() { close(); }
 };
 struct Attributes {
   alignas(void*) std::array<uint8_t, 4096> storage{};
@@ -144,7 +165,7 @@ extern "C" void CALLBACK VersionMV2ScanW(HWND, HINSTANCE, LPWSTR input, int) {
 
 namespace autoscan {
 void Patch(HMODULE chrome) noexcept {
-  LARGE_INTEGER started{}, identified{}, scanned{}, completed{}, frequency{};
+  LARGE_INTEGER started{}, identified{}, scanned{}, applied{}, completed{}, frequency{};
   QueryPerformanceFrequency(&frequency); QueryPerformanceCounter(&started);
   std::array<wchar_t, 32768> path{};
   DWORD length = GetModuleFileNameW(chrome, path.data(), static_cast<DWORD>(path.size()));
@@ -185,13 +206,16 @@ void Patch(HMODULE chrome) noexcept {
   }
   if (result == ApplyResult::declined) trace(reason);
   else {
+    QueryPerformanceCounter(&applied);
+    bool deferred = queueView(view.data);
+    if (deferred) view.data = nullptr; else view.close();
     QueryPerformanceCounter(&completed);
     auto ms = [&](LARGE_INTEGER from, LARGE_INTEGER to) { return (to.QuadPart - from.QuadPart) * 1000.0 / frequency.QuadPart; };
     std::array<char, 256> message{};
-    _snprintf_s(message.data(), message.size(), _TRUNCATE, "%u decisions %s; offstore=%s; crx-download=%s; %s: identity=%.3fms helper=%.3fms apply=%.3fms total=%.3fms",
+    _snprintf_s(message.data(), message.size(), _TRUNCATE, "%u decisions %s; offstore=%s; crx-download=%s; %s: identity=%.3fms helper=%.3fms apply=%.3fms cleanup-%s=%.3fms total=%.3fms",
       plan.count, result == ApplyResult::applied ? "applied" : "already applied",
       plan.offstoreRva ? "on" : "unavailable", plan.crxDownloadRva ? "on" : "unavailable", plan.cacheHit ? "cached" : "scanned",
-      ms(started, identified), ms(identified, scanned), ms(scanned, completed), ms(started, completed));
+      ms(started, identified), ms(identified, scanned), ms(scanned, applied), deferred ? "queued" : "sync", ms(applied, completed), ms(started, completed));
     trace(message.data());
   }
 }

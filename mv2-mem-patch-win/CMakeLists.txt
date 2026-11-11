@@ -165,6 +165,13 @@ endforeach()
 
 include(CTest)
 if(BUILD_TESTING)
+  file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/runtime-test.def"
+    CONTENT "EXPORTS\n ConfigureCleanup\n QueueCleanup\n" @ONLY)
+  add_library(runtime-test-helper SHARED runtime_test.cpp "${CMAKE_CURRENT_BINARY_DIR}/runtime-test.def")
+  target_compile_definitions(runtime-test-helper PRIVATE AUTOSCAN_RUNTIME_HELPER)
+  target_link_libraries(runtime-test-helper PRIVATE autoscan_apply)
+  add_executable(runtime-test runtime_test.cpp)
+  add_test(NAME native-runtime-cleanup COMMAND runtime-test $<TARGET_FILE:runtime-test-helper>)
   add_executable(hash-test hash_test.cpp)
   target_link_libraries(hash-test PRIVATE autoscan_core)
   add_test(NAME native-hashes COMMAND hash-test)

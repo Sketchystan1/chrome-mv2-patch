@@ -5,6 +5,7 @@
 - Remove the optional MV3 `webRequestBlocking` permission patches from all tables.
 - Add experimental Windows x64 MV2 discovery without a signature table or debug symbols.
 - Speed up the Windows auto-patcher with native SIMD searches, parallel BLAKE3 identity checks, relocation filtering and a persistent protected plan cache. Raise the DLL/scanner size limit to 300,000 bytes.
+- Balance hashing across an adaptive CPU budget, defer completed scan-view cleanup and reuse exact function trimming results; preserve full identity and loaded-code checks.
 
 ## [1.16.0] - 2026-11-07
 

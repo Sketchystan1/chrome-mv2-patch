@@ -1,3 +1,5 @@
+#define NOMINMAX
+#include <windows.h>
 #include "autoscan.h"
 #include <algorithm>
 #include <array>
@@ -5,6 +7,7 @@
 #include <string_view>
 #include <vector>
 #include <thread>
+#include <bit>
 #include "blake3.h"
 
 // BLAKE3 1.8.7 official vectors: input[i] = i % 251.
@@ -73,7 +76,44 @@ int main() {
     std::thread other([&] { concurrent[0] = autoscan::Blake3(bytes); });
     concurrent[1] = autoscan::Blake3(bytes); other.join();
     if (concurrent[0] != encoded || concurrent[1] != encoded) { std::fputs("Parallel BLAKE3 differs from serial\n", stderr); return 1; }
+    if (size == 32 * 1024 * 1024 + 1) {
+      DWORD_PTR original = 0, system = 0;
+      if (!GetProcessAffinityMask(GetCurrentProcess(), &original, &system) || !original) return 1;
+      DWORD_PTR remaining = original, limited = 0;
+      for (unsigned n = 1; n <= 3 && remaining; ++n) {
+        DWORD_PTR next = remaining & (~remaining + 1); remaining &= ~next; limited |= next;
+        if (!SetProcessAffinityMask(GetCurrentProcess(), limited)) return 1;
+        auto count = autoscan::HashThreadCount();
+        if (!count || count > n || autoscan::Blake3(bytes) != encoded) {
+          std::fputs("Affinity-limited hashing differs or exceeds its CPU budget\n", stderr); return 1;
+        }
+      }
+      if (!SetProcessAffinityMask(GetCurrentProcess(), original)) return 1;
+      if (!autoscan::HashThreadCount() || autoscan::HashThreadCount() > 8 || autoscan::HashThreadCount() > std::popcount(original)) return 1;
+      alignas(void*) std::array<uint8_t, 8192> cpuData{};
+      std::array<ULONG, 256> saved{}; ULONG required = 0, savedCount = 0;
+      GROUP_AFFINITY group{};
+      if (GetSystemCpuSetInformation(reinterpret_cast<PSYSTEM_CPU_SET_INFORMATION>(cpuData.data()), static_cast<ULONG>(cpuData.size()), &required, GetCurrentProcess(), 0) &&
+          required <= cpuData.size() && GetThreadGroupAffinity(GetCurrentThread(), &group) &&
+          GetProcessDefaultCpuSets(GetCurrentProcess(), saved.data(), static_cast<ULONG>(saved.size()), &savedCount) && savedCount <= saved.size()) {
+        for (size_t offset = 0; offset + sizeof(SYSTEM_CPU_SET_INFORMATION) <= required;) {
+          SYSTEM_CPU_SET_INFORMATION cpu{}; memcpy(&cpu, cpuData.data() + offset, sizeof(cpu));
+          if (cpu.Size < sizeof(cpu) || cpu.Size > required - offset) return 1;
+          if (cpu.Type == CpuSetInformation && cpu.CpuSet.Group == group.Group &&
+              cpu.CpuSet.LogicalProcessorIndex < sizeof(original) * 8 &&
+              (original & (DWORD_PTR{1} << cpu.CpuSet.LogicalProcessorIndex)) &&
+              (!cpu.CpuSet.Allocated || cpu.CpuSet.AllocatedToTargetProcess)) {
+            ULONG id = cpu.CpuSet.Id;
+            if (!SetProcessDefaultCpuSets(GetCurrentProcess(), &id, 1)) return 1;
+            bool ok = autoscan::HashThreadCount() == 1 && autoscan::Blake3(bytes) == encoded;
+            if (!SetProcessDefaultCpuSets(GetCurrentProcess(), saved.data(), savedCount) || !ok) return 1;
+            break;
+          }
+          offset += cpu.Size;
+        }
+      }
+    }
   }
-  std::puts("PASS: 70 BLAKE3 vectors, concurrent parallel boundaries and SHA-256 diagnostics");
+  std::puts("PASS: 70 BLAKE3 vectors, concurrent boundaries, adaptive CPU budgets and SHA-256 diagnostics");
   return 0;
 }

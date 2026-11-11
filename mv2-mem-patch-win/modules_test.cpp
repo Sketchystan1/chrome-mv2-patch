@@ -131,6 +131,12 @@ void boundaries() {
   std::copy(std::begin(body), std::end(body), bytes.begin() + 0x200);
   PeImage pe(bytes); Boundaries ranges(pe);
   check(pe.valid() && !ranges.error && ranges.find(0x1000).end == 0x1005, "padding trimming does not eat immediate bytes");
+  check(ranges.find(0x1003).begin == 0x1000 && ranges.find(0x1003).end == 0x1005,
+        "cached trimming keeps the complete immediate and exact function bounds");
+  auto different = bytes; different[0x200] = 0xc3;
+  PeImage second(different); Boundaries other(second);
+  check(other.find(0x1000).end == 0x1001 && ranges.find(0x1000).end == 0x1005,
+        "each PE view keeps separate trimming state");
   bytes[0x602] = 255;
   PeImage bad(bytes); Boundaries invalid(bad);
   check(invalid.error != nullptr, "truncated xdata codes decline");

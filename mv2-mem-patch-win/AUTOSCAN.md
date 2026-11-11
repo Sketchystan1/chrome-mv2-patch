@@ -57,17 +57,20 @@ storage, principally `std::array` on the stack. Shipped project code has no
 `new`, `malloc`, heap-backed containers, RTTI or C++ exceptions. This is a
 source-level allocation guarantee: the Windows loader, UCRT and called Windows
 APIs may allocate internally. DPAPI allocates temporary protected/decrypted blobs,
-which are freed with `LocalFree`; Windows owns thread-pool work objects, which are
-joined and closed before their caller's storage expires. Detours' import parser
-still uses Windows SEH.
+which are freed with `LocalFree`; hash callbacks are joined before caller storage
+expires. Deferred view cleanup uses one fixed slot and holds its DLL reference
+until callback return. Detours' import parser still uses Windows SEH.
 
 BLAKE3 dispatches to upstream SSE2/SSE4.1/AVX2/AVX-512 assembly on x64, isolated
 intrinsic objects on x86, and NEON on ARM64. CPU and OS feature checks retain
 architecture fallbacks. `blake3_threads.cpp` supplies the pinned library's parallel
-join hook using Windows work callbacks, with at most three additional workers for
-large subtrees. Work allocation failure falls back to serial hashing. No oneTBB
-runtime is required. SSE2 byte filters and bounded literal/call searches reduce
-discovery work without changing the full structural checks.
+join hook using balanced subtree budgets and up to seven additional workers for
+large subtrees. The total thread budget adapts to the process affinity and default
+CPU-set count, capped at eight; the scheduler places the threads. This is a bounded
+heuristic, not per-CPU benchmark autotuning. Work allocation failure falls back to
+serial hashing. No oneTBB runtime is required. SSE2 filters, bounded literal/call
+searches and one exact cached trim range reduce discovery work without changing
+the structural checks. Each boundary object reads one immutable image.
 
 ## Recognition and application
 
@@ -147,6 +150,12 @@ a failed rollback stops the process. This code is restricted to startup before
 Chrome enters the patched routines; it is not a live-patching API for running
 threads. W^X and data pointer swaps do not guarantee antivirus allowlisting.
 
+After successful verification/application, file-view unmapping can finish in a
+thread-pool callback while startup proceeds. A busy slot, failed DLL reference or
+failed submission falls back to synchronous unmapping. Runtime timings separate
+application from queued/synchronous cleanup. Static TLS is retained for the hash
+budget, so the proxy keeps thread initialization notifications enabled.
+
 The diagnostic scanner retains truthful SHA-256 output and adds a `blake3` field.
 It computes both hashes, so its CLI wall time includes extra diagnostic hashing
 that the runtime patcher does not perform. Runtime stage timings use QPC.
@@ -161,11 +170,11 @@ Measured on November 11, 2026 with MSVC 19.52.37029, Release `/MD`:
 
 | Target | `version.dll` | `mv2-scan.exe` |
 | --- | ---: | ---: |
-| x64 | 215,040 bytes | 203,264 bytes |
-| x86 | 228,352 bytes | 211,968 bytes |
-| ARM64 | 153,600 bytes | 138,752 bytes |
+| x64 | 216,576 bytes | 203,776 bytes |
+| x86 | 229,888 bytes | 213,504 bytes |
+| ARM64 | 155,136 bytes | 139,264 bytes |
 
-All x64 tests (7/7) and x86 tests (4/4) passed. The final scanners reproduced
+All x64 tests (8/8) and x86 tests (5/5) passed. The final scanners reproduced
 166 reviewed core decisions across 21 x64 and two x86 stock images, preserving
 all 23 recognized InstallVerifier gates. The CRX download gate matched
 independently reviewed addresses on 20 x64 images; the different DCHECK Chrome
@@ -187,11 +196,11 @@ archive still reports `CRX_SIGNATURE_VERIFICATION_FAILED`; a missing developer
 proof still reports `CRX_REQUIRED_PROOF_MISSING`. Removing the DLL restores the
 download rejection. These trials use isolated copies and fresh profiles.
 
-ARM64 cross-compilation passed. The actual ARM64 hash, module and optional-gate
-executables passed under Wine/QEMU, including parallel hash boundaries. Two real
-ARM64 images reproduced the frozen scanner's plans on the x64 analysis target.
-The proxy ABI could not be validated under Wine's version-DLL loader; native
-Windows ARM64 browser execution remains untested.
+ARM64 cross-compilation passed. Module and optional-gate executables passed under
+Wine/QEMU, and two ARM64 images reproduced the frozen reports on the x64 analysis
+target. The updated hash executable cannot run in that emulator because its
+CPU-set query is unimplemented. Native ARM64 hashing, proxy ABI and browser
+execution remain untested.
 The binary hashes, sizes and individual results are recorded in
 [AUTOSCAN-RESULTS.json](AUTOSCAN-RESULTS.json).
 
@@ -202,6 +211,8 @@ must also be run on ARM64 Windows before treating that target as runtime-validat
 
 Performance experiments, compiler comparisons, unselected approaches and measured
 limits are in [PERFORMANCE-RESEARCH.md](PERFORMANCE-RESEARCH.md).
+Further prototypes, startup/cleanup measurements and the wider optimization
+catalogue are in [PERFORMANCE-DEEP-DIVE.md](PERFORMANCE-DEEP-DIVE.md).
 
 The diagnostic JSON includes hashes, inferred fields, patch bytes, skipped
 optional gates and unresolved candidates. Exit codes are 0 for a ready plan,
