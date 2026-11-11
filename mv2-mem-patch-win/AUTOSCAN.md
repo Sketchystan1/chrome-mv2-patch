@@ -64,13 +64,16 @@ until callback return. Detours' import parser still uses Windows SEH.
 BLAKE3 dispatches to upstream SSE2/SSE4.1/AVX2/AVX-512 assembly on x64, isolated
 intrinsic objects on x86, and NEON on ARM64. CPU and OS feature checks retain
 architecture fallbacks. `blake3_threads.cpp` supplies the pinned library's parallel
-join hook using balanced subtree budgets and up to seven additional workers for
-large subtrees. The total thread budget adapts to the process affinity and default
-CPU-set count, capped at eight; the scheduler places the threads. This is a bounded
-heuristic, not per-CPU benchmark autotuning. Work allocation failure falls back to
+join hook using balanced subtree budgets for large subtrees. The total thread
+budget adapts to process affinity, eligible processor groups and the default
+CPU-set count without a fixed application ceiling; the scheduler places threads.
+The 16 MiB fork threshold bounds useful work. This is not per-CPU benchmark
+autotuning. Work allocation failure falls back to
 serial hashing. No oneTBB runtime is required. SSE2 filters, bounded literal/call
 searches and one exact cached trim range reduce discovery work without changing
-the structural checks. Each boundary object reads one immutable image.
+the structural checks. Optional recognizers collect their anchor names once and
+share the reference traversal, retaining independent hit limits and ambiguity
+checks. Each boundary object reads one immutable image.
 
 ## Recognition and application
 
@@ -170,11 +173,11 @@ Measured on November 11, 2026 with MSVC 19.52.37029, Release `/MD`:
 
 | Target | `version.dll` | `mv2-scan.exe` |
 | --- | ---: | ---: |
-| x64 | 216,576 bytes | 203,776 bytes |
-| x86 | 229,888 bytes | 213,504 bytes |
-| ARM64 | 155,136 bytes | 139,264 bytes |
+| x64 | 219,136 bytes | 206,848 bytes |
+| x86 | 230,912 bytes | 214,528 bytes |
+| ARM64 | 156,672 bytes | 141,312 bytes |
 
-All x64 tests (8/8) and x86 tests (5/5) passed. The final scanners reproduced
+All x64 tests (10/10) and x86 tests (7/7) passed. The final scanners reproduced
 166 reviewed core decisions across 21 x64 and two x86 stock images, preserving
 all 23 recognized InstallVerifier gates. The CRX download gate matched
 independently reviewed addresses on 20 x64 images; the different DCHECK Chrome
@@ -213,6 +216,10 @@ Performance experiments, compiler comparisons, unselected approaches and measure
 limits are in [PERFORMANCE-RESEARCH.md](PERFORMANCE-RESEARCH.md).
 Further prototypes, startup/cleanup measurements and the wider optimization
 catalogue are in [PERFORMANCE-DEEP-DIVE.md](PERFORMANCE-DEEP-DIVE.md).
+The next shared-reference search experiment is recorded in
+[PERFORMANCE-NEXT.md](PERFORMANCE-NEXT.md).
+Microsoft threading examples, processor sizing and the native/PPL comparison are
+recorded in [PERFORMANCE-THREADING.md](PERFORMANCE-THREADING.md).
 
 The diagnostic JSON includes hashes, inferred fields, patch bytes, skipped
 optional gates and unresolved candidates. Exit codes are 0 for a ready plan,

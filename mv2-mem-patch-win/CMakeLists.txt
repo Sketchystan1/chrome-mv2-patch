@@ -165,6 +165,12 @@ endforeach()
 
 include(CTest)
 if(BUILD_TESTING)
+  add_executable(cpu-test cpu_test.cpp)
+  target_link_libraries(cpu-test PRIVATE blake3)
+  add_test(NAME native-cpu-budget COMMAND cpu-test)
+  add_executable(reference-test reference_test.cpp)
+  target_link_libraries(reference-test PRIVATE bcrypt blake3)
+  add_test(NAME native-reference-search COMMAND reference-test)
   file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/runtime-test.def"
     CONTENT "EXPORTS\n ConfigureCleanup\n QueueCleanup\n" @ONLY)
   add_library(runtime-test-helper SHARED runtime_test.cpp "${CMAKE_CURRENT_BINARY_DIR}/runtime-test.def")

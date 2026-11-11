@@ -89,7 +89,7 @@ int main() {
         }
       }
       if (!SetProcessAffinityMask(GetCurrentProcess(), original)) return 1;
-      if (!autoscan::HashThreadCount() || autoscan::HashThreadCount() > 8 || autoscan::HashThreadCount() > std::popcount(original)) return 1;
+      if (!autoscan::HashThreadCount() || autoscan::HashThreadCount() > GetActiveProcessorCount(ALL_PROCESSOR_GROUPS)) return 1;
       alignas(void*) std::array<uint8_t, 8192> cpuData{};
       std::array<ULONG, 256> saved{}; ULONG required = 0, savedCount = 0;
       GROUP_AFFINITY group{};

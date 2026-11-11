@@ -10,11 +10,18 @@ unsigned HashThreadCount() noexcept {
   DWORD_PTR mask = 0, system = 0;
   unsigned count = GetProcessAffinityMask(GetCurrentProcess(), &mask, &system) && mask
     ? std::popcount(mask) : GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+  if (mask && mask == system) {
+    std::array<USHORT, 64> groups{}; USHORT size = static_cast<USHORT>(groups.size());
+    if (GetProcessGroupAffinity(GetCurrentProcess(), &size, groups.data()) && size > 1 && size <= groups.size()) {
+      unsigned grouped = 0;
+      for (USHORT n = 0; n < size; ++n) grouped += GetActiveProcessorCount(groups[n]);
+      if (grouped) count = grouped;
+    }
+  }
   ULONG selected = 0;
   if ((GetProcessDefaultCpuSets(GetCurrentProcess(), nullptr, 0, &selected) || GetLastError() == ERROR_INSUFFICIENT_BUFFER) && selected)
     count = std::min(count, static_cast<unsigned>(selected));
-  // shortcut: cap at eight hashing threads; raise only after full-startup measurements justify it.
-  return std::clamp(count, 1u, 8u);
+  return std::max(count, 1u);
 }
 }
 

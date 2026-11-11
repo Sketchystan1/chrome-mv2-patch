@@ -54,7 +54,30 @@ bool threshold(const LiftedInsn& cmp, const LiftedInsn& jump) {
     ((cmp.imm == 2 && (jump.condition() == 14 || jump.condition() == 15)) ||
      (cmp.imm == 3 && (jump.condition() == 12 || jump.condition() == 13)));
 }
-bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& found) {
+struct RefQuery { uint32_t literal = 0; FixedList<uint32_t, 64> found; bool complete = true; };
+struct RefBatch {
+  FixedList<RefQuery, 17> queries;
+  unsigned providerCount = 0;
+  uint32_t gallery = 0;
+  bool providerAmbiguous = false, galleryAmbiguous = false, scanned = false;
+  explicit RefBatch(const PeImage& pe) {
+    auto data = pe.at(pe.rdata.rva, pe.rdata.size);
+    std::string_view hay(reinterpret_cast<const char*>(data.data()), data.size());
+    for (auto name : {std::string_view("InstallVerifier"), std::string_view("apps-gallery-url")}) {
+      bool provider = name[0] == 'I', ambiguous = false;
+      unsigned count = 0, limit = provider ? 16 : 1;
+      size_t begin = queries.size();
+      for (size_t n = hay.find(name[0]); n != std::string_view::npos; n = hay.find(name[0], n + 1)) {
+        if (name.size() + 1 > data.size() - n || memcmp(data.data() + n, name.data(), name.size()) || data[n + name.size()]) continue;
+        RefQuery query; query.literal = pe.rdata.rva + static_cast<uint32_t>(n);
+        if (++count > limit || !queries.push_back(query)) { ambiguous = true; queries.count = begin; break; }
+      }
+      if (provider) { providerAmbiguous = ambiguous; providerCount = ambiguous ? 0 : count; }
+      else { galleryAmbiguous = ambiguous; if (!ambiguous && count) gallery = queries.back().literal; }
+    }
+  }
+};
+void scanReferences(const PeImage& pe, std::span<RefQuery> queries) {
   auto code = pe.at(pe.text.rva, pe.text.size);
 #if defined(AUTOSCAN_ARM64)
   for (size_t n = 0; n + 8 <= code.size(); n += 4) {
@@ -63,8 +86,8 @@ bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& fo
         (next & 31) != (word & 31) || ((next >> 5) & 31) != (word & 31)) continue;
     int32_t pages = static_cast<int32_t>((((word >> 5) & 0x7ffff) << 2 | ((word >> 29) & 3)) << 11) >> 11;
     uint32_t pc = pe.text.rva + static_cast<uint32_t>(n);
-    if (static_cast<int64_t>(pc & ~0xfffu) + int64_t{pages} * 4096 + ((next >> 10) & 0xfff) == literal &&
-        !found.push_back(pc)) return false;
+    int64_t target = static_cast<int64_t>(pc & ~0xfffu) + int64_t{pages} * 4096 + ((next >> 10) & 0xfff);
+    for (auto& query : queries) if (query.complete && target == query.literal && !query.found.push_back(pc)) query.complete = false;
   }
 #else
   for (size_t n = 2; n + 4 <= code.size(); ++n) {
@@ -81,11 +104,15 @@ bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& fo
     if (op != 0x8d && !(n >= 3 && code[n - 3] == 0x0f &&
         (op == 0x10 || op == 0x11 || op == 0x28 || op == 0x29 || op == 0x6f || op == 0x7f))) continue;
     int64_t end = static_cast<int64_t>(pe.text.rva) + n + 4;
-    if (end + ReadInsn<int32_t>(code.data() + n) != literal) continue;
+    int64_t target = end + ReadInsn<int32_t>(code.data() + n);
 #else
-    if (ReadInsn<uint32_t>(code.data() + n) != pe.imageBase + literal) continue;
+    int64_t target = int64_t{ReadInsn<uint32_t>(code.data() + n)} - static_cast<int64_t>(pe.imageBase);
     int64_t end = static_cast<int64_t>(pe.text.rva) + n + 4;
 #endif
+    RefQuery* matching = nullptr;
+    for (auto& query : queries) if (query.complete && query.literal == target) { matching = &query; break; }
+    if (!matching) continue;
+    auto& found = matching->found;
     uint32_t first = static_cast<uint32_t>(std::max<int64_t>(pe.text.rva, end - 15));
     for (uint32_t pc = first; pc + 4 < end; ++pc) {
       auto i = Lift(pe.code(pc), pc);
@@ -94,30 +121,32 @@ bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& fo
       if (!(i.detail & 0x100) || (op == 0x8d && i.width() != 8)) continue;
 #else
       if (!((i.op == Op::MovReg && i.src == NoReg) || (i.op == Op::Other && i.other() == Other::Push && i.dst == NoReg) ||
-            (i.memory() && i.disp == static_cast<int32_t>(pe.imageBase + literal)))) continue;
+            (i.memory() && i.disp == static_cast<int32_t>(pe.imageBase + matching->literal)))) continue;
 #endif
-      if (!found.push_back(pc)) return false;
+      if (!found.push_back(pc)) { matching->complete = false; break; }
     }
   }
 #endif
-  return true;
 }
-void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& program, const std::array<int64_t, 5>& layout, Report& report) {
+bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& found, RefBatch& batch) {
+  if (!batch.scanned) { batch.scanned = true; scanReferences(pe, {batch.queries.items.data(), batch.queries.size()}); }
+  for (const auto& query : batch.queries) if (query.literal == literal) { found = query.found; return query.complete; }
+  RefQuery query; query.literal = literal; scanReferences(pe, {&query, 1}); found = query.found; return query.complete;
+}
+
+void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& program, const std::array<int64_t, 5>& layout, Report& report, RefBatch& batch) {
   auto data = pe.at(pe.rdata.rva, pe.rdata.size), code = pe.at(pe.text.rva, pe.text.size);
-  constexpr char name[] = "InstallVerifier";
   FixedList<uint32_t, 16> literals, getters;
   auto unique = [](auto& list, uint32_t value) {
     for (auto n : list) if (n == value) return true;
     return list.push_back(value);
   };
-  std::string_view hay(reinterpret_cast<const char*>(data.data()), data.size());
-  for (size_t n = hay.find(name[0]); n != std::string_view::npos; n = hay.find(name[0], n + 1))
-    if (sizeof(name) <= data.size() - n && !memcmp(data.data() + n, name, sizeof(name)))
-    if (!literals.push_back(pe.rdata.rva + static_cast<uint32_t>(n))) { report.installVerifier = "ambiguous provider name"; return; }
+  if (batch.providerAmbiguous) { report.installVerifier = "ambiguous provider name"; return; }
+  for (unsigned n = 0; n < batch.providerCount; ++n) literals.push_back(batch.queries[n].literal);
   if (literals.empty()) { report.installVerifier = "provider name absent"; return; }
   for (auto literal : literals) {
     FixedList<uint32_t, 64> refs;
-    if (!references(pe, literal, refs)) { report.installVerifier = "too many provider references"; return; }
+    if (!references(pe, literal, refs, batch)) { report.installVerifier = "too many provider references"; return; }
     for (auto pc : refs) {
       auto range = boundaries.find(pc);
       if (!range || range.end - range.begin > 256 || !program.build(pe, range) || !program.at(pc)) continue;
@@ -321,21 +350,16 @@ bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Progra
 }
 #endif
 
-void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& program, Report& report) {
+void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& program, Report& report, RefBatch& batch) {
   auto data = pe.at(pe.rdata.rva, pe.rdata.size), code = pe.at(pe.text.rva, pe.text.size);
-  constexpr char name[] = "apps-gallery-url";
   constexpr unsigned argumentReg = StackReg == 31 ? 0 : 1;
   uint32_t literal = 0, installer = 0; int32_t reasonOffset = 0;
-  std::string_view hay(reinterpret_cast<const char*>(data.data()), data.size());
-  for (size_t n = hay.find(name[0]); n != std::string_view::npos; n = hay.find(name[0], n + 1))
-    if (sizeof(name) <= data.size() - n && !memcmp(data.data() + n, name, sizeof(name))) {
-    if (literal) { report.crxDownload = "ambiguous gallery switch"; return; }
-    literal = pe.rdata.rva + static_cast<uint32_t>(n);
-  }
+  if (batch.galleryAmbiguous) { report.crxDownload = "ambiguous gallery switch"; return; }
+  literal = batch.gallery;
   if (!literal) { report.crxDownload = "gallery switch absent"; return; }
   auto call = [](const Node* n) { return n && n->insn.op == Op::Other && n->insn.other() == Other::Call && n->insn.target(); };
   FixedList<uint32_t, 64> refs;
-  if (!references(pe, literal, refs)) { report.crxDownload = "too many gallery references"; return; }
+  if (!references(pe, literal, refs, batch)) { report.crxDownload = "too many gallery references"; return; }
   for (auto pc : refs) {
     auto range = boundaries.find(pc);
     if (!range || range.end - range.begin > 1024 || !program.build(pe, range) || !program.at(pc)) continue;
@@ -590,8 +614,9 @@ Report Analyze(std::span<const uint8_t> bytes) {
   report.installVerifier = "optional provider not recognized by the bounded lifter";
   report.crxDownload = "optional CRX downloads not recognized by the bounded lifter";
   if (report.ready() && report.gates.size() < 64) {
-    installVerifier(pe, boundaries, program, layout, report);
-    if (report.gates.size() < 64) crxDownload(pe, boundaries, program, report);
+    RefBatch batch(pe);
+    installVerifier(pe, boundaries, program, layout, report, batch);
+    if (report.gates.size() < 64) crxDownload(pe, boundaries, program, report, batch);
     std::sort(report.gates.begin(), report.gates.end(), [](const Gate& a, const Gate& b) { return a.rva < b.rva; });
   }
   return report;

@@ -33,8 +33,8 @@
       "architecture": "x64",
       "binary": "version.dll",
       "path": "build\\x64\\version.dll",
-      "bytes": 216576,
-      "sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
+      "bytes": 219136,
+      "sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
       "machine_verified": true,
       "no_rwx_sections": true
     },
@@ -42,8 +42,8 @@
       "architecture": "x64",
       "binary": "mv2-scan.exe",
       "path": "out\\x64\\mv2-scan.exe",
-      "bytes": 203776,
-      "sha256": "4dc8fb3f8f7023784d9ad7fa5d87a2d9acc8d3825b17e88bacadb460cb58350d",
+      "bytes": 206848,
+      "sha256": "c15b2366904ec31bbe6b8abfd628b8f02f498788effb2627900bb3742a71177b",
       "machine_verified": true,
       "no_rwx_sections": true
     },
@@ -51,8 +51,8 @@
       "architecture": "x86",
       "binary": "version.dll",
       "path": "build\\x86\\version.dll",
-      "bytes": 229888,
-      "sha256": "7e6afdbcd357ab50c032779147192369dcbc3737c259caa9c1b23e95497dc73f",
+      "bytes": 230912,
+      "sha256": "c17d3faf9ef0a4a79dc8aa96adf08921211b431a5d5803f3bdf7679faf33c98a",
       "machine_verified": true,
       "no_rwx_sections": true
     },
@@ -60,8 +60,8 @@
       "architecture": "x86",
       "binary": "mv2-scan.exe",
       "path": "out\\x86\\mv2-scan.exe",
-      "bytes": 213504,
-      "sha256": "fb8977c49bd7403550771cbb0035497b8f5482f86f581318306b582d7782fb66",
+      "bytes": 214528,
+      "sha256": "e8e87caa10295cd6a4275ef55015f0ef08f15d38c0acc64caa816fe733d3eac6",
       "machine_verified": true,
       "no_rwx_sections": true
     },
@@ -69,8 +69,8 @@
       "architecture": "arm64",
       "binary": "version.dll",
       "path": "build\\arm64\\version.dll",
-      "bytes": 155136,
-      "sha256": "b949c44e9c9f322843635ba8a46908371f6ff7b51877746e4e074845863d8109",
+      "bytes": 156672,
+      "sha256": "ab3354759033b8d491e32be3d5f9c13013f6c75a16fafb4daa7f1735d2cb6d57",
       "machine_verified": true,
       "no_rwx_sections": true
     },
@@ -78,8 +78,8 @@
       "architecture": "arm64",
       "binary": "mv2-scan.exe",
       "path": "out\\arm64\\mv2-scan.exe",
-      "bytes": 139264,
-      "sha256": "42f681c11e7624fc807ab31639619ea789b3e6ea19297bf13b0d9acde2e9f886",
+      "bytes": 141312,
+      "sha256": "2cbbcb0e9723546e307ea679eed2e76215e26fe4bc00de018b8a97285e787ee0",
       "machine_verified": true,
       "no_rwx_sections": true
     }
@@ -89,6 +89,14 @@
       "architecture": "x64",
       "passed": true,
       "tests": [
+        {
+          "name": "native-cpu-budget",
+          "passed": true
+        },
+        {
+          "name": "native-reference-search",
+          "passed": true
+        },
         {
           "name": "native-runtime-cleanup",
           "passed": true
@@ -128,6 +136,14 @@
       "passed": true,
       "tests": [
         {
+          "name": "native-cpu-budget",
+          "passed": true
+        },
+        {
+          "name": "native-reference-search",
+          "passed": true
+        },
+        {
           "name": "native-runtime-cleanup",
           "passed": true
         },
@@ -157,7 +173,7 @@
     "install_verifier_gates": 23,
     "crx_download_gates": 20,
     "optional_gates": 43,
-    "comparison": "Complete reports identical to frozen reviewed outputs on 21 x64 and 2 x86 images.",
+    "comparison": "Complete reports match 21 x64 and 2 x86 frozen reviewed images after shared reference collection.",
     "results": [
       {
         "version": "152.0.7977.82",
@@ -372,14 +388,14 @@
     {
       "version": "159.0.8153.0 Official Canary x64",
       "source_sha256": "01b6e13ca5a810905ff878c657c14c335b368f26a02450f93d320ee606032429",
-      "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-      "extension_id": "cdapjhldiemogoeffkbekmhbdhgdcick",
+      "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+      "extension_id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
       "phases": [
         {
           "phase": "stock",
           "offstore_enabled": false,
           "offstore_launch_flags": [],
-          "startup_seconds": 1.217,
+          "startup_seconds": 1.631,
           "memory_gates_checked": 9,
           "sandboxed_renderers": 9,
           "extensions": {},
@@ -395,13 +411,13 @@
           "offstore_enabled": false,
           "offstore_launch_flags": [],
           "dll_sha256": "6476af305d88dffac498bbef48deccf41beb1486e5634831954a18db23fc9765",
-          "startup_seconds": 5.032,
+          "startup_seconds": 7.218,
           "memory_gates_checked": 9,
           "cache_reused": false,
           "sandboxed_renderers": 9,
           "extensions": {
             "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
               "name": "Native scanner MV2 control",
               "state": "DISABLED",
               "location": "UNKNOWN",
@@ -422,9 +438,9 @@
               "manifestErrors": [],
               "runtimeErrors": []
             },
-            "enableError": "Extension cdapjhldiemogoeffkbekmhbdhgdcick cannot be modified by user.",
+            "enableError": "Extension pmkajhhpphmimkmcfknmbgjipjplaomk cannot be modified by user.",
             "after": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
               "name": "Native scanner MV2 control",
               "state": "DISABLED",
               "location": "UNKNOWN",
@@ -457,14 +473,14 @@
           "phase": "patched",
           "offstore_enabled": true,
           "offstore_launch_flags": [],
-          "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-          "startup_seconds": 1.611,
+          "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+          "startup_seconds": 2.409,
           "memory_gates_checked": 9,
           "cache_reused": false,
-          "sandboxed_renderers": 6,
+          "sandboxed_renderers": 7,
           "extensions": {
             "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
               "name": "Native scanner MV2 control",
               "state": "ENABLED",
               "location": "UNKNOWN",
@@ -486,7 +502,7 @@
               "runtimeErrors": []
             },
             "after": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
               "name": "Native scanner MV2 control",
               "state": "ENABLED",
               "location": "UNKNOWN",
@@ -521,14 +537,14 @@
           "phase": "restart",
           "offstore_enabled": true,
           "offstore_launch_flags": [],
-          "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-          "startup_seconds": 0.816,
+          "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+          "startup_seconds": 0.805,
           "memory_gates_checked": 9,
           "cache_reused": true,
-          "sandboxed_renderers": 7,
+          "sandboxed_renderers": 6,
           "extensions": {
             "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
               "name": "Native scanner MV2 control",
               "state": "ENABLED",
               "location": "UNKNOWN",
@@ -550,7 +566,393 @@
               "runtimeErrors": []
             },
             "after": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "ENABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": false,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": false,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            }
+          },
+          "requests": {
+            "/mv2-started": 2,
+            "/mv3-started": 1,
+            "/": 1,
+            "/page-ready": 1,
+            "/favicon.ico": 1,
+            "/blocked-success": 1
+          }
+        },
+        {
+          "phase": "restore",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "startup_seconds": 0.608,
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 6,
+          "extensions": {
+            "before": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "DISABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": true,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": true,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            },
+            "enableError": "Extension pmkajhhpphmimkmcfknmbgjipjplaomk cannot be modified by user."
+          },
+          "requests": {
+            "/mv3-started": 1,
+            "/": 1,
+            "/page-ready": 1,
+            "/favicon.ico": 1
+          }
+        }
+      ],
+      "passed": true,
+      "registry_cleanup": true,
+      "disk_unchanged": true
+    },
+    {
+      "version": "159.0.8148.1 DCHECK",
+      "source_sha256": "ae231acb188b19d5a880adb3224634a21a420de91b45defda81e4a076af8c3b1",
+      "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+      "extension_id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+      "phases": [
+        {
+          "phase": "stock",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "startup_seconds": 2.426,
+          "memory_gates_checked": 11,
+          "sandboxed_renderers": 9,
+          "extensions": {},
+          "requests": {
+            "/mv3-started": 1,
+            "/": 1,
+            "/page-ready": 1,
+            "/favicon.ico": 1
+          }
+        },
+        {
+          "phase": "patched",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+          "startup_seconds": 5.812,
+          "memory_gates_checked": 11,
+          "cache_reused": false,
+          "sandboxed_renderers": 10,
+          "extensions": {
+            "before": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "DISABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": false,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": false,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            },
+            "after": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "ENABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": false,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": false,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            }
+          },
+          "requests": {
+            "/mv3-started": 1,
+            "/mv2-started": 1,
+            "/": 1,
+            "/page-ready": 1,
+            "/favicon.ico": 1,
+            "/blocked-success": 1
+          }
+        },
+        {
+          "phase": "restart",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+          "startup_seconds": 2.409,
+          "memory_gates_checked": 11,
+          "cache_reused": true,
+          "sandboxed_renderers": 7,
+          "extensions": {
+            "before": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "ENABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": false,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": false,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            },
+            "after": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "ENABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": false,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": false,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            }
+          },
+          "requests": {
+            "/mv2-started": 2,
+            "/mv3-started": 1,
+            "/": 1,
+            "/page-ready": 1,
+            "/favicon.ico": 1,
+            "/blocked-success": 1
+          }
+        },
+        {
+          "phase": "restore",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "startup_seconds": 0.602,
+          "memory_gates_checked": 11,
+          "sandboxed_renderers": 6,
+          "extensions": {
+            "before": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "DISABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": true,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": true,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            },
+            "enableError": "Extension pmkajhhpphmimkmcfknmbgjipjplaomk cannot be modified by user."
+          },
+          "requests": {
+            "/mv3-started": 1,
+            "/": 1,
+            "/page-ready": 1,
+            "/favicon.ico": 1
+          }
+        }
+      ],
+      "passed": true,
+      "registry_cleanup": true,
+      "disk_unchanged": true
+    },
+    {
+      "version": "157.0.8103.39 user Chromium",
+      "source_sha256": "82939be5f5b6043e72336bb6386a69cb3126302cc36a604d4cb1e2dee829eeb8",
+      "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+      "extension_id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+      "phases": [
+        {
+          "phase": "stock",
+          "offstore_enabled": false,
+          "offstore_launch_flags": [],
+          "startup_seconds": 1.804,
+          "memory_gates_checked": 9,
+          "sandboxed_renderers": 8,
+          "extensions": {},
+          "requests": {
+            "/mv3-started": 1,
+            "/": 1,
+            "/page-ready": 1,
+            "/favicon.ico": 1
+          }
+        },
+        {
+          "phase": "patched",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+          "startup_seconds": 1.404,
+          "memory_gates_checked": 9,
+          "cache_reused": false,
+          "sandboxed_renderers": 9,
+          "extensions": {
+            "before": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "DISABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": false,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": false,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            },
+            "after": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "ENABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": false,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": false,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            }
+          },
+          "requests": {
+            "/mv3-started": 1,
+            "/mv2-started": 1,
+            "/": 1,
+            "/page-ready": 1,
+            "/favicon.ico": 1,
+            "/blocked-success": 1
+          }
+        },
+        {
+          "phase": "restart",
+          "offstore_enabled": true,
+          "offstore_launch_flags": [],
+          "dll_sha256": "a94452a7ba5973857197cf8646ed763c97e58b0c207f0ab3d9ccded4b4e97f71",
+          "startup_seconds": 0.608,
+          "memory_gates_checked": 9,
+          "cache_reused": true,
+          "sandboxed_renderers": 7,
+          "extensions": {
+            "before": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
+              "name": "Native scanner MV2 control",
+              "state": "ENABLED",
+              "location": "UNKNOWN",
+              "isAffectedByMV2Deprecation": false,
+              "disableReasons": {
+                "blockedByPolicy": false,
+                "corruptInstall": false,
+                "custodianApprovalRequired": false,
+                "disabledByAnotherExtension": false,
+                "parentDisabledPermissions": false,
+                "publishedInStoreRequired": false,
+                "reloading": false,
+                "suspiciousInstall": false,
+                "unsupportedDeveloperExtension": false,
+                "unsupportedManifestVersion": false,
+                "updateRequired": false
+              },
+              "manifestErrors": [],
+              "runtimeErrors": []
+            },
+            "after": {
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
               "name": "Native scanner MV2 control",
               "state": "ENABLED",
               "location": "UNKNOWN",
@@ -590,7 +992,7 @@
           "sandboxed_renderers": 6,
           "extensions": {
             "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
+              "id": "pmkajhhpphmimkmcfknmbgjipjplaomk",
               "name": "Native scanner MV2 control",
               "state": "DISABLED",
               "location": "UNKNOWN",
@@ -611,393 +1013,7 @@
               "manifestErrors": [],
               "runtimeErrors": []
             },
-            "enableError": "Extension cdapjhldiemogoeffkbekmhbdhgdcick cannot be modified by user."
-          },
-          "requests": {
-            "/mv3-started": 1,
-            "/": 1,
-            "/page-ready": 1,
-            "/favicon.ico": 1
-          }
-        }
-      ],
-      "passed": true,
-      "registry_cleanup": true,
-      "disk_unchanged": true
-    },
-    {
-      "version": "159.0.8148.1 DCHECK",
-      "source_sha256": "ae231acb188b19d5a880adb3224634a21a420de91b45defda81e4a076af8c3b1",
-      "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-      "extension_id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-      "phases": [
-        {
-          "phase": "stock",
-          "offstore_enabled": false,
-          "offstore_launch_flags": [],
-          "startup_seconds": 3.609,
-          "memory_gates_checked": 11,
-          "sandboxed_renderers": 9,
-          "extensions": {},
-          "requests": {
-            "/mv3-started": 1,
-            "/": 1,
-            "/page-ready": 1,
-            "/favicon.ico": 1
-          }
-        },
-        {
-          "phase": "patched",
-          "offstore_enabled": true,
-          "offstore_launch_flags": [],
-          "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-          "startup_seconds": 5.614,
-          "memory_gates_checked": 11,
-          "cache_reused": false,
-          "sandboxed_renderers": 10,
-          "extensions": {
-            "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "DISABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": false,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            },
-            "after": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "ENABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": false,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            }
-          },
-          "requests": {
-            "/mv3-started": 1,
-            "/mv2-started": 1,
-            "/": 1,
-            "/page-ready": 1,
-            "/favicon.ico": 1,
-            "/blocked-success": 1
-          }
-        },
-        {
-          "phase": "restart",
-          "offstore_enabled": true,
-          "offstore_launch_flags": [],
-          "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-          "startup_seconds": 3.016,
-          "memory_gates_checked": 11,
-          "cache_reused": true,
-          "sandboxed_renderers": 7,
-          "extensions": {
-            "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "ENABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": false,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            },
-            "after": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "ENABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": false,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            }
-          },
-          "requests": {
-            "/mv2-started": 2,
-            "/mv3-started": 1,
-            "/": 1,
-            "/page-ready": 1,
-            "/favicon.ico": 1,
-            "/blocked-success": 1
-          }
-        },
-        {
-          "phase": "restore",
-          "offstore_enabled": false,
-          "offstore_launch_flags": [],
-          "startup_seconds": 0.604,
-          "memory_gates_checked": 11,
-          "sandboxed_renderers": 6,
-          "extensions": {
-            "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "DISABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": true,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": true,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            },
-            "enableError": "Extension cdapjhldiemogoeffkbekmhbdhgdcick cannot be modified by user."
-          },
-          "requests": {
-            "/mv3-started": 1,
-            "/": 1,
-            "/page-ready": 1,
-            "/favicon.ico": 1
-          }
-        }
-      ],
-      "passed": true,
-      "registry_cleanup": true,
-      "disk_unchanged": true
-    },
-    {
-      "version": "157.0.8103.39 user Chromium",
-      "source_sha256": "82939be5f5b6043e72336bb6386a69cb3126302cc36a604d4cb1e2dee829eeb8",
-      "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-      "extension_id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-      "phases": [
-        {
-          "phase": "stock",
-          "offstore_enabled": false,
-          "offstore_launch_flags": [],
-          "startup_seconds": 3.847,
-          "memory_gates_checked": 9,
-          "sandboxed_renderers": 8,
-          "extensions": {},
-          "requests": {
-            "/mv3-started": 1,
-            "/": 1,
-            "/page-ready": 1,
-            "/favicon.ico": 1
-          }
-        },
-        {
-          "phase": "patched",
-          "offstore_enabled": true,
-          "offstore_launch_flags": [],
-          "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-          "startup_seconds": 3.23,
-          "memory_gates_checked": 9,
-          "cache_reused": false,
-          "sandboxed_renderers": 9,
-          "extensions": {
-            "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "DISABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": false,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            },
-            "after": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "ENABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": false,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            }
-          },
-          "requests": {
-            "/mv3-started": 1,
-            "/mv2-started": 1,
-            "/": 1,
-            "/page-ready": 1,
-            "/favicon.ico": 1,
-            "/blocked-success": 1
-          }
-        },
-        {
-          "phase": "restart",
-          "offstore_enabled": true,
-          "offstore_launch_flags": [],
-          "dll_sha256": "43eca83a889394211df81d744c35d473db4f383c1578307ae57eace7871c221a",
-          "startup_seconds": 0.608,
-          "memory_gates_checked": 9,
-          "cache_reused": true,
-          "sandboxed_renderers": 7,
-          "extensions": {
-            "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "ENABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": false,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            },
-            "after": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "ENABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": false,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": false,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            }
-          },
-          "requests": {
-            "/mv2-started": 2,
-            "/mv3-started": 1,
-            "/": 1,
-            "/page-ready": 1,
-            "/favicon.ico": 1,
-            "/blocked-success": 1
-          }
-        },
-        {
-          "phase": "restore",
-          "offstore_enabled": false,
-          "offstore_launch_flags": [],
-          "startup_seconds": 0.415,
-          "memory_gates_checked": 9,
-          "sandboxed_renderers": 6,
-          "extensions": {
-            "before": {
-              "id": "cdapjhldiemogoeffkbekmhbdhgdcick",
-              "name": "Native scanner MV2 control",
-              "state": "DISABLED",
-              "location": "UNKNOWN",
-              "isAffectedByMV2Deprecation": true,
-              "disableReasons": {
-                "blockedByPolicy": false,
-                "corruptInstall": false,
-                "custodianApprovalRequired": false,
-                "disabledByAnotherExtension": false,
-                "parentDisabledPermissions": false,
-                "publishedInStoreRequired": false,
-                "reloading": false,
-                "suspiciousInstall": false,
-                "unsupportedDeveloperExtension": false,
-                "unsupportedManifestVersion": true,
-                "updateRequired": false
-              },
-              "manifestErrors": [],
-              "runtimeErrors": []
-            },
-            "enableError": "Extension cdapjhldiemogoeffkbekmhbdhgdcick cannot be modified by user."
+            "enableError": "Extension pmkajhhpphmimkmcfknmbgjipjplaomk cannot be modified by user."
           },
           "requests": {
             "/mv3-started": 1,
@@ -1030,12 +1046,14 @@
     "emulated_modules_passed": true,
     "emulated_optional_gates_passed": true,
     "emulated_hash_passed": false,
-    "emulated_hash_limitation": "The emulator aborts on its unimplemented CPU-set query. Native ARM64 hash/ABI/browser tests remain required."
+    "emulated_hash_limitation": "The emulator aborts on its unimplemented CPU-set query. Native ARM64 hash/ABI/browser tests remain required.",
+    "emulated_reference_checks_passed": true,
+    "emulated_cpu_policy_checks_passed": true
   },
   "limits": [
     "No controlled cold-boot benchmark.",
-    "No native ARM64 runtime validation; the emulator lacks the CPU-set query.",
-    "Worker selection is an availability heuristic; globally optimal placement requires hardware-specific measurements.",
+    "No native ARM64 runtime validation; the emulator lacks the real CPU-set query.",
+    "Processor counts above eight are policy-tested with simulated topology, not benchmarked on matching hardware.",
     "Deferred cleanup still uses CPU and briefly retains the stock mapping."
   ],
   "build_layout": {
@@ -1049,9 +1067,9 @@
   },
   "packaging_check": {
     "passed": true,
-    "archive": "_scratch\\perf-deep-dive-2026-11-11\\version.dll-v1.17.0-balanced.zip",
-    "sha256": "eacf94148cc1ce1fa1c61f18c3b834e99a83afe422b4a95b8b9d10504616ab1d",
-    "bytes": 281636,
+    "archive": "_scratch\\perf-threading-2026-11-11\\version.dll-v1.17.0-available.zip",
+    "bytes": 284304,
+    "sha256": "f7b7a8be9ab49c8306edb7f99118e9428ef38e56c374ce623db7d3660c5d1ff6",
     "files": [
       "BLAKE3-LICENSE.md",
       "Detours-LICENSE.md",
@@ -1237,16 +1255,16 @@
     "runtime_identity": "full-file BLAKE3-256",
     "diagnostic_sha256_retained": true,
     "wire_protocol": 5,
-    "maximum_hash_threads": 8,
     "parallel_subtree_minimum_bytes": 16777216,
     "license": "CC0",
     "balanced_subtree_budgets": true,
-    "adaptive_thread_budget": "Process affinity and default CPU-set count, bounded to 1..8.",
-    "core_placement": "Scheduler-managed; no per-startup benchmark calibration."
+    "adaptive_thread_budget": "Available process affinity/processor groups and default CPU-set count; no fixed application ceiling.",
+    "core_placement": "Scheduler-managed; CPU availability and work size bound scheduling.",
+    "processor_groups_supported": true
   },
-  "source_commit": "8f56f5cc7f50573bc4b72157032cfc17194533fe",
+  "source_commit": "56f893c23b6ed86a86c8a96d84c00366588e464d",
   "source_sha256": {
-    "mv2-mem-patch-win\\autoscan.cpp": "05117890e26dbb0ccf32e5e9d4a34799109d5426df79813ed61aeb3753050a48",
+    "mv2-mem-patch-win\\autoscan.cpp": "332d3e555b3641df4ce6432c48333053a10b6ae54230f997fc4a0541431cd329",
     "mv2-mem-patch-win\\autoscan.h": "26ad10165c1fdbebd9cdef49fb723193d9c8dabf77aa3950bea5e80775f1da03",
     "mv2-mem-patch-win\\autoscan_apply.cpp": "6e00d0d4ebc8c293fdeba992b91bf2c647db1fd804a41079b9b7e5e056e77b76",
     "mv2-mem-patch-win\\autoscan_cache.cpp": "8d4dedd85e3cf3e48df4096a4cf969d4ba6eded2ce2ba48aa3aebf359755e8ba",
@@ -1255,17 +1273,19 @@
     "mv2-mem-patch-win\\autoscan_runtime.cpp": "8f82a9f48c54ee2904ae240331737378431e2d8688e2ba9e187ce96f4b487822",
     "mv2-mem-patch-win\\autoscan_runtime.h": "83478a7f0352d448ad71e9276af41e7f029da74825f0981a422aaeafc2228d69",
     "mv2-mem-patch-win\\autoscan_test.cpp": "fc39d79f96b3863577d44b8ca82ee24f13d689736cd737765a5da1520f9b544e",
-    "mv2-mem-patch-win\\blake3_threads.cpp": "334cf53a83ecb5a248229196d1e4e492fd4fc492f068d6ab21fb745c78a58b54",
+    "mv2-mem-patch-win\\blake3_threads.cpp": "82ffe30e0dd9572ca05fcbc4746c5c35177c23a49df0c2236d1ee0e469976d90",
     "mv2-mem-patch-win\\boundaries.hpp": "2617b039b375ee198c91cff1a284431dfe03272d0cf460c838bb9c58d989f916",
     "mv2-mem-patch-win\\check-size.cmake": "39d404ee8294ae6f24431621be236a8e3882625002129e0cfd107b30b0a23101",
-    "mv2-mem-patch-win\\CMakeLists.txt": "49696c9b98e5c21f3b93ff36bd775ecd18d39c805c885cc036bc0f36cf353ab8",
-    "mv2-mem-patch-win\\hash_test.cpp": "00e7f7a74c954598c7f64c8054a02254b1b887fb53945402b23805fc97e7d32b",
+    "mv2-mem-patch-win\\CMakeLists.txt": "f2342c9dbacd3c13f07408f6a1fb1a6e471cb68454ca3d9e6f82134792219642",
+    "mv2-mem-patch-win\\cpu_test.cpp": "d231364814e7616503993fccc4796ddee9a455f2208e596ba12769bb84f7a550",
+    "mv2-mem-patch-win\\hash_test.cpp": "a04c32b22fef884bca22ce0a995c4909b5d9822cc9042b4be11074a520e0baee",
     "mv2-mem-patch-win\\hook.hpp": "989ac7734b78bc0ff75dc6184408d68299d043a0a7243478be14349d09231953",
     "mv2-mem-patch-win\\lifter.hpp": "6180d2016f5a4e9b08dbca6dabed988b3930ab9ad6aa3d42b87ec3f851c2f0b7",
     "mv2-mem-patch-win\\modules_test.cpp": "1dec311c675f0c070657169a61ecb0ac31a28e5f1b70bfae4d109c836f069c7c",
     "mv2-mem-patch-win\\mv2-mem-patch.cpp": "00f3855a5cce9e3cc1b0ddcc23d36aec667f8e86cbc3bd883b935598bb156bd1",
     "mv2-mem-patch-win\\optional_test.cpp": "1a047178b28673d338e08d05dcc51a4038ff79075158e6e43b1c2fe03f34e73c",
     "mv2-mem-patch-win\\proxy.cpp": "9c42ed8b69e6ada58b661344000e2c6661e94185f5473f5416a1e0291ede4a36",
+    "mv2-mem-patch-win\\reference_test.cpp": "7b07f18022e55d26f79e2f685289107dccdd7318d03e57a854e0568e56a76957",
     "mv2-mem-patch-win\\runtime_test.cpp": "dbf21ce8d686999410a4fd3c32663d23f894d501cab51cc45fcdc71d58df8da5",
     "mv2-mem-patch-win\\solver.hpp": "c7d0109a0626d2fd6dab892c848612922033decca9a54deff3adfe8ffaa9327a",
     "mv2-mem-patch-win\\test_launch.cpp": "3bfd881be1ab5c37a4b1dc8e01987cba859389f92162c9fe2c06ac90afee87ed",

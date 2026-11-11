@@ -1,0 +1,625 @@
+{
+  "research_date": "2026-11-11",
+  "base_commit": "56f893c23b6ed86a86c8a96d84c00366588e464d",
+  "working_tree_changes": true,
+  "samples_per_provider_per_image": 20,
+  "ordering": "native,PPL,PPL,native",
+  "controlled_cold_boot": false,
+  "file_cache_flushed": false,
+  "summary": [
+    {
+      "binary": "C:\\Users\\Admin\\source\\repos\\chrome-mv2-patch\\_scratch\\chrome-153.0.8010.37-win64.dll",
+      "bytes": 301659288,
+      "native_median_ms": 58.648,
+      "ppl_median_ms": 62.321
+    },
+    {
+      "binary": "C:\\Users\\Admin\\source\\repos\\chrome-mv2-patch\\_scratch\\159-runtime-canary\\chrome-win64\\159.0.8148.1\\chrome.dll",
+      "bytes": 535535768,
+      "native_median_ms": 108.721,
+      "ppl_median_ms": 104.563
+    }
+  ],
+  "observations": [
+    {
+      "binary": "C:\\Users\\Admin\\source\\repos\\chrome-mv2-patch\\_scratch\\chrome-153.0.8010.37-win64.dll",
+      "bytes": 301659288,
+      "blake3": "3252214addff07a248f2e7c99b61b8440b42c6ddf37d0b6dae85cbeeba043b48",
+      "rows": [
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 0,
+          "wall_ms": 60.35050004720688,
+          "cpu_ms": 281.25
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 1,
+          "wall_ms": 60.198300052434206,
+          "cpu_ms": 359.375
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 2,
+          "wall_ms": 58.83660004474223,
+          "cpu_ms": 390.625
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 3,
+          "wall_ms": 59.955700067803264,
+          "cpu_ms": 312.5
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 4,
+          "wall_ms": 58.15340019762516,
+          "cpu_ms": 281.25
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 5,
+          "wall_ms": 60.96679996699095,
+          "cpu_ms": 250.0
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 6,
+          "wall_ms": 59.05150016769767,
+          "cpu_ms": 390.625
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 7,
+          "wall_ms": 58.45859996043146,
+          "cpu_ms": 390.625
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 8,
+          "wall_ms": 58.90940013341606,
+          "cpu_ms": 328.125
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 9,
+          "wall_ms": 58.26080008409917,
+          "cpu_ms": 234.375
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 0,
+          "wall_ms": 60.60219998471439,
+          "cpu_ms": 265.625
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 1,
+          "wall_ms": 59.6427998971194,
+          "cpu_ms": 406.25
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 2,
+          "wall_ms": 66.92900019697845,
+          "cpu_ms": 359.375
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 3,
+          "wall_ms": 67.39689991809428,
+          "cpu_ms": 265.625
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 4,
+          "wall_ms": 65.53110014647245,
+          "cpu_ms": 328.125
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 5,
+          "wall_ms": 67.16310000047088,
+          "cpu_ms": 328.125
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 6,
+          "wall_ms": 65.69020007736981,
+          "cpu_ms": 343.75
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 7,
+          "wall_ms": 67.50530004501343,
+          "cpu_ms": 250.0
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 8,
+          "wall_ms": 65.7387999817729,
+          "cpu_ms": 328.125
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 9,
+          "wall_ms": 61.85130006633699,
+          "cpu_ms": 375.0
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 0,
+          "wall_ms": 62.791300006210804,
+          "cpu_ms": 375.0
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 1,
+          "wall_ms": 60.294599970802665,
+          "cpu_ms": 312.5
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 2,
+          "wall_ms": 58.11439990065992,
+          "cpu_ms": 328.125
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 3,
+          "wall_ms": 58.787900023162365,
+          "cpu_ms": 281.25
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 4,
+          "wall_ms": 58.34099999628961,
+          "cpu_ms": 390.625
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 5,
+          "wall_ms": 58.59169992618263,
+          "cpu_ms": 343.75
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 6,
+          "wall_ms": 58.56909998692572,
+          "cpu_ms": 359.375
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 7,
+          "wall_ms": 58.226600056514144,
+          "cpu_ms": 281.25
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 8,
+          "wall_ms": 64.95149992406368,
+          "cpu_ms": 375.0
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 9,
+          "wall_ms": 66.0073000472039,
+          "cpu_ms": 265.625
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 0,
+          "wall_ms": 80.80240013077855,
+          "cpu_ms": 312.5
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 1,
+          "wall_ms": 57.108999928459525,
+          "cpu_ms": 312.5
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 2,
+          "wall_ms": 57.91400000452995,
+          "cpu_ms": 296.875
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 3,
+          "wall_ms": 58.335999958217144,
+          "cpu_ms": 343.75
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 4,
+          "wall_ms": 58.124199975281954,
+          "cpu_ms": 390.625
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 5,
+          "wall_ms": 59.3323998618871,
+          "cpu_ms": 250.0
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 6,
+          "wall_ms": 57.35000013373792,
+          "cpu_ms": 281.25
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 7,
+          "wall_ms": 57.915000012144446,
+          "cpu_ms": 343.75
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 8,
+          "wall_ms": 60.94780005514622,
+          "cpu_ms": 359.375
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 9,
+          "wall_ms": 56.789700174704194,
+          "cpu_ms": 281.25
+        }
+      ]
+    },
+    {
+      "binary": "C:\\Users\\Admin\\source\\repos\\chrome-mv2-patch\\_scratch\\159-runtime-canary\\chrome-win64\\159.0.8148.1\\chrome.dll",
+      "bytes": 535535768,
+      "blake3": "821c34f27efec2f212ebc9e7e8d66550ea4d4a6a406fce4d8d8735c91d3bd1ae",
+      "rows": [
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 0,
+          "wall_ms": 108.14330005086958,
+          "cpu_ms": 453.125
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 1,
+          "wall_ms": 109.13470014929771,
+          "cpu_ms": 500.0
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 2,
+          "wall_ms": 104.8049998935312,
+          "cpu_ms": 515.625
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 3,
+          "wall_ms": 106.36269999668002,
+          "cpu_ms": 546.875
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 4,
+          "wall_ms": 104.3851999565959,
+          "cpu_ms": 562.5
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 5,
+          "wall_ms": 105.42059992440045,
+          "cpu_ms": 515.625
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 6,
+          "wall_ms": 98.77449995838106,
+          "cpu_ms": 656.25
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 7,
+          "wall_ms": 94.48530012741685,
+          "cpu_ms": 515.625
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 8,
+          "wall_ms": 94.43179983645678,
+          "cpu_ms": 453.125
+        },
+        {
+          "variant": "native",
+          "block": 0,
+          "run": 9,
+          "wall_ms": 107.48189990408719,
+          "cpu_ms": 609.375
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 0,
+          "wall_ms": 110.31369981355965,
+          "cpu_ms": 562.5
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 1,
+          "wall_ms": 114.69010007567704,
+          "cpu_ms": 609.375
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 2,
+          "wall_ms": 103.75500004738569,
+          "cpu_ms": 546.875
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 3,
+          "wall_ms": 105.7674998883158,
+          "cpu_ms": 578.125
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 4,
+          "wall_ms": 104.8441999591887,
+          "cpu_ms": 500.0
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 5,
+          "wall_ms": 106.09890008345246,
+          "cpu_ms": 656.25
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 6,
+          "wall_ms": 96.95070004090667,
+          "cpu_ms": 609.375
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 7,
+          "wall_ms": 97.58369997143745,
+          "cpu_ms": 640.625
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 8,
+          "wall_ms": 103.38229988701642,
+          "cpu_ms": 593.75
+        },
+        {
+          "variant": "ppl",
+          "block": 1,
+          "run": 9,
+          "wall_ms": 111.55429994687438,
+          "cpu_ms": 656.25
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 0,
+          "wall_ms": 105.64520000480115,
+          "cpu_ms": 578.125
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 1,
+          "wall_ms": 104.28089997731149,
+          "cpu_ms": 531.25
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 2,
+          "wall_ms": 97.10470004938543,
+          "cpu_ms": 531.25
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 3,
+          "wall_ms": 102.26520011201501,
+          "cpu_ms": 671.875
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 4,
+          "wall_ms": 98.87930005788803,
+          "cpu_ms": 531.25
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 5,
+          "wall_ms": 95.37770017050207,
+          "cpu_ms": 562.5
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 6,
+          "wall_ms": 97.1867002081126,
+          "cpu_ms": 593.75
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 7,
+          "wall_ms": 115.85039994679391,
+          "cpu_ms": 687.5
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 8,
+          "wall_ms": 131.98040006682277,
+          "cpu_ms": 562.5
+        },
+        {
+          "variant": "ppl",
+          "block": 2,
+          "run": 9,
+          "wall_ms": 130.37410005927086,
+          "cpu_ms": 609.375
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 0,
+          "wall_ms": 108.30650012940168,
+          "cpu_ms": 640.625
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 1,
+          "wall_ms": 137.02009990811348,
+          "cpu_ms": 515.625
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 2,
+          "wall_ms": 116.80419999174774,
+          "cpu_ms": 546.875
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 3,
+          "wall_ms": 110.8243998605758,
+          "cpu_ms": 531.25
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 4,
+          "wall_ms": 232.8309000004083,
+          "cpu_ms": 500.0
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 5,
+          "wall_ms": 120.20989996381104,
+          "cpu_ms": 546.875
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 6,
+          "wall_ms": 123.3872000593692,
+          "cpu_ms": 562.5
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 7,
+          "wall_ms": 112.63219988904893,
+          "cpu_ms": 640.625
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 8,
+          "wall_ms": 110.2305999957025,
+          "cpu_ms": 609.375
+        },
+        {
+          "variant": "native",
+          "block": 3,
+          "run": 9,
+          "wall_ms": 128.0621001496911,
+          "cpu_ms": 562.5
+        }
+      ]
+    }
+  ],
+  "artifacts": [
+    {
+      "provider": "native",
+      "bytes": 95744,
+      "sha256": "bf8b5be674ca4d6483c28806de9e676dc2ee7ce5dad64beaeb33b70685ef134d"
+    },
+    {
+      "provider": "ppl",
+      "bytes": 96256,
+      "sha256": "c653d3dcfead6d89007985a6e81c025d3471c107367b00aab293e86963d36876"
+    }
+  ],
+  "sources": [
+    "https://learn.microsoft.com/en-us/windows/win32/procthread/using-the-thread-pool-functions",
+    "https://learn.microsoft.com/en-us/windows/win32/procthread/thread-pools#best-practices",
+    "https://learn.microsoft.com/en-us/cpp/parallel/concrt/parallel-algorithms?view=msvc-170",
+    "https://learn.microsoft.com/en-us/cpp/parallel/concrt/general-best-practices-in-the-concurrency-runtime?view=msvc-170",
+    "https://learn.microsoft.com/en-us/windows/win32/api/processtopologyapi/nf-processtopologyapi-getprocessgroupaffinity"
+  ],
+  "cpu_budget_cases": "Counts above eight, multiple processor groups, restrictive masks, default CPU sets and failed queries.",
+  "limits": [
+    "No controlled cold-boot benchmark.",
+    "No native ARM64 runtime validation; the emulator lacks the real CPU-set query.",
+    "Processor counts above eight are policy-tested with simulated topology, not benchmarked on matching hardware.",
+    "Deferred cleanup still uses CPU and briefly retains the stock mapping."
+  ]
+}

@@ -5,8 +5,9 @@ The 253 ms number measures when all verified instructions are installed and `Pat
 This is follow-up research against commit `8f56f5cc7f50573bc4b72157032cfc17194533fe`, dated November 11, 2026. Production runtime code and deployment DLLs were left unchanged. Prototypes, build scripts and logs are in `_scratch/perf-deep-dive-2026-11-11/`; reproducible inputs, artifact hashes and individual observations are recorded in [PERFORMANCE-DEEP-DIVE.json](PERFORMANCE-DEEP-DIVE.json). The [previous research](PERFORMANCE-RESEARCH.md) covers optimizations already implemented.
 
 The balanced hash budgets, bounded deferred cleanup and one-entry trim cache have
-since been implemented. The hashing thread count adapts to process affinity and
-default CPU sets, up to eight; core placement belongs to the scheduler. CPU model
+since been implemented. The original eight-thread ceiling has since been removed;
+hashing follows process affinity, eligible groups and default CPU sets. Core
+placement belongs to the scheduler; see [threading research](PERFORMANCE-THREADING.md). CPU model
 and host OS identifiers are omitted from reports. The implementation passed 8/8
 x64 and 5/5 x86 tests, 23 complete frozen-report comparisons, two ARM64 analysis
 comparisons and three isolated browser lifecycles. Current artifact identities and
