@@ -7,10 +7,10 @@
 namespace autoscan {
 WirePlan MakePlan(const Report& report) {
   WirePlan plan;
-  std::copy_n(report.sha256.begin(), std::min(report.sha256.size(), plan.sha256.size()), plan.sha256.begin());
+  std::copy_n(report.blake3.begin(), std::min(report.blake3.size(), plan.blake3.size()), plan.blake3.begin());
   std::string_view error = report.error.empty() && !report.unresolved.empty() ? report.unresolved.front().reason : report.error;
   std::copy_n(error.begin(), std::min(error.size(), plan.error.size() - 1), plan.error.begin());
-  if (!report.ready() || !report.sha256[0] || report.gates.size() > plan.sites.size()) return plan;
+  if (!report.ready() || !report.blake3[0] || report.gates.size() > plan.sites.size()) return plan;
   plan.count = static_cast<uint32_t>(report.gates.size());
   for (size_t n = 0; n < report.gates.size(); ++n) {
     const auto& gate = report.gates[n];
@@ -45,9 +45,9 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
   auto decline = [&](const char* why) { reason = why; return ApplyResult::declined; };
   const auto& info = stockImage.info();
   auto disk = stockImage.bytes();
-  if (plan.magic != 0x32564D41 || plan.protocol != 4 || plan.status || !plan.count || plan.count > plan.sites.size() || plan.cacheHit > 1)
+  if (plan.magic != 0x32564D41 || plan.protocol != 5 || plan.status || !plan.count || plan.count > plan.sites.size() || plan.cacheHit > 1)
     return decline("incomplete or incompatible scan response");
-  if (!plan.sha256[0] || plan.sha256 != stockImage.sha256()) return decline("image hash differs from scan response");
+  if (!plan.blake3[0] || plan.blake3 != stockImage.blake3()) return decline("image hash differs from scan response");
   PeImage pe(disk);
   if (!pe.valid() || !info.imageSize || info.imageSize != image.size()) return decline("loaded image size differs");
   uintptr_t base = reinterpret_cast<uintptr_t>(image.data());
@@ -73,6 +73,9 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
       if (table.size() - offset < 8) return false;
       auto block = ReadInsn<IMAGE_BASE_RELOCATION>(table.data() + offset);
       if (block.SizeOfBlock < 8 || block.SizeOfBlock > table.size() - offset || (block.SizeOfBlock & 1)) return false;
+      // A 12-bit offset plus an eight-byte relocation can cross the block's page.
+      uint64_t blockEnd = uint64_t{block.VirtualAddress} + 0xfff + 8;
+      if (block.VirtualAddress >= to || blockEnd <= from) { offset += block.SizeOfBlock; continue; }
       for (size_t n = 8; n < block.SizeOfBlock; n += 2) {
         uint16_t entry = ReadInsn<uint16_t>(table.data() + offset + n);
         unsigned type = entry >> 12;

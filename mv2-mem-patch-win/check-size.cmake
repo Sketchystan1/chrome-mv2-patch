@@ -1,5 +1,5 @@
 file(SIZE "${BINARY}" bytes)
-if(bytes GREATER_EQUAL 150000)
-  message(FATAL_ERROR "${BINARY}: ${bytes} bytes; must be below 150,000 bytes")
+if(bytes GREATER_EQUAL 300000)
+  message(FATAL_ERROR "${BINARY}: ${bytes} bytes; must be below 300,000 bytes")
 endif()
-message(STATUS "${BINARY}: ${bytes} bytes (limit 150,000)")
+message(STATUS "${BINARY}: ${bytes} bytes (limit 300,000)")

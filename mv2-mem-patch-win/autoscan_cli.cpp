@@ -41,6 +41,7 @@ struct Json {
 bool reportJson(const autoscan::Report& report) {
   Json out;
   out.text("{\"protocol\":1,\"sha256\":"); out.string({report.sha256.data(), report.sha256[0] ? report.sha256.size() : 0});
+  out.text(",\"blake3\":"); out.string({report.blake3.data(), report.blake3[0] ? report.blake3.size() : 0});
   out.text(",\"ready\":"); out.text(report.ready() ? "true" : "false");
   out.text(",\"complete_enforcement_coverage_proven\":false,\"error\":"); out.string(report.error);
   out.text(",\"install_verifier\":"); out.string(report.installVerifier);

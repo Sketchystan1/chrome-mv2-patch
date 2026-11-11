@@ -1,5 +1,10 @@
 #include "solver.hpp"
 #include <bcrypt.h>
+#include "blake3.h"
+#include <bit>
+#if defined(AUTOSCAN_X64) || defined(AUTOSCAN_X86)
+#include <emmintrin.h>
+#endif
 
 namespace autoscan {
 namespace {
@@ -64,6 +69,13 @@ bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& fo
 #else
   for (size_t n = 2; n + 4 <= code.size(); ++n) {
 #if defined(AUTOSCAN_X64)
+    if (n + 19 <= code.size()) {
+      auto bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(code.data() + n - 1));
+      auto matches = _mm_cmpeq_epi8(_mm_and_si128(bytes, _mm_set1_epi8(-57)), _mm_set1_epi8(5));
+      unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(matches));
+      if (!mask) { n += 15; continue; }
+      n += std::countr_zero(mask);
+    }
     if ((code[n - 1] & 0xc7) != 5) continue;
     uint8_t op = code[n - 2];
     if (op != 0x8d && !(n >= 3 && code[n - 3] == 0x0f &&
@@ -98,7 +110,9 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
     for (auto n : list) if (n == value) return true;
     return list.push_back(value);
   };
-  for (size_t n = 0; n + sizeof(name) <= data.size(); ++n) if (!memcmp(data.data() + n, name, sizeof(name)))
+  std::string_view hay(reinterpret_cast<const char*>(data.data()), data.size());
+  for (size_t n = hay.find(name[0]); n != std::string_view::npos; n = hay.find(name[0], n + 1))
+    if (sizeof(name) <= data.size() - n && !memcmp(data.data() + n, name, sizeof(name)))
     if (!literals.push_back(pe.rdata.rva + static_cast<uint32_t>(n))) { report.installVerifier = "ambiguous provider name"; return; }
   if (literals.empty()) { report.installVerifier = "provider name absent"; return; }
   for (auto literal : literals) {
@@ -312,7 +326,9 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
   constexpr char name[] = "apps-gallery-url";
   constexpr unsigned argumentReg = StackReg == 31 ? 0 : 1;
   uint32_t literal = 0, installer = 0; int32_t reasonOffset = 0;
-  for (size_t n = 0; n + sizeof(name) <= data.size(); ++n) if (!memcmp(data.data() + n, name, sizeof(name))) {
+  std::string_view hay(reinterpret_cast<const char*>(data.data()), data.size());
+  for (size_t n = hay.find(name[0]); n != std::string_view::npos; n = hay.find(name[0], n + 1))
+    if (sizeof(name) <= data.size() - n && !memcmp(data.data() + n, name, sizeof(name))) {
     if (literal) { report.crxDownload = "ambiguous gallery switch"; return; }
     literal = pe.rdata.rva + static_cast<uint32_t>(n);
   }
@@ -374,8 +390,17 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
   FixedList<Gate, 2> candidates;
   // shortcut: only stack-held installers are recognized; extend with provenance tests for other compiler layouts.
   for (size_t n = 0; n + (StackReg == 31 ? 4 : 5) <= code.size(); n += StackReg == 31 ? 4 : 1) {
+    if constexpr (StackReg != 31) {
+      auto found = static_cast<const uint8_t*>(memchr(code.data() + n, 0xe8, code.size() - n - 4));
+      if (!found) break;
+      n = static_cast<size_t>(found - code.data());
+    }
     if (StackReg == 31 ? (ReadInsn<uint32_t>(code.data() + n) & 0xfc000000) != 0x94000000 : code[n] != 0xe8) continue;
     uint32_t pc = pe.text.rva + static_cast<uint32_t>(n);
+    if constexpr (StackReg != 31) {
+      uint32_t target = 0;
+      if (!RelativeTarget(pc, 5, ReadInsn<int32_t>(code.data() + n + 1), target) || target != installer) continue;
+    }
     if (Lift(pe.code(pc), pc).target() != installer) continue;
     auto range = boundaries.find(pc);
     if (!range || !program.build(pe, range) || !call(program.at(pc))) continue;
@@ -463,6 +488,17 @@ HashValue Hash(std::span<const uint8_t> bytes) {
   }
   return result;
 }
+HashValue Blake3(std::span<const uint8_t> bytes) {
+  blake3_hasher hasher;
+  blake3_hasher_init(&hasher);
+  blake3_hasher_update_tbb(&hasher, bytes.data(), bytes.size());
+  std::array<uint8_t, 32> digest{};
+  blake3_hasher_finalize(&hasher, digest.data(), digest.size());
+  constexpr char hex[] = "0123456789abcdef";
+  HashValue result{};
+  for (size_t n = 0; n < digest.size(); ++n) { result[n * 2] = hex[digest[n] >> 4]; result[n * 2 + 1] = hex[digest[n] & 15]; }
+  return result;
+}
 Report Analyze(std::span<const uint8_t> bytes) {
   Report report; PeImage pe(bytes);
   if (!pe.valid()) { report.error = pe.error; return report; }
@@ -516,15 +552,23 @@ Report Analyze(std::span<const uint8_t> bytes) {
     if (cmp.op == Op::CmpImm && (cmp.imm == 2 || cmp.imm == 3)) consider(pe.text.rva + static_cast<uint32_t>(p) + 4);
   }
 #else
-  for (size_t p = 0; p < text.size(); ++p) if (text[p] == 2 || text[p] == 3) {
-    auto probe = [&](size_t n) {
-      if (n + 1 < text.size() && ((text[n] >= 0x7c && text[n] <= 0x7f) ||
-          (text[n] == 0x0f && text[n + 1] >= 0x8c && text[n + 1] <= 0x8f)))
-        consider(pe.text.rva + static_cast<uint32_t>(n));
-    };
+  auto probe = [&](size_t n) {
+    if (n < text.size() && text.size() - n >= 2 && ((text[n] >= 0x7c && text[n] <= 0x7f) ||
+        (text[n] == 0x0f && text[n + 1] >= 0x8c && text[n + 1] <= 0x8f)))
+      consider(pe.text.rva + static_cast<uint32_t>(n));
+  };
+  auto examine = [&](size_t p) {
     probe(p + 1);
-    if (p + 4 < text.size() && !text[p + 1] && !text[p + 2] && !text[p + 3]) probe(p + 4);
+    if (text.size() - p > 4 && !text[p + 1] && !text[p + 2] && !text[p + 3]) probe(p + 4);
+  };
+  size_t p = 0;
+  for (; text.size() - p >= 16; p += 16) {
+    auto bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(text.data() + p));
+    auto matched = _mm_cmpeq_epi8(_mm_and_si128(bytes, _mm_set1_epi8(-2)), _mm_set1_epi8(2));
+    unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(matched));
+    while (mask) { examine(p + std::countr_zero(mask)); mask &= mask - 1; }
   }
+  for (; p < text.size(); ++p) if (text[p] == 2 || text[p] == 3) examine(p);
 #endif
   std::sort(report.gates.begin(), report.gates.end(), [](const Gate& a, const Gate& b) { return a.rva < b.rva; });
   bool free = false, hasLayout = false, coherent = true;
@@ -555,6 +599,6 @@ Report Analyze(std::span<const uint8_t> bytes) {
 Report Discover(std::span<const uint8_t> bytes) {
   auto hash = Hash(bytes); Report report;
   if (!hash[0]) { report.error = "SHA-256 failed"; return report; }
-  report = Analyze(bytes); report.sha256 = hash; return report;
+  report = Analyze(bytes); report.sha256 = hash; report.blake3 = Blake3(bytes); return report;
 }
 } // namespace autoscan

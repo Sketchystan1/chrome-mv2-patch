@@ -61,7 +61,8 @@ jobs:
           $outDir = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
           Copy-Item 'mv2-mem-patch-win/out/x64/Detours-LICENSE.md' $root
-          tar -a -cf (Join-Path $outDir $zip) -C $root @built Detours-LICENSE.md
+          Copy-Item 'mv2-mem-patch-win/out/x64/BLAKE3-LICENSE.md' $root
+          tar -a -cf (Join-Path $outDir $zip) -C $root @built Detours-LICENSE.md BLAKE3-LICENSE.md
           if ($LASTEXITCODE) { throw 'release packaging failed' }
           "version=v$ver" >> $env:GITHUB_OUTPUT
 

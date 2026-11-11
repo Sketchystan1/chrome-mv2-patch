@@ -213,7 +213,8 @@ def run_build(entry, args, extensions, state, port, crx, extension_id):
                     memory_check(pid, report, patched, allow_offstore)
                     phase_result['memory_gates_checked'] = len(report['gates'])
                     if patched:
-                        key = hashlib.sha256((proxy_hash + original).encode('ascii')).hexdigest()
+                        identity = original if phase == 'core-only' else report['blake3']
+                        key = hashlib.sha256((proxy_hash + identity).encode('ascii')).hexdigest()
                         cache = local / 'chrome-mv2-patch/autoscan' / (key + '.bin')
                         assert cache.exists(), 'expected a complete cached scan; use a shorter --work path if its temporary filename exceeds MAX_PATH'
                         cached = (digest(cache), cache.stat().st_mtime_ns)

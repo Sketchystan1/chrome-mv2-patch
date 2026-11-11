@@ -10,6 +10,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <wincrypt.h>
 
 using Bytes = std::vector<uint8_t>;
 static unsigned checks = 0;
@@ -293,7 +294,7 @@ struct LiveImage {
     }
     if (includeOptional || includeDownload) {
       std::sort(plan.sites.begin(), plan.sites.begin() + plan.count, [](auto a, auto b) { return a.rva < b.rva; });
-      plan.sha256 = autoscan::Hash(disk);
+      plan.blake3 = autoscan::Blake3(disk);
     }
     protectCalls = flushCalls = failProtect = failFlush = 0;
   }
@@ -334,7 +335,7 @@ static void applicationTests() {
   for (unsigned test = 0; test < 6; ++test) {
     LiveImage live;
     if (test == 0) ++live.plan.protocol;
-    if (test == 1) live.plan.sha256[0] ^= 1;
+    if (test == 1) live.plan.blake3[0] ^= 1;
     if (test == 2) live.plan.sites[0].patch[1] ^= 1;
     if (test == 3) live.plan.sites[1].rva = 0x31FF;
     if (test == 4) live.plan.count = 65;
@@ -376,6 +377,45 @@ static void applicationTests() {
   {
     LiveImage live; failFlush = 1; failProtect = 5;
     check(live.apply() == Result::fatal, "irrecoverable rollback cannot be reported as a clean decline");
+  }
+}
+
+static void relocationTests() {
+  auto table = [](LiveImage& live, uint32_t page, uint16_t entry, uint32_t blockSize = 12) {
+    put<uint16_t>(live.disk, 0x86, 2);
+    std::copy_n(".reloc", 7, live.disk.begin() + 0x1B0);
+    put<uint32_t>(live.disk, 0x1B8, 0x200); put<uint32_t>(live.disk, 0x1BC, 0x3800);
+    put<uint32_t>(live.disk, 0x1C0, 0x200); put<uint32_t>(live.disk, 0x1C4, 0x2600);
+    put<uint32_t>(live.disk, 0x1D4, 0x40000040);
+    put<uint32_t>(live.disk, 0x130, 0x3800); put<uint32_t>(live.disk, 0x134, 12);
+    put<uint32_t>(live.disk, 0x2600, page); put<uint32_t>(live.disk, 0x2604, blockSize);
+    put<uint16_t>(live.disk, 0x2608, entry); put<uint16_t>(live.disk, 0x260A, 0);
+    live.plan.blake3 = autoscan::Blake3(live.disk);
+  };
+  for (unsigned type : {IMAGE_REL_BASED_HIGHLOW, IMAGE_REL_BASED_DIR64}) {
+    LiveImage live;
+    constexpr uint32_t rva = 0x10E0;
+    uint64_t stock = 0x180001234, imageBase = 0x180000000;
+    unsigned width = type == IMAGE_REL_BASED_HIGHLOW ? 4 : 8;
+    put<uint64_t>(live.disk, 0xB0, imageBase);
+    memcpy(live.disk.data() + 0x400 + rva - 0x1000, &stock, width);
+    uint64_t relocated = stock + reinterpret_cast<uintptr_t>(live.base) - imageBase;
+    live.change(rva, reinterpret_cast<uint8_t*>(&relocated), width);
+    table(live, 0x1000, static_cast<uint16_t>((type << 12) | 0xE0));
+    check(live.apply() == autoscan::ApplyResult::applied && live.protectedAgain(), "HIGHLOW and DIR64 relocation adjustments remain checked");
+    check(live.apply() == autoscan::ApplyResult::alreadyApplied, "relocated code supports idempotent application");
+  }
+  for (unsigned test = 0; test < 6; ++test) {
+    LiveImage live;
+    if (test == 0) table(live, 0x5000, 0xF123); // Irrelevant unknown relocation types remain ignored.
+    if (test == 1) table(live, 0xFFFFF000, 0xAFFF);
+    if (test == 2) table(live, 0x5000, 0xF123, 6);
+    if (test == 3) table(live, 0x5000, 0xF123, 14);
+    if (test == 4) table(live, 0, 0xAFFF); // Crosses the first .text byte from the preceding page.
+    if (test == 5) table(live, 0x1000, static_cast<uint16_t>(0xA000 | (live.plan.sites[0].rva - 0x1000 - 1)));
+    auto result = live.apply();
+    check(test < 2 ? result == autoscan::ApplyResult::applied : result == autoscan::ApplyResult::declined && protectCalls == 0,
+          "skipping unrelated blocks retains block bounds and straddling relocation rejection");
   }
 }
 
@@ -445,7 +485,7 @@ static void cacheTests() {
     ~Cleanup() { std::error_code error; fs::remove(directory / L"plan.bin", error); fs::remove(directory, error); }
   } cleanup{directory};
   LiveImage live(true, true);
-  std::string scanner(64, '1'), different(64, '2'), hash(live.plan.sha256.data(), live.plan.sha256.size());
+  std::string scanner(64, '1'), different(64, '2'), hash(live.plan.blake3.data(), live.plan.blake3.size());
   autoscan::WirePlan restored;
   check(!autoscan::ReadCache(path.c_str(), scanner, hash, restored), "missing cache is a miss");
   check(autoscan::WriteCache(path.c_str(), scanner, live.plan), "complete scan can be cached");
@@ -463,7 +503,7 @@ static void cacheTests() {
     if (test == 1) invalid.count = 65;
     if (test == 2) invalid.status = 1;
     if (test == 3) ++invalid.protocol;
-    if (test == 4) invalid.sha256[0] = 'z';
+    if (test == 4) invalid.blake3[0] = 'z';
     check(!autoscan::WriteCache(path.c_str(), scanner, invalid), "incomplete or incompatible results never replace a cache");
   }
   check(autoscan::ReadCache(path.c_str(), scanner, hash, restored), "rejected writes preserve the prior complete cache");
@@ -481,6 +521,13 @@ static void cacheTests() {
     check(static_cast<bool>(file), "write corrupt cache fixture");
   };
   auto encrypted = read();
+  {
+    uint8_t message[] = {1, 2, 3}; DATA_BLOB input{sizeof(message), message}, output{};
+    check(CryptProtectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &output),
+          "create authenticated non-plan cache fixture");
+    Bytes invalid(output.pbData, output.pbData + output.cbData); LocalFree(output.pbData); write(invalid);
+    check(!autoscan::ReadCache(path.c_str(), scanner, hash, restored), "authenticated blobs still require the exact plan size");
+  }
   for (auto offset : {size_t(0), encrypted.size() / 2, encrypted.size() - 1}) {
     auto damaged = encrypted; damaged[offset] ^= 0x40; write(damaged);
     check(!autoscan::ReadCache(path.c_str(), scanner, hash, restored), "corrupted protected cache is a miss");
@@ -545,6 +592,13 @@ int wmain(int argc, wchar_t** argv) {
       std::copy(tail.begin(), tail.end(), bytes.begin() + 0x600 - tail.size());
       auto truncated = autoscan::Discover(bytes);
       check(truncated.ready() && truncated.gates.size() == 2, "prescreens ignore truncated instructions at the end of .text");
+    }
+    for (const char* marker : {"027f00", "030000000f8d00000000"}) for (size_t padding = 0; padding < 32; ++padding) {
+      auto bytes = image(); auto tail = hex(marker);
+      std::copy(tail.begin(), tail.end(), bytes.begin() + 0x600 - tail.size() - padding);
+      auto report = autoscan::Analyze(bytes);
+      check(report.ready() && report.gates.size() == 2 && report.heads == basic.heads + 1,
+            "byte filters retain short and near candidates at every vector and tail alignment");
     }
     auto inverted = autoscan::Discover(image(freeCode, invertedCode));
     check(inverted.ready() && inverted.gates[1].kind == 6, "inverted predicate and Boolean AL return");
@@ -627,6 +681,7 @@ int wmain(int argc, wchar_t** argv) {
     providerTests();
     crxTests();
     applicationTests();
+    relocationTests();
     optionalPlanTests();
     cacheTests();
     std::cout << "PASS: " << checks << " native scanner checks\n";

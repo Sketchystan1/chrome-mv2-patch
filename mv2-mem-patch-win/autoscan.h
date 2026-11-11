@@ -35,7 +35,7 @@ struct Gate {
 };
 struct Issue { uint32_t rva; std::string_view reason; };
 struct Report {
-  HashValue sha256{};
+  HashValue sha256{}, blake3{};
   std::string_view error, installVerifier, crxDownload;
   unsigned heads = 0, screened = 0, rejected = 0;
   FixedList<Gate, 64> gates;
@@ -46,17 +46,18 @@ struct Report {
 struct ImageInfo { uint32_t textRva, textRaw, textSize, imageSize; };
 
 HashValue Hash(std::span<const uint8_t> bytes);
+HashValue Blake3(std::span<const uint8_t> bytes);
 ImageInfo Inspect(std::span<const uint8_t> bytes);
 // The caller keeps these bytes locked and unchanged for this object's lifetime.
 class StockImage {
   std::span<const uint8_t> bytes_;
   ImageInfo info_;
-  HashValue sha256_;
+  HashValue blake3_;
  public:
-  explicit StockImage(std::span<const uint8_t> bytes) : bytes_(bytes), info_(Inspect(bytes)), sha256_(Hash(bytes)) {}
+  explicit StockImage(std::span<const uint8_t> bytes) : bytes_(bytes), info_(Inspect(bytes)), blake3_(Blake3(bytes)) {}
   auto bytes() const { return bytes_; }
   const auto& info() const { return info_; }
-  const auto& sha256() const { return sha256_; }
+  const auto& blake3() const { return blake3_; }
 };
 
 // Analysis alone has no identity: the helper binds it to the parent's locked shared mapping.

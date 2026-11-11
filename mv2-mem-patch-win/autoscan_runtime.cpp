@@ -131,7 +131,7 @@ extern "C" void CALLBACK VersionMV2ScanW(HWND, HINSTANCE, LPWSTR input, int) {
   autoscan::WirePlan plan;
   if (!autoscan::ReadCache(cache.data(), scannerView, imageView, plan)) {
     auto report = autoscan::Analyze({view.data, static_cast<size_t>(size)});
-    report.sha256 = imageHash; plan = autoscan::MakePlan(report);
+    report.blake3 = imageHash; plan = autoscan::MakePlan(report);
     if (!plan.status) autoscan::WriteCache(cache.data(), scannerView, plan);
   }
   size_t offset = 0;
@@ -144,7 +144,8 @@ extern "C" void CALLBACK VersionMV2ScanW(HWND, HINSTANCE, LPWSTR input, int) {
 
 namespace autoscan {
 void Patch(HMODULE chrome) noexcept {
-  ULONGLONG started = GetTickCount64();
+  LARGE_INTEGER started{}, identified{}, scanned{}, completed{}, frequency{};
+  QueryPerformanceFrequency(&frequency); QueryPerformanceCounter(&started);
   std::array<wchar_t, 32768> path{};
   DWORD length = GetModuleFileNameW(chrome, path.data(), static_cast<DWORD>(path.size()));
   if (!length || length == path.size()) { trace("cannot resolve chrome.dll"); return; }
@@ -159,17 +160,20 @@ void Patch(HMODULE chrome) noexcept {
   View view(mapping.value, static_cast<size_t>(size.QuadPart));
   if (!view.data) { trace("cannot map the stock image"); return; }
   StockImage stockImage({view.data, static_cast<size_t>(size.QuadPart)});
-  if (!stockImage.info().imageSize || !stockImage.sha256()[0]) { trace("cannot identify stock image"); return; }
-  ULONGLONG identified = GetTickCount64();
+  if (!stockImage.info().imageSize || !stockImage.blake3()[0]) { trace("cannot identify stock image"); return; }
+  QueryPerformanceCounter(&identified);
   MEMORY_BASIC_INFORMATION memory{};
   if (!VirtualQuery(chrome, &memory, sizeof(memory)) || memory.Type != MEM_IMAGE || memory.AllocationBase != chrome) {
     trace("chrome.dll is not a loaded image"); return;
   }
   WirePlan plan;
-  if (!scanInHelper(mapping.value, static_cast<size_t>(size.QuadPart), stockImage.sha256(), plan)) {
+  auto scanner = scannerHash(); std::array<wchar_t, 1024> cache{};
+  std::string_view scannerView(scanner.data(), scanner.size()), imageView(stockImage.blake3().data(), stockImage.blake3().size());
+  bool cached = CachePath(scannerView, imageView, cache) && ReadCache(cache.data(), scannerView, imageView, plan);
+  if (!cached && !scanInHelper(mapping.value, static_cast<size_t>(size.QuadPart), stockImage.blake3(), plan)) {
     trace("scan helper failed or exceeded 30 seconds; no patches applied"); return;
   }
-  ULONGLONG scanned = GetTickCount64();
+  QueryPerformanceCounter(&scanned);
   if (plan.status) { trace({plan.error.data(), static_cast<size_t>(std::find(plan.error.begin(), plan.error.end(), '\0') - plan.error.begin())}); return; }
   if (!plan.offstoreRva) trace("no verified InstallVerifier gate was found");
   if (!plan.crxDownloadRva) trace("no verified CRX download gate was found");
@@ -181,11 +185,13 @@ void Patch(HMODULE chrome) noexcept {
   }
   if (result == ApplyResult::declined) trace(reason);
   else {
+    QueryPerformanceCounter(&completed);
+    auto ms = [&](LARGE_INTEGER from, LARGE_INTEGER to) { return (to.QuadPart - from.QuadPart) * 1000.0 / frequency.QuadPart; };
     std::array<char, 256> message{};
-    _snprintf_s(message.data(), message.size(), _TRUNCATE, "%u decisions %s; offstore=%s; crx-download=%s; %s: identity=%llums helper=%llums apply=%llums total=%llums",
+    _snprintf_s(message.data(), message.size(), _TRUNCATE, "%u decisions %s; offstore=%s; crx-download=%s; %s: identity=%.3fms helper=%.3fms apply=%.3fms total=%.3fms",
       plan.count, result == ApplyResult::applied ? "applied" : "already applied",
       plan.offstoreRva ? "on" : "unavailable", plan.crxDownloadRva ? "on" : "unavailable", plan.cacheHit ? "cached" : "scanned",
-      identified - started, scanned - identified, GetTickCount64() - scanned, GetTickCount64() - started);
+      ms(started, identified), ms(identified, scanned), ms(scanned, completed), ms(started, completed));
     trace(message.data());
   }
 }

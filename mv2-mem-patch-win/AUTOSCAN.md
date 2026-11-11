@@ -4,8 +4,8 @@ This C++20 build produces `version.dll` for x86, x64 and ARM64. It discovers MV2
 decisions from the installed `chrome.dll`, without a maintained offset table,
 symbols, Capstone or Z3. A read-only `mv2-scan.exe` is available for development.
 
-The Release build fails if the DLL or diagnostic scanner reaches **150,000 bytes**.
-It uses `/O1 /Os /GL /GS- /GR- /EHs-c- /Gw /Gy /MD` and
+The Release build fails if the DLL or diagnostic scanner reaches **300,000 bytes**.
+It uses `/O2 /GL /GS- /GR- /EHs-c- /Gw /Gy /MD` and
 `/LTCG /OPT:REF /OPT:ICF`. `/MD` requires the matching Microsoft Visual C++
 runtime and Windows UCRT on the target machine.
 
@@ -16,9 +16,11 @@ for the build, test and installation commands. Only `build/<arch>/version.dll`
 is a release output. CMake files, dependencies and development tools stay in
 `out/<arch>/`. Each diagnostic scanner accepts only its own PE architecture.
 
-Only Microsoft Detours **v4.0.1**, release commit
-`e4bfd6b03e50de46b47abfbd1e46b384f0c5f833`, is fetched. Its archive is checked
-against SHA-256. Redistribute `out/<arch>/Detours-LICENSE.md` alongside the DLL.
+Microsoft Detours **v4.0.1**, commit
+`e4bfd6b03e50de46b47abfbd1e46b384f0c5f833`, and BLAKE3 **1.8.7**, commit
+`f3149ec5bb5449af877ba20377a11008ff499fa2`, are fetched. Both archives are checked
+against SHA-256. Redistribute `out/<arch>/Detours-LICENSE.md` and
+`out/<arch>/BLAKE3-LICENSE.md` alongside the DLL.
 No dependencies are fetched when the DLL runs.
 
 For a trial, close a separate browser copy, put the matching DLL beside its
@@ -50,11 +52,22 @@ the copy to restore normal enforcement. The browser's disk image is unchanged.
   allocates heap memory and uses RWX pages. Generated assembly tail jumps forward
   the 17 system version exports; ordinal 18 is the private scan helper.
 
-Scanner, solver, IPC, hashing buffers and cache buffers use fixed caller-owned
+Scanner, solver, IPC and hashing buffers use fixed caller-owned
 storage, principally `std::array` on the stack. Shipped project code has no
 `new`, `malloc`, heap-backed containers, RTTI or C++ exceptions. This is a
 source-level allocation guarantee: the Windows loader, UCRT and called Windows
-APIs may allocate internally. Detours' import parser still uses Windows SEH.
+APIs may allocate internally. DPAPI allocates temporary protected/decrypted blobs,
+which are freed with `LocalFree`; Windows owns thread-pool work objects, which are
+joined and closed before their caller's storage expires. Detours' import parser
+still uses Windows SEH.
+
+BLAKE3 dispatches to upstream SSE2/SSE4.1/AVX2/AVX-512 assembly on x64, isolated
+intrinsic objects on x86, and NEON on ARM64. CPU and OS feature checks retain
+architecture fallbacks. `blake3_threads.cpp` supplies the pinned library's parallel
+join hook using Windows work callbacks, with at most three additional workers for
+large subtrees. Work allocation failure falls back to serial hashing. No oneTBB
+runtime is required. SSE2 byte filters and bounded literal/call searches reduce
+discovery work without changing the full structural checks.
 
 ## Recognition and application
 
@@ -83,7 +96,8 @@ lie below every address-taken local; it does not model arbitrary stack objects.
 Every verified InstallVerifier gate is applied automatically, with no launch
 flag or version-specific opt-in. This permits enabling off-store extensions,
 including ones already disabled with `DISABLE_NOT_VERIFIED`; it does not hide
-warning text or edit extension preferences. Recognition currently supports x64.
+warning text or edit extension preferences. Browser lifecycle validation covers
+x64; x86 and ARM64 also run the bounded optional recognizers.
 See [launch instructions](README.md#off-store-extensions).
 
 The optional x64 CRX download gate is anchored to `apps-gallery-url` in
@@ -99,19 +113,22 @@ package parsing and requested file hashes still apply. Drag-and-drop already use
 Chrome's external verifier format. See [CRX installation](README.md#installing-downloaded-crx-files).
 
 The proxy swaps Chrome's loader imports during startup. After `chrome.dll` loads,
-it locks and maps the disk image read-only, computes its SHA-256, and launches
-System32 `rundll32.exe` with a helper entry point in the same DLL. The helper has
+it locks and maps the disk image read-only and computes its full-file BLAKE3.
+The parent reads a valid cached plan directly. A miss launches System32
+`rundll32.exe` with a helper entry point in the same DLL. The helper has
 30 seconds to return a fixed 1,532-byte response with at most 64 sites. Analysis
-and cache work run outside the loading browser.
+and cache writes run outside the loading browser; cache reads also run in the
+parent after the loader call returns, never in `DllMain`.
 
 A cache under `%LOCALAPPDATA%\chrome-mv2-patch\autoscan` is bound to both the
-browser and scanner hashes. `CryptProtectMemory(CRYPTPROTECTMEMORY_SAME_LOGON)`
-protects caller-supplied storage; the checksum, size and protocol are checked on
-read. A new Windows logon, corrupt entry or cache IO failure causes a fresh scan.
+browser BLAKE3 and scanner SHA-256. User-scoped `CryptProtectData` with UI forbidden
+keeps plans usable across Windows logons. Protected input is bounded to 4 KiB;
+decrypted size, checksum, identities and protocol are checked on read. A browser
+or scanner change, corrupt entry or cache IO failure causes a fresh scan.
 Successful writes replace a temporary file atomically. Same-user code is not a
 security boundary for this cache.
 
-Protocol 4 records separate RVAs for the optional InstallVerifier and CRX download
+Protocol 5 uses explicit BLAKE3 identity and records separate RVAs for the optional InstallVerifier and CRX download
 sites. The parent validates every site, requires the former to identify a JNE
 and the latter a JE, and applies all verified sites together. The scanner hash
 prevents an older DLL's cache from being reused after an update.
@@ -130,23 +147,27 @@ a failed rollback stops the process. This code is restricted to startup before
 Chrome enters the patched routines; it is not a live-patching API for running
 threads. W^X and data pointer swaps do not guarantee antivirus allowlisting.
 
+The diagnostic scanner retains truthful SHA-256 output and adds a `blake3` field.
+It computes both hashes, so its CLI wall time includes extra diagnostic hashing
+that the runtime patcher does not perform. Runtime stage timings use QPC.
+
 The proxy also preserves the existing child-process mitigation adjustment needed
 for its unsigned DLL to load. Renderer Win32k lockdown is retained. Crypt32 is
-delay-loaded for use in the helper.
+delay-loaded for cache IO in the parent and helper.
 
 ## Validation and limits
 
-Measured on November 10, 2026 with MSVC 19.51.36260, Release `/MD`:
+Measured on November 11, 2026 with MSVC 19.52.37029, Release `/MD`:
 
 | Target | `version.dll` | `mv2-scan.exe` |
 | --- | ---: | ---: |
-| x64 | 97,792 bytes | 71,680 bytes |
-| x86 | 76,288 bytes | 50,176 bytes |
-| ARM64 | 73,728 bytes | 48,128 bytes |
+| x64 | 215,040 bytes | 203,264 bytes |
+| x86 | 228,352 bytes | 211,968 bytes |
+| ARM64 | 153,600 bytes | 138,752 bytes |
 
-All x64 tests (4/4) and x86 tests (2/2) passed. The final scanners reproduced
+All x64 tests (7/7) and x86 tests (4/4) passed. The final scanners reproduced
 166 reviewed core decisions across 21 x64 and two x86 stock images, preserving
-all 21 recognized InstallVerifier gates. The new CRX download gate matched
+all 23 recognized InstallVerifier gates. The CRX download gate matched
 independently reviewed addresses on 20 x64 images; the different DCHECK Chrome
 159.0.8148.1 layout safely skips it. No signature tables are used by the DLL.
 
@@ -166,8 +187,11 @@ archive still reports `CRX_SIGNATURE_VERIFICATION_FAILED`; a missing developer
 proof still reports `CRX_REQUIRED_PROOF_MISSING`. Removing the DLL restores the
 download rejection. These trials use isolated copies and fresh profiles.
 
-ARM64 cross-compilation passed. Earlier PE/unwind validation on two real ARM64
-images is retained as historical evidence; native execution remains untested.
+ARM64 cross-compilation passed. The actual ARM64 hash, module and optional-gate
+executables passed under Wine/QEMU, including parallel hash boundaries. Two real
+ARM64 images reproduced the frozen scanner's plans on the x64 analysis target.
+The proxy ABI could not be validated under Wine's version-DLL loader; native
+Windows ARM64 browser execution remains untested.
 The binary hashes, sizes and individual results are recorded in
 [AUTOSCAN-RESULTS.json](AUTOSCAN-RESULTS.json).
 
@@ -175,6 +199,9 @@ The binary hashes, sizes and individual results are recorded in
 extrema, native field inference, and pointer protection. x64 additionally runs
 scanner, application rollback, cache and proxy export regressions. ARM64 tests
 must also be run on ARM64 Windows before treating that target as runtime-validated.
+
+Performance experiments, compiler comparisons, unselected approaches and measured
+limits are in [PERFORMANCE-RESEARCH.md](PERFORMANCE-RESEARCH.md).
 
 The diagnostic JSON includes hashes, inferred fields, patch bytes, skipped
 optional gates and unresolved candidates. Exit codes are 0 for a ready plan,

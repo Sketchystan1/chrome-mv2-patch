@@ -7,14 +7,19 @@
 namespace autoscan {
 namespace {
 constexpr size_t CacheSize = (sizeof(WirePlan) + 128 + 15) & ~size_t{15};
+constexpr size_t ProtectedCacheSize = 4096;
+struct Blob {
+  DATA_BLOB value{};
+  ~Blob() { if (value.pbData) LocalFree(value.pbData); }
+};
 bool validHash(std::string_view hash) {
   return hash.size() == 64 && std::all_of(hash.begin(), hash.end(), [](char c) {
     return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
   });
 }
 bool complete(const WirePlan& plan) {
-  return plan.magic == 0x32564d41 && plan.protocol == 4 && !plan.status && !plan.cacheHit &&
-    plan.count && plan.count <= plan.sites.size() && validHash({plan.sha256.data(), plan.sha256.size()});
+  return plan.magic == 0x32564d41 && plan.protocol == 5 && !plan.status && !plan.cacheHit &&
+    plan.count && plan.count <= plan.sites.size() && validHash({plan.blake3.data(), plan.blake3.size()});
 }
 }
 bool CachePath(std::string_view scannerHash, std::string_view imageHash, std::span<wchar_t> path) noexcept {
@@ -38,15 +43,18 @@ bool ReadCache(const wchar_t* path, std::string_view scannerHash, std::string_vi
   if (!path || !*path || !validHash(scannerHash) || !validHash(imageHash)) return false;
   HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) return false;
-  LARGE_INTEGER size{}; DWORD got = 0; std::array<uint8_t, CacheSize> clear{};
-  bool ok = GetFileSizeEx(file, &size) && size.QuadPart == clear.size() &&
-    ReadFile(file, clear.data(), static_cast<DWORD>(clear.size()), &got, nullptr) && got == clear.size();
+  LARGE_INTEGER size{}; DWORD got = 0; std::array<uint8_t, ProtectedCacheSize> encrypted{};
+  bool ok = GetFileSizeEx(file, &size) && size.QuadPart > 0 && size.QuadPart <= encrypted.size() &&
+    ReadFile(file, encrypted.data(), static_cast<DWORD>(size.QuadPart), &got, nullptr) && got == size.QuadPart;
   CloseHandle(file);
-  if (!ok || !CryptUnprotectMemory(clear.data(), static_cast<DWORD>(clear.size()), CRYPTPROTECTMEMORY_SAME_LOGON)) return false;
-  auto checksum = Hash(std::span(clear).subspan(64));
-  if (!checksum[0] || memcmp(clear.data(), checksum.data(), 64) || memcmp(clear.data() + 64, scannerHash.data(), 64)) return false;
-  WirePlan cached; memcpy(&cached, clear.data() + 128, sizeof(cached));
-  if (!complete(cached) || memcmp(cached.sha256.data(), imageHash.data(), 64)) return false;
+  DATA_BLOB input{got, encrypted.data()}; Blob clear;
+  if (!ok || !CryptUnprotectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &clear.value) ||
+      clear.value.cbData != CacheSize || !clear.value.pbData) return false;
+  auto bytes = std::span(clear.value.pbData, static_cast<size_t>(clear.value.cbData));
+  auto checksum = Hash(bytes.subspan(64));
+  if (!checksum[0] || memcmp(bytes.data(), checksum.data(), 64) || memcmp(bytes.data() + 64, scannerHash.data(), 64)) return false;
+  WirePlan cached; memcpy(&cached, bytes.data() + 128, sizeof(cached));
+  if (!complete(cached) || memcmp(cached.blake3.data(), imageHash.data(), 64)) return false;
   cached.cacheHit = 1; plan = cached; return true;
 }
 bool WriteCache(const wchar_t* path, std::string_view scannerHash, const WirePlan& plan) noexcept {
@@ -56,8 +64,10 @@ bool WriteCache(const wchar_t* path, std::string_view scannerHash, const WirePla
   auto checksum = Hash(std::span(clear).subspan(64));
   if (!checksum[0]) return false;
   memcpy(clear.data(), checksum.data(), 64);
-  // SAME_LOGON uses caller storage; a new Windows logon safely causes a fresh scan.
-  if (!CryptProtectMemory(clear.data(), static_cast<DWORD>(clear.size()), CRYPTPROTECTMEMORY_SAME_LOGON)) return false;
+  // User-scoped DPAPI keeps verified plans usable after Windows logoff or restart.
+  DATA_BLOB input{static_cast<DWORD>(clear.size()), clear.data()}; Blob encrypted;
+  if (!CryptProtectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &encrypted.value) ||
+      !encrypted.value.cbData || encrypted.value.cbData > ProtectedCacheSize || !encrypted.value.pbData) return false;
   // shortcut: cache paths are bounded to 1024 characters; longer profiles still scan without caching.
   std::array<wchar_t, 1152> temporary{};
   if (wcslen(path) > 1024) return false;
@@ -73,7 +83,7 @@ bool WriteCache(const wchar_t* path, std::string_view scannerHash, const WirePla
   HANDLE file = CreateFileW(temporary.data(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) return false;
   DWORD written = 0;
-  bool ok = WriteFile(file, clear.data(), static_cast<DWORD>(clear.size()), &written, nullptr) && written == clear.size() && FlushFileBuffers(file);
+  bool ok = WriteFile(file, encrypted.value.pbData, encrypted.value.cbData, &written, nullptr) && written == encrypted.value.cbData && FlushFileBuffers(file);
   ok = CloseHandle(file) && ok;
   if (ok && MoveFileExW(temporary.data(), path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
   DeleteFileW(temporary.data()); return false;

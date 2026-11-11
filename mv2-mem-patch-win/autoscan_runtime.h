@@ -11,8 +11,8 @@ struct WireSite {
   std::array<uint8_t, 6> stock{}, patch{};
 };
 struct WirePlan {
-  uint32_t magic = 0x32564D41, protocol = 4, count = 0, status = 1, cacheHit = 0, offstoreRva = 0, crxDownloadRva = 0;
-  std::array<char, 64> sha256{};
+  uint32_t magic = 0x32564D41, protocol = 5, count = 0, status = 1, cacheHit = 0, offstoreRva = 0, crxDownloadRva = 0;
+  std::array<char, 64> blake3{};
   std::array<char, 160> error{};
   std::array<WireSite, 64> sites{};
 };

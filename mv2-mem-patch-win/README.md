@@ -1,7 +1,7 @@
 # Windows MV2 DLL
 
 A C++20 `version.dll` proxy that discovers Chrome's MV2 checks at startup and
-patches them in memory. It supports x64, x86 and ARM64, with a 150,000-byte build
+patches them in memory. It supports x64, x86 and ARM64, with a 300,000-byte build
 limit. No signature table, Capstone or Z3 is used by this DLL.
 
 ## Build
@@ -58,9 +58,9 @@ extension at `chrome://extensions` if it is still disabled.
 This applies to all off-store extensions in that browser process. Management
 policy and corruption checks still apply. Close Chrome and remove the proxy DLL
 to restore stock behavior. An unavailable off-store gate is reported in the
-runtime debug log; unknown layouts are skipped. x86 and ARM64 currently support
-core MV2 discovery only. Recognition has been checked on x64 Chrome/Chromium
-152–159; other versions are not guaranteed.
+runtime debug log; unknown layouts are skipped. x86 and ARM64 also run bounded
+optional recognition. Browser lifecycle validation covers x64 Chrome/Chromium
+152–159; other versions and native ARM64 browser behavior are not guaranteed.
 
 ## Installing downloaded CRX files
 
