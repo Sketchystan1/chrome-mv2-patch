@@ -68,12 +68,17 @@ join hook using balanced subtree budgets for large subtrees. The total thread
 budget adapts to process affinity, eligible processor groups and the default
 CPU-set count without a fixed application ceiling; the scheduler places threads.
 The 16 MiB fork threshold bounds useful work. This is not per-CPU benchmark
-autotuning. Work allocation failure falls back to
-serial hashing. No oneTBB runtime is required. SSE2 filters, bounded literal/call
+autotuning. Work allocation or TLS initialization/installation failure falls back
+to serial hashing. Scoped dynamic TLS stores pointers to joined caller-owned
+budgets; failed restoration disables future lookups before storage expires.
+No oneTBB runtime is required. SSE2 filters, bounded literal/call
 searches and one exact cached trim range reduce discovery work without changing
 the structural checks. Optional recognizers collect their anchor names once and
 share the reference traversal, retaining independent hit limits and ambiguity
 checks. Each boundary object reads one immutable image.
+On x64, a complete preliminary check of authoritative runtime-table bounds can
+reject a core candidate before trimming. Decode/capacity uncertainty still runs
+the original trimmed checks; leaf, x86 and ARM64 recovery retain their usual path.
 
 ## Recognition and application
 
@@ -142,6 +147,9 @@ prevents an older DLL's cache from being reused after an update.
 Before applying a plan, the parent validates its identity, stock instructions,
 branch direction, targets, ordering and allocation bounds. All other loaded
 `.text` bytes must match the disk image, allowing checked HIGHLOW/DIR64 relocations.
+Decision-page protections are queried in one bounded `K32QueryWorkingSetEx` batch.
+Only valid exact execute/read results pass; all other results use the original
+`VirtualQuery` check. Residency and sharing never replace content validation.
 The existing decision instructions are edited during startup with this order:
 
 ```text
@@ -156,8 +164,9 @@ threads. W^X and data pointer swaps do not guarantee antivirus allowlisting.
 After successful verification/application, file-view unmapping can finish in a
 thread-pool callback while startup proceeds. A busy slot, failed DLL reference or
 failed submission falls back to synchronous unmapping. Runtime timings separate
-application from queued/synchronous cleanup. Static TLS is retained for the hash
-budget, so the proxy keeps thread initialization notifications enabled.
+application from queued/synchronous cleanup. The proxy disables unused thread
+notifications without static hash TLS and frees its dynamic TLS index on DLL
+detach after joined calls and retained cleanup callbacks finish.
 
 The diagnostic scanner retains truthful SHA-256 output and adds a `blake3` field.
 It computes both hashes, so its CLI wall time includes extra diagnostic hashing
@@ -169,15 +178,15 @@ delay-loaded for cache IO in the parent and helper.
 
 ## Validation and limits
 
-Measured on November 11, 2026 with MSVC 19.52.37029, Release `/MD`:
+Measured on November 12, 2026 with MSVC 19.52.37029, Release `/MD`:
 
 | Target | `version.dll` | `mv2-scan.exe` |
 | --- | ---: | ---: |
-| x64 | 219,136 bytes | 206,848 bytes |
-| x86 | 230,912 bytes | 214,528 bytes |
-| ARM64 | 156,672 bytes | 141,312 bytes |
+| x64 | 219,648 bytes | 207,360 bytes |
+| x86 | 230,912 bytes | 214,016 bytes |
+| ARM64 | 157,696 bytes | 142,336 bytes |
 
-All x64 tests (10/10) and x86 tests (7/7) passed. The final scanners reproduced
+All x64 tests (18/18) and x86 tests (14/14) passed. The final scanners reproduced
 166 reviewed core decisions across 21 x64 and two x86 stock images, preserving
 all 23 recognized InstallVerifier gates. The CRX download gate matched
 independently reviewed addresses on 20 x64 images; the different DCHECK Chrome
@@ -220,6 +229,12 @@ The next shared-reference search experiment is recorded in
 [PERFORMANCE-NEXT.md](PERFORMANCE-NEXT.md).
 Microsoft threading examples, processor sizing and the native/PPL comparison are
 recorded in [PERFORMANCE-THREADING.md](PERFORMANCE-THREADING.md).
+New stock-preflight overlap, lazy-trim experiments and the expanded optimization
+catalogue are in [PERFORMANCE-FRONTIER.md](PERFORMANCE-FRONTIER.md).
+Continued page-protection, worker and streaming experiments are in
+[PERFORMANCE-FOLLOWUP.md](PERFORMANCE-FOLLOWUP.md).
+Actual browser, dynamic TLS and read-buffer experiments are in
+[PERFORMANCE-IO-STARTUP.md](PERFORMANCE-IO-STARTUP.md).
 
 The diagnostic JSON includes hashes, inferred fields, patch bytes, skipped
 optional gates and unresolved candidates. Exit codes are 0 for a ready plan,

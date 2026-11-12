@@ -57,7 +57,9 @@ HMODULE WINAPI load(LPCWSTR path) {
 } // namespace
 
 BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {
+  if (reason == DLL_PROCESS_DETACH) { autoscan::ReleaseHashTls(); return TRUE; }
   if (reason != DLL_PROCESS_ATTACH) return TRUE;
+  DisableThreadLibraryCalls(self);
   if (!forward()) return FALSE;
   std::array<wchar_t, 32768> host{};
   DWORD length = GetModuleFileNameW(nullptr, host.data(), static_cast<DWORD>(host.size()));

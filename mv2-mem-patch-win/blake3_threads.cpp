@@ -26,9 +26,47 @@ unsigned HashThreadCount() noexcept {
 }
 
 namespace {
+INIT_ONCE budgetOnce = INIT_ONCE_STATIC_INIT;
+DWORD budgetIndex = TLS_OUT_OF_INDEXES;
+LONG budgetEnabled = 1;
 LONG active = 0;
 struct Budget { unsigned threads = 0, total = 0; };
-thread_local Budget budget;
+BOOL CALLBACK initializeBudget(PINIT_ONCE, void*, void**) {
+  budgetIndex = TlsAlloc();
+  if (budgetIndex == TLS_OUT_OF_INDEXES) InterlockedExchange(&budgetEnabled, 0);
+  return TRUE;
+}
+bool enabled() {
+  return InterlockedCompareExchange(&budgetEnabled, 0, 0) &&
+    InitOnceExecuteOnce(&budgetOnce, initializeBudget, nullptr, nullptr) &&
+    InterlockedCompareExchange(&budgetEnabled, 0, 0);
+}
+Budget currentBudget() {
+  if (!enabled()) return {1, 1};
+  auto value = static_cast<const Budget*>(TlsGetValue(budgetIndex));
+  return value ? *value : Budget{};
+}
+struct BudgetScope {
+  DWORD lastError = GetLastError();
+  Budget value{};
+  void* previous = nullptr;
+  bool installed = false;
+  explicit BudgetScope(Budget target = {}) { if (target.threads) install(target); }
+  bool install(Budget target) {
+    if (!enabled()) return false;
+    previous = TlsGetValue(budgetIndex); value = target;
+    installed = TlsSetValue(budgetIndex, &value) != FALSE;
+    return installed;
+  }
+  ~BudgetScope() {
+    if (installed && InterlockedCompareExchange(&budgetEnabled, 0, 0) &&
+        !TlsSetValue(budgetIndex, previous)) {
+      // A failed restore can leave a dead stack pointer: retire lookups first.
+      InterlockedExchange(&budgetEnabled, 0);
+    }
+    SetLastError(lastError);
+  }
+};
 struct Task {
   const uint8_t* input;
   size_t size;
@@ -40,12 +78,23 @@ struct Task {
   Budget budget;
 };
 void CALLBACK compress(PTP_CALLBACK_INSTANCE instance, void* raw, PTP_WORK) {
-  CallbackMayRunLong(instance);
   auto& task = *static_cast<Task*>(raw);
-  auto previous = budget; budget = task.budget;
-  *task.count = blake3_compress_subtree_wide(task.input, task.size, task.key, task.counter, task.flags, task.cvs, true);
-  budget = previous;
+  BudgetScope scope(task.budget);
+  CallbackMayRunLong(instance);
+  *task.count = blake3_compress_subtree_wide(task.input, task.size, task.key,
+    task.counter, task.flags, task.cvs, scope.installed);
   InterlockedDecrement(&active);
+}
+}
+
+namespace autoscan {
+void ReleaseHashTls() noexcept {
+  DWORD error = GetLastError();
+  InterlockedExchange(&budgetEnabled, 0);
+  if (budgetIndex != TLS_OUT_OF_INDEXES) {
+    TlsFree(budgetIndex); budgetIndex = TLS_OUT_OF_INDEXES;
+  }
+  SetLastError(error);
 }
 }
 
@@ -55,21 +104,22 @@ extern "C" void blake3_compress_subtree_wide_join_tbb(
     const uint8_t* l_input, size_t l_input_len, uint64_t l_chunk_counter, uint8_t* l_cvs, size_t* l_n,
     const uint8_t* r_input, size_t r_input_len, uint64_t r_chunk_counter, uint8_t* r_cvs, size_t* r_n) noexcept {
   if (use_tbb && l_input_len + r_input_len >= 16 * 1024 * 1024) {
-    auto allowed = budget;
+    BudgetScope scope;
+    auto allowed = currentBudget();
     if (!allowed.threads) allowed.threads = allowed.total = autoscan::HashThreadCount();
     if (allowed.threads > 1) {
       LONG count = InterlockedIncrement(&active);
       if (count < static_cast<LONG>(allowed.total)) {
         Task task{l_input, l_input_len, key, l_chunk_counter, flags, l_cvs, l_n, {allowed.threads / 2, allowed.total}};
-        PTP_WORK worker = CreateThreadpoolWork(compress, &task, nullptr);
-        if (worker) {
-          SubmitThreadpoolWork(worker);
-          auto previous = budget; budget = {allowed.threads - task.budget.threads, allowed.total};
-          *r_n = blake3_compress_subtree_wide(r_input, r_input_len, key, r_chunk_counter, flags, r_cvs, true);
-          budget = previous;
-          WaitForThreadpoolWorkCallbacks(worker, FALSE);
-          CloseThreadpoolWork(worker);
-          return;
+        if (scope.install({allowed.threads - task.budget.threads, allowed.total})) {
+          PTP_WORK worker = CreateThreadpoolWork(compress, &task, nullptr);
+          if (worker) {
+            SubmitThreadpoolWork(worker);
+            *r_n = blake3_compress_subtree_wide(r_input, r_input_len, key, r_chunk_counter, flags, r_cvs, true);
+            WaitForThreadpoolWorkCallbacks(worker, FALSE);
+            CloseThreadpoolWork(worker);
+            return;
+          }
         }
       }
       InterlockedDecrement(&active);

@@ -48,6 +48,8 @@ struct ImageInfo { uint32_t textRva, textRaw, textSize, imageSize; };
 HashValue Hash(std::span<const uint8_t> bytes);
 HashValue Blake3(std::span<const uint8_t> bytes);
 unsigned HashThreadCount() noexcept;
+// Call only after all hash users have joined, including during DLL unload.
+void ReleaseHashTls() noexcept;
 ImageInfo Inspect(std::span<const uint8_t> bytes);
 // The caller keeps these bytes locked and unchanged for this object's lifetime.
 class StockImage {

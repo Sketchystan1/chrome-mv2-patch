@@ -307,8 +307,9 @@ class Boundaries {
       previous = current;
     }
   }
-  Range find(uint32_t position) const {
-    if (error || !pe_.text.contains(position)) return {};
+  // Untrimmed queries return only authoritative x64 runtime-table bounds.
+  Range find(uint32_t position, bool untrimmed = false) const {
+    if (error || !pe_.text.contains(position) || (untrimmed && pe_.machine != IMAGE_FILE_MACHINE_AMD64)) return {};
     uint32_t low = 0, high = entries_;
     while (low < high) {
       uint32_t mid = low + (high - low) / 2, begin = 0;
@@ -319,11 +320,11 @@ class Boundaries {
       Range range{};
       while (low) {
         if (entry(--low, range, false)) {
-          if (range.contains(position)) return trim(range);
+          if (range.contains(position)) return untrimmed ? range : trim(range);
           break;
         }
       }
-      return leaf(position, range.end);
+      return untrimmed ? Range{} : leaf(position, range.end);
     }
     Range range{0, pe_.text.rva + pe_.text.size};
     if (low) pe_.rvaRead(table_ + (low - 1) * stride_, range.begin);

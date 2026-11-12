@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <psapi.h>
 #include "boundaries.hpp"
 
 namespace autoscan {
@@ -170,9 +171,16 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
     addPage(first & ~(static_cast<uintptr_t>(system.dwPageSize) - 1));
     addPage(last & ~(static_cast<uintptr_t>(system.dwPageSize) - 1));
   }
-  for (const auto& page : pages) {
+  std::array<PSAPI_WORKING_SET_EX_INFORMATION, 128> pageInfo{};
+  for (size_t n = 0; n < pages.size(); ++n)
+    pageInfo[n].VirtualAddress = reinterpret_cast<void*>(pages[n].address);
+  bool queriedPages = K32QueryWorkingSetEx(GetCurrentProcess(), pageInfo.data(),
+    static_cast<DWORD>(pages.size() * sizeof(pageInfo[0]))) != FALSE;
+  for (size_t n = 0; n < pages.size(); ++n) {
+    const auto& attributes = pageInfo[n].VirtualAttributes;
+    if (queriedPages && attributes.Valid && attributes.Win32Protection == PAGE_EXECUTE_READ) continue;
     MEMORY_BASIC_INFORMATION memory{};
-    if (!VirtualQuery(reinterpret_cast<void*>(page.address), &memory, sizeof(memory)) || memory.Protect != PAGE_EXECUTE_READ)
+    if (!VirtualQuery(reinterpret_cast<void*>(pages[n].address), &memory, sizeof(memory)) || memory.Protect != PAGE_EXECUTE_READ)
       return decline("decision page is not execute/read");
   }
   auto restore = [&]() {

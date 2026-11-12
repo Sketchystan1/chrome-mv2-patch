@@ -8,7 +8,8 @@
 
 namespace autoscan {
 namespace {
-bool prefilter(const PeImage& pe, Head head, Range range) {
+bool prefilter(const PeImage& pe, Head head, Range range, bool* complete = nullptr) {
+  if (complete) *complete = true;
   FixedList<uint32_t, 256> todo, seen;
   todo.push_back(head.affected); unsigned constants = 0; bool bit = false;
   while (!todo.empty()) {
@@ -16,14 +17,15 @@ bool prefilter(const PeImage& pe, Head head, Range range) {
     if (!range.contains(pc) || pc == head.unaffected) continue;
     bool repeat = false; for (auto p : seen) repeat |= p == pc;
     if (repeat) continue;
-    if (!seen.push_back(pc)) return false;
+    if (!seen.push_back(pc)) { if (complete) *complete = false; return false; }
     auto i = Lift(pe.at(pc, range.end - pc), pc);
-    if (!i.length() || Terminal(i) || (i.op == Op::Other && (i.other() == Other::Call || i.other() == Other::Store))) continue;
+    if (!i.length()) { if (complete) *complete = false; continue; }
+    if (Terminal(i) || (i.op == Op::Other && (i.other() == Other::Call || i.other() == Other::Store))) continue;
     if (i.width() == 4 && (i.op == Op::CmpImm || (i.op == Op::Other && i.other() == Other::ConditionalCompare)))
       constants |= i.imm == 1 ? 1 : i.imm == 3 ? 2 : i.imm == 8 ? 4 : i.imm == 5 ? 8 : i.imm == 10 ? 16 : 0;
     bit |= i.op == Op::Other && (i.other() == Other::BitTest || i.other() == Other::ShiftRight);
-    if ((i.op == Op::Jmp || i.conditional()) && !todo.push_back(i.target())) return false;
-    if (i.op != Op::Jmp && !todo.push_back(pc + i.length())) return false;
+    if ((i.op == Op::Jmp || i.conditional()) && !todo.push_back(i.target())) { if (complete) *complete = false; return false; }
+    if (i.op != Op::Jmp && !todo.push_back(pc + i.length())) { if (complete) *complete = false; return false; }
   }
   return (constants & 28) == 28 && (bit || (constants & 3) == 3);
 }
@@ -549,10 +551,15 @@ Report Analyze(std::span<const uint8_t> bytes) {
     for (uint32_t cp = lower; cp < jumpPc; cp += step) {
       auto cmp = Lift(pe.code(cp), cp);
       if (cp + cmp.length() != jumpPc || !threshold(cmp, jump)) continue;
-      auto bounds = boundaries.find(cp); if (!bounds) continue;
       bool inverted = jump.condition() == 12 || jump.condition() == 14;
       Head head{cp, jumpPc, inverted ? jump.target() : jumpPc + jump.length(),
                 inverted ? jumpPc + jump.length() : jump.target(), inverted};
+#if defined(AUTOSCAN_X64)
+      // shortcut: prescreen raw x64 table bounds; extend only after native architecture parity.
+      auto raw = boundaries.find(cp, true); bool complete = true;
+      if (raw && !prefilter(pe, head, raw, &complete) && complete) continue;
+#endif
+      auto bounds = boundaries.find(cp); if (!bounds) continue;
       if (!prefilter(pe, head, bounds)) continue;
       plausible = true;
       if (program.range.begin != bounds.begin || program.range.end != bounds.end) program.build(pe, bounds);
