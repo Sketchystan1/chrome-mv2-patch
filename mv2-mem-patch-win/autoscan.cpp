@@ -56,6 +56,15 @@ bool threshold(const LiftedInsn& cmp, const LiftedInsn& jump) {
     ((cmp.imm == 2 && (jump.condition() == 14 || jump.condition() == 15)) ||
      (cmp.imm == 3 && (jump.condition() == 12 || jump.condition() == 13)));
 }
+#if !defined(AUTOSCAN_ARM64)
+bool cmpStart(uint8_t byte) {
+  return byte == 0x81 || byte == 0x83 || byte == 0x3d || byte == 0x67
+#if defined(AUTOSCAN_X64)
+    || (byte >= 0x40 && byte <= 0x4f)
+#endif
+    ;
+}
+#endif
 struct RefQuery { uint32_t literal = 0; FixedList<uint32_t, 64> found; bool complete = true; };
 struct RefBatch {
   FixedList<RefQuery, 17> queries;
@@ -92,19 +101,12 @@ void scanReferences(const PeImage& pe, std::span<RefQuery> queries) {
     for (auto& query : queries) if (query.complete && target == query.literal && !query.found.push_back(pc)) query.complete = false;
   }
 #else
-  for (size_t n = 2; n + 4 <= code.size(); ++n) {
+  auto examine = [&](size_t n) {
 #if defined(AUTOSCAN_X64)
-    if (n + 19 <= code.size()) {
-      auto bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(code.data() + n - 1));
-      auto matches = _mm_cmpeq_epi8(_mm_and_si128(bytes, _mm_set1_epi8(-57)), _mm_set1_epi8(5));
-      unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(matches));
-      if (!mask) { n += 15; continue; }
-      n += std::countr_zero(mask);
-    }
-    if ((code[n - 1] & 0xc7) != 5) continue;
+    if ((code[n - 1] & 0xc7) != 5) return;
     uint8_t op = code[n - 2];
     if (op != 0x8d && !(n >= 3 && code[n - 3] == 0x0f &&
-        (op == 0x10 || op == 0x11 || op == 0x28 || op == 0x29 || op == 0x6f || op == 0x7f))) continue;
+        (op == 0x10 || op == 0x11 || op == 0x28 || op == 0x29 || op == 0x6f || op == 0x7f))) return;
     int64_t end = static_cast<int64_t>(pe.text.rva) + n + 4;
     int64_t target = end + ReadInsn<int32_t>(code.data() + n);
 #else
@@ -113,7 +115,7 @@ void scanReferences(const PeImage& pe, std::span<RefQuery> queries) {
 #endif
     RefQuery* matching = nullptr;
     for (auto& query : queries) if (query.complete && query.literal == target) { matching = &query; break; }
-    if (!matching) continue;
+    if (!matching) return;
     auto& found = matching->found;
     uint32_t first = static_cast<uint32_t>(std::max<int64_t>(pe.text.rva, end - 15));
     for (uint32_t pc = first; pc + 4 < end; ++pc) {
@@ -127,7 +129,17 @@ void scanReferences(const PeImage& pe, std::span<RefQuery> queries) {
 #endif
       if (!found.push_back(pc)) { matching->complete = false; break; }
     }
+  };
+  size_t n = 2;
+#if defined(AUTOSCAN_X64)
+  for (; n + 19 <= code.size(); n += 16) {
+    auto bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(code.data() + n - 1));
+    auto matches = _mm_cmpeq_epi8(_mm_and_si128(bytes, _mm_set1_epi8(-57)), _mm_set1_epi8(5));
+    unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(matches));
+    while (mask) { examine(n + std::countr_zero(mask)); mask &= mask - 1; }
   }
+#endif
+  for (; n + 4 <= code.size(); ++n) examine(n);
 #endif
 }
 bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& found, RefBatch& batch) {
@@ -667,6 +679,9 @@ Report Analyze(std::span<const uint8_t> bytes) {
 #endif
     bool plausible = false;
     for (uint32_t cp = lower; cp < jumpPc; cp += step) {
+#if !defined(AUTOSCAN_ARM64)
+      if (!cmpStart(pe.code(cp)[0])) continue;
+#endif
       auto cmp = Lift(pe.code(cp), cp);
       if (cp + cmp.length() != jumpPc || !threshold(cmp, jump)) continue;
       bool inverted = jump.condition() == 12 || jump.condition() == 14;

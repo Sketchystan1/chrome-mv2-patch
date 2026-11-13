@@ -6,7 +6,9 @@ The best supported improvements already in that path are `/O2`/LTCG, upstream SI
 hashing, balanced adaptive hash workers, parent cache reads, bounded search filters,
 shared reference searches, exact function-trim reuse, lazy x64 trimming, batched
 page-protection checks, dynamic hash TLS, deferred view cleanup and process-only
-initial-thread capture during dynamic DLL loading.
+initial-thread capture during dynamic DLL loading. Further November 13 changes
+add exact x86/x64 CMP-start filtering, ordered SIMD reference-mask draining,
+relocation-block cursor reuse and two-way large-gap code comparison.
 
 This is the single record for the former performance Markdown/JSON reports and the
 scanner, carrier and Edge result files. It retains measured summaries, validation,
@@ -320,6 +322,115 @@ showed modest discovery gains; neither approach removes compulsory file reads,
 mapping faults or loaded-code validation, and upstream assembly is not optimized
 by the C++ profile. A permanent build configuration still needs a complete-path
 win on representative held-out browser starts.
+
+## Further November 13 scan and validation improvements
+
+Discovery now checks an exact set of possible first bytes before decoding a
+32-bit CMP-immediate candidate. The complete decoder and predicate checks still
+run on survivors. The x64 reference collector drains each 16-byte SIMD mask in
+address order, preserving hit limits and ambiguity handling. A smaller occupancy
+buffer initialization was tested and removed because paired measurements showed
+no useful gain.
+
+Relocation block headers are validated once. A cursor skips only complete blocks
+whose maximum relocation span precedes the next decision gap; sorted tables can
+also stop at the next gap boundary. Unsorted tables retain the original traversal.
+Individual relocation widths, ordering, overlap and decision-boundary checks are
+unchanged, including zero-delta relocations.
+
+After hashing, code gaps of at least 16 MiB use one thread-pool callback for half
+the bytes and the calling thread for the other half. Each worker is joined even
+on mismatch before returning or patching. One available CPU or worker allocation
+failure uses serial `memcmp`. Relocation words and decision instructions retain
+their original small comparisons. This adds no dependency or static DLL TLS.
+
+| Controlled component measurement | Before median | After median | Reduction |
+| --- | ---: | ---: | ---: |
+| Chrome 157 discovery, retained mapping | 369.72745 ms | 349.4661 ms | 5.48% |
+| Edge 157 discovery, retained mapping | 323.2322 ms | 307.16195 ms | 4.97% |
+| Chrome 157 text comparison, fresh stock-file view | 135.4431 ms | 76.3543 ms | 43.63% |
+| Edge 157 text comparison, fresh stock-file view | 160.1893 ms | 117.5187 ms | 26.64% |
+
+Discovery uses one executable and one retained mapping per image, with sixteen
+pairs alternating order on each call after two excluded warm-ups. Both browsers
+were faster in fourteen of sixteen pairs; paired median reductions were 6.26%
+and 4.91%. All 68 complete reports matched exactly. Earlier separate-process ABBA
+controls suggested 7.14%/6.15%, but component runs contradicted those gains under
+background drift. The final per-call controls supersede those estimates; the
+earlier raw observations are retained. The comparison kernel uses one executable,
+alternating pair order and nine retained pairs per image. Its live buffer is
+already resident; the stock file is cached in RAM but remapped for each call.
+These are component measurements, not complete browser launch improvements or
+cold-disk results. Raw observations and frozen sources remain under ignored
+`_scratch/autopatch-speed-2026-11-13/`.
+
+Native tests pass 20/20 on x64 and 17/17 on x86; all ARM64 targets compile.
+Added checks compare the scanner filters and relocation traversal against their
+original behavior and exercise comparator split boundaries, mismatches, one-CPU
+operation, allocation failure and callback joins. Native ARM64 execution is
+unavailable.
+
+The complete x64 `ApplyPlan` comparison used the same executable, one prehashed
+retained stock mapping and an isolated relocated Chrome image. Twenty-four
+observations per mode rotated order on each call after excluded warm-ups:
+
+| Full validation and patch transaction | Median |
+| --- | ---: |
+| Original traversal and serial comparison | 44.95320 ms |
+| Relocation cursor only | 43.99140 ms |
+| Cursor and two-way comparison | 38.88675 ms |
+
+The combined median was 13.50% lower and all 24 observations beat the original;
+675 final-decision assertions passed. Hashing, fresh mapping faults and browser
+launch are excluded. The first original warm-up took 255.7 ms and is not part of
+the retained population.
+
+Separate x86 synthetic 32 MiB text fixtures used 24 alternating pairs and direct
+serial comparison to isolate the relocation cursor. With 8,192 relocation blocks,
+nine decisions improved 6.87735→6.64180 ms (3.43%) and 64 decisions improved
+9.06280→7.35885 ms (18.80%). A 58,192-block/nine-decision scaling fixture improved
+8.41330→6.95880 ms (17.28%). All 4,100 final-decision assertions passed. These are
+synthetic retained-image results, not native x86 browser startup measurements.
+
+The final production DLL also passed a common-frozen-profile cached Chrome
+157.0.8103.79 browser comparison, alternating AB/BA order across twelve pairs:
+
+| Cached headless API-response endpoint | Before | Final DLL |
+| --- | ---: | ---: |
+| Median | 962.85775 ms | 807.37965 ms |
+| p95 / maximum with twelve samples | 1,150.9568 ms | 1,019.37 ms |
+
+The median fell 16.15%; eleven of twelve pairs were faster. Timing begins at QPC
+immediately before `ResumeThread` and ends after the ready observer receives both
+browser-version and process-info RPC responses with the browser PID checked.
+Ten-millisecond port polling and observer/RPC/IPC overhead remain included. This
+is a warm cached, headless, GPU-disabled workload on one host, with ordinary
+background activity; it does not measure cold storage or usable desktop windows.
+The component percentages above must not be added to this launch improvement.
+
+All 26 launches including two excluded warm-ups passed 234 final-instruction and
+78 renderer sandbox checks. All 24 measured cache hits preserved cache contents
+and mtime. The stock-file SHA-256 remained
+`db7ebeb22a6f731d85af882d314fecbab770eac22744dca033811d4c61cbd087` and the private
+test registry was removed. The baseline was the frozen current PSS DLL
+`a9d50f5c667d300c56765b13f7e67ec075118ca983817a40e339190b026884ea`;
+the final DLL identity is below. Raw results are in
+`_scratch/autopatch-speed-2026-11-13/browser/results.json`.
+
+The same final DLL passed a separate packed-MV2 lifecycle: stock, patched, cached
+restart, cache-deleted restart and removal/restoration. All 45 instruction and
+39 renderer policy checks passed, together with MV2 enable/disable, background
+HTTP cancellation and MV3 behavior. The cached restart reused the protected plan;
+deleting it caused successful rediscovery. Stock disk bytes stayed unchanged and
+the private registry was removed. Results are in `_scratch/ap-life-13/results.json`
+and `_scratch/autopatch-speed-2026-11-13/validation_summary.json`. These functional
+phase starts are not a paired performance population.
+
+| Final deployment DLL | Bytes | SHA-256 |
+| --- | ---: | --- |
+| x64 secur32.dll | 242,688 | `d42b07e6a1af4094e83f512e579b5c0818a910985d51487190aee616437aeb08` |
+| x86 secur32.dll | 244,224 | `d1e2d4e9d03e8574855dcd15c80b95f6ed47ff930230ca8fa0baa16e2c127a98` |
+| ARM64 secur32.dll | 172,544 | `e5664925904bbc90a499549c84cf2d2f56ce2cb7f65711a2f40ee01050fd362e` |
 
 ## Measured improvements already selected
 

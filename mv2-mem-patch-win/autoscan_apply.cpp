@@ -4,6 +4,7 @@
 #include <cstring>
 #include <psapi.h>
 #include "boundaries.hpp"
+#include "text_compare.hpp"
 
 namespace autoscan {
 WirePlan MakePlan(const Report& report) {
@@ -65,19 +66,36 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
   auto liveText = image.subspan(info.textRva, info.textSize);
   if (!readable(liveText)) return decline("loaded code is not fully readable");
 
+  const auto& reloc = pe.directory(IMAGE_DIRECTORY_ENTRY_BASERELOC);
+  auto table = pe.at(reloc.VirtualAddress, reloc.Size);
+  bool validRelocations = !reloc.Size || table.size() == reloc.Size, sortedBlocks = true;
+  uint32_t previousBlock = 0;
+  for (size_t offset = 0; validRelocations && offset < table.size();) {
+    if (table.size() - offset < 8) { validRelocations = false; break; }
+    auto block = ReadInsn<IMAGE_BASE_RELOCATION>(table.data() + offset);
+    if (block.SizeOfBlock < 8 || block.SizeOfBlock > table.size() - offset || (block.SizeOfBlock & 1)) {
+      validRelocations = false; break;
+    }
+    if (block.VirtualAddress < previousBlock) sortedBlocks = false;
+    previousBlock = block.VirtualAddress;
+    offset += block.SizeOfBlock;
+  }
+  // Reuse only blocks whose entire possible relocation span precedes the next gap.
+  size_t firstBlock = 0;
   auto sameText = [&](uint32_t from, uint32_t to) {
     uint32_t cursor = from;
-    const auto& reloc = pe.directory(IMAGE_DIRECTORY_ENTRY_BASERELOC);
-    auto table = pe.at(reloc.VirtualAddress, reloc.Size);
-    if (reloc.Size && table.size() != reloc.Size) return false;
+    if (!validRelocations) return false;
     uint64_t delta = static_cast<uint64_t>(base) - pe.imageBase;
-    for (size_t offset = 0; offset < table.size();) {
-      if (table.size() - offset < 8) return false;
+    for (size_t offset = sortedBlocks ? firstBlock : 0; offset < table.size();) {
       auto block = ReadInsn<IMAGE_BASE_RELOCATION>(table.data() + offset);
-      if (block.SizeOfBlock < 8 || block.SizeOfBlock > table.size() - offset || (block.SizeOfBlock & 1)) return false;
       // A 12-bit offset plus an eight-byte relocation can cross the block's page.
       uint64_t blockEnd = uint64_t{block.VirtualAddress} + 0xfff + 8;
-      if (block.VirtualAddress >= to || blockEnd <= from) { offset += block.SizeOfBlock; continue; }
+      if (block.VirtualAddress >= to && sortedBlocks) break;
+      if (block.VirtualAddress >= to || blockEnd <= from) {
+        offset += block.SizeOfBlock;
+        if (sortedBlocks) firstBlock = offset;
+        continue;
+      }
       for (size_t n = 8; n < block.SizeOfBlock; n += 2) {
         uint16_t entry = ReadInsn<uint16_t>(table.data() + offset + n);
         unsigned type = entry >> 12;
@@ -86,7 +104,7 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
         unsigned width = type == IMAGE_REL_BASED_HIGHLOW ? 4 : type == IMAGE_REL_BASED_DIR64 ? 8 : 0;
         if (rva >= to || rva + (width ? width : 1) <= from) continue;
         if (!width || rva < cursor || rva + width > to) return false;
-        if (memcmp(image.data() + cursor, disk.data() + info.textRaw + cursor - info.textRva, rva - cursor)) return false;
+        if (!SameBytes(image.data() + cursor, disk.data() + info.textRaw + cursor - info.textRva, rva - cursor)) return false;
         uint64_t value = 0;
         memcpy(&value, disk.data() + info.textRaw + rva - info.textRva, width);
         value += delta;
@@ -95,7 +113,7 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
       }
       offset += block.SizeOfBlock;
     }
-    return !memcmp(image.data() + cursor, disk.data() + info.textRaw + cursor - info.textRva, to - cursor);
+    return SameBytes(image.data() + cursor, disk.data() + info.textRaw + cursor - info.textRva, to - cursor);
   };
   uint32_t previous = info.textRva;
   unsigned done = 0, optional = 0;

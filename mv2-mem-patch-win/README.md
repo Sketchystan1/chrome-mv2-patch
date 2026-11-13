@@ -308,6 +308,10 @@ branch direction, targets, ordering and allocation bounds. All other loaded
 Decision-page protections are queried in one bounded `K32QueryWorkingSetEx` batch.
 Only valid exact execute/read results pass; all other results use the original
 `VirtualQuery` check. Residency and sharing never replace content validation.
+Large code gaps use two joined comparisons after hashing, with serial fallback
+on one available CPU or worker creation failure. Relocation block headers are
+validated once; sorted tables reuse a bounded cursor between decisions, while
+unsorted tables retain the original traversal and relocation checks.
 The existing decision instructions are edited during startup with this order:
 
 ```text

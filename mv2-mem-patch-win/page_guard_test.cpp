@@ -137,7 +137,103 @@ struct Fixture {
           !info.VirtualAttributes.Shared && info.VirtualAttributes.Win32Protection == PAGE_EXECUTE_READ,
           "private allocated page retains exact execute/read protection");
   }
+  void relocations(std::span<const uint8_t> table) {
+    bool x86 = autoscan::NativeMachine() == IMAGE_FILE_MACHINE_I386;
+    put<uint16_t>(disk, 0x86, 2);
+    IMAGE_SECTION_HEADER section{};
+    std::memcpy(section.Name, ".reloc", 6);
+    section.VirtualAddress = section.PointerToRawData = 0x3000;
+    section.Misc.VirtualSize = section.SizeOfRawData = 0x1000;
+    section.Characteristics = IMAGE_SCN_MEM_READ | IMAGE_SCN_CNT_INITIALIZED_DATA;
+    put(disk, (x86 ? 0x178 : 0x188) + sizeof(section), section);
+    put<uint32_t>(disk, x86 ? 0x120 : 0x130, 0x3000);
+    put<uint32_t>(disk, x86 ? 0x124 : 0x134, static_cast<uint32_t>(table.size()));
+    if (x86) put<uint32_t>(disk, 0xb4, static_cast<uint32_t>(reinterpret_cast<uintptr_t>(live)));
+    else put<uint64_t>(disk, 0xb0, reinterpret_cast<uintptr_t>(live));
+    std::fill(disk.begin() + 0x3000, disk.end(), uint8_t{});
+    std::copy(table.begin(), table.end(), disk.begin() + 0x3000);
+    DWORD old = 0, ignored = 0;
+    check(VirtualProtect(live, disk.size(), PAGE_READWRITE, &old) != FALSE, "prepare relocation fixture");
+    std::memcpy(live, disk.data(), disk.size());
+    check(VirtualProtect(live, disk.size(), old, &ignored) != FALSE, "restore relocation fixture protection");
+    plan.blake3 = autoscan::Blake3(disk);
+  }
 };
+
+// The original independent traversal is the oracle for unordered and malformed tables.
+bool referenceText(const Fixture& fixture) {
+  autoscan::PeImage pe(fixture.disk);
+  const auto& reloc = pe.directory(IMAGE_DIRECTORY_ENTRY_BASERELOC);
+  auto table = pe.at(reloc.VirtualAddress, reloc.Size);
+  auto same = [&](uint32_t from, uint32_t to) {
+    if (reloc.Size && table.size() != reloc.Size) return false;
+    uint32_t cursor = from;
+    for (size_t offset = 0; offset < table.size();) {
+      if (table.size() - offset < 8) return false;
+      auto block = autoscan::ReadInsn<IMAGE_BASE_RELOCATION>(table.data() + offset);
+      if (block.SizeOfBlock < 8 || block.SizeOfBlock > table.size() - offset || (block.SizeOfBlock & 1)) return false;
+      uint64_t end = uint64_t{block.VirtualAddress} + 0xfff + 8;
+      if (block.VirtualAddress < to && end > from) for (size_t n = 8; n < block.SizeOfBlock; n += 2) {
+        uint16_t entry = autoscan::ReadInsn<uint16_t>(table.data() + offset + n);
+        unsigned type = entry >> 12;
+        if (type == IMAGE_REL_BASED_ABSOLUTE) continue;
+        uint64_t rva = uint64_t{block.VirtualAddress} + (entry & 0xfff);
+        unsigned width = type == IMAGE_REL_BASED_HIGHLOW ? 4 : type == IMAGE_REL_BASED_DIR64 ? 8 : 0;
+        if (rva >= to || rva + (width ? width : 1) <= from) continue;
+        if (!width || rva < cursor || rva + width > to) return false;
+        if (std::memcmp(fixture.live + cursor, fixture.disk.data() + cursor, rva - cursor)) return false;
+        uint64_t value = 0;
+        std::memcpy(&value, fixture.disk.data() + rva, width);
+        value += static_cast<uint64_t>(reinterpret_cast<uintptr_t>(fixture.live)) - pe.imageBase;
+        if (std::memcmp(fixture.live + rva, &value, width)) return false;
+        cursor = static_cast<uint32_t>(rva) + width;
+      }
+      offset += block.SizeOfBlock;
+    }
+    return !std::memcmp(fixture.live + cursor, fixture.disk.data() + cursor, to - cursor);
+  };
+  uint32_t previous = pe.text.rva;
+  for (unsigned n = 0; n < fixture.plan.count; ++n) {
+    const auto& site = fixture.plan.sites[n];
+    if (!same(previous, site.rva)) return false;
+    previous = site.rva + site.width;
+  }
+  return same(previous, pe.text.rva + pe.text.size);
+}
+void relocationTraversal() {
+  constexpr uint32_t pages[] = {0, 0x1000, 0x2000, 0x4000, 0xfffff000};
+  constexpr uint16_t offsets[] = {0, 0x10, 0x3f, 0x40, 0x41, 0x42, 0x43, 0xfff};
+  uint32_t random = 0x38ad91;
+  auto next = [&] { random = random * 1664525 + 1013904223; return random; };
+  for (unsigned test = 0; test < 256; ++test) {
+    Fixture fixture;
+    std::array<uint8_t, 48> table{};
+    size_t size = table.size();
+    for (unsigned n = 0; n < 4; ++n) {
+      put<uint32_t>(table, n * 12, pages[next() % std::size(pages)]);
+      put<uint32_t>(table, n * 12 + 4, 12);
+      for (unsigned j = 0; j < 2; ++j) {
+        unsigned type = next() % 4;
+        type = type == 0 ? 0 : type == 1 ? IMAGE_REL_BASED_HIGHLOW : type == 2 ? IMAGE_REL_BASED_DIR64 : 15;
+        put<uint16_t>(table, n * 12 + 8 + j * 2,
+          static_cast<uint16_t>((type << 12) | offsets[next() % std::size(offsets)]));
+      }
+    }
+    if (test < 32) for (unsigned n = 0; n < 4; ++n) put<uint32_t>(table, n * 12, n * 0x1000);
+    if (test == 0) put<uint32_t>(table, 4, 6);
+    if (test == 1) put<uint32_t>(table, 4, 11);
+    if (test == 2) put<uint32_t>(table, 40, 14);
+    if (test == 3) --size;
+    fixture.relocations(std::span(table).first(size));
+    bool expected = referenceText(fixture);
+    auto result = fixture.apply();
+    check((result == autoscan::ApplyResult::applied) == expected && fixture.bytesMatch(expected) &&
+          fixture.protectedAgain() && (expected || !protectCalls),
+          "relocation block reuse matches the original ordered traversal", fixture.reason);
+    if (expected) check(fixture.apply() == autoscan::ApplyResult::alreadyApplied,
+                        "accepted relocation traversal remains idempotent");
+  }
+}
 void imageCopyOnWrite() {
   MEMORY_BASIC_INFORMATION memory{};
   check(!(reinterpret_cast<uintptr_t>(cowPage) & 0xfff) &&
@@ -157,6 +253,7 @@ void imageCopyOnWrite() {
 
 int main() {
   using Result = autoscan::ApplyResult;
+  relocationTraversal();
   for (BatchMode mode : {BatchMode::native, BatchMode::fail, BatchMode::invalidLast, BatchMode::wrongProtection}) {
     Fixture fixture;
     check(fixture.apply(mode) == Result::applied && fixture.bytesMatch(true) && fixture.protectedAgain(),
