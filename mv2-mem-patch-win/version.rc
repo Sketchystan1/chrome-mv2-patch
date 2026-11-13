@@ -1,4 +1,4 @@
-// version.rc - Windows VERSIONINFO for the mv2-mem-patch version.dll proxy.
+// Windows VERSIONINFO shared by the automatic patcher proxy DLLs.
 //
 // CMakeLists.txt supplies the project version through the MV2_* defines.
 //
@@ -15,6 +15,9 @@
 #ifndef MV2_PROD
 #define MV2_PROD "1.16.0"
 #endif
+#ifndef MV2_PROXY_STR
+#define MV2_PROXY_STR "version.dll"
+#endif
 
 VS_VERSION_INFO VERSIONINFO
  FILEVERSION    MV2_VERC
@@ -30,11 +33,11 @@ BEGIN
         BLOCK "040904B0"
         BEGIN
             VALUE "CompanyName",      "chrome-mv2-patch"
-            VALUE "FileDescription",  "Chrome MV2 compatibility shim (version.dll proxy)"
+            VALUE "FileDescription",  "chrome-mv2-patch " MV2_PROXY_STR " proxy"
             VALUE "FileVersion",      MV2_VER_STR
-            VALUE "InternalName",     "version.dll"
+            VALUE "InternalName",     MV2_PROXY_STR
             VALUE "LegalCopyright",   "Copyright (C) 2026 chrome-mv2-patch. MIT-licensed. Not affiliated with Microsoft or Google."
-            VALUE "OriginalFilename", "version.dll"
+            VALUE "OriginalFilename", MV2_PROXY_STR
             VALUE "ProductName",      "chrome-mv2-patch mem-patch"
             VALUE "ProductVersion",   MV2_PROD
         END

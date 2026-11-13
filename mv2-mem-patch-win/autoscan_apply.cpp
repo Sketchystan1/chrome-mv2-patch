@@ -23,7 +23,8 @@ WirePlan MakePlan(const Report& report) {
     }
     plan.sites[n] = {gate.rva, gate.width, gate.stock, gate.patch};
   }
-  if (plan.count > unsigned(plan.offstoreRva != 0) + unsigned(plan.crxDownloadRva != 0)) plan.status = 0;
+  if (plan.count > unsigned(plan.offstoreRva != 0) + unsigned(plan.crxDownloadRva != 0) ||
+      (plan.count == 2 && plan.offstoreRva && plan.crxDownloadRva)) plan.status = 0;
   return plan;
 }
 
@@ -131,8 +132,9 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
         (site.width == 2 ? (opcode < 0x74 || opcode > 0x75) && (opcode < 0x7C || opcode > 0x7F) :
                           (opcode < 0x84 || opcode > 0x85) && (opcode < 0x8C || opcode > 0x8F)))
       return decline("unsupported decision instruction");
-    if ((opcode == 0x75 || opcode == 0x85) != offstore) return decline("optional decision metadata differs");
-    if ((opcode == 0x74 || opcode == 0x84) != crxDownload) return decline("CRX download metadata differs");
+    bool edgeSource = offstore && pe.isEdge() && (opcode == 0x74 || opcode == 0x84);
+    if ((opcode == 0x75 || opcode == 0x85) != (offstore && !edgeSource)) return decline("optional decision metadata differs");
+    if ((opcode == 0x74 || opcode == 0x84) != (crxDownload || edgeSource)) return decline("CRX download metadata differs");
     bool inverted = (opcode & 3) == 0 || (opcode & 3) == 2;
     if (inverted) std::fill_n(expected.begin(), site.width, uint8_t{0x90});
     else if (site.width == 2) expected[0] = 0xEB;
@@ -152,7 +154,8 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
     if (!sameText(previous, site.rva)) return decline("loaded code differs from the scanned file");
     previous = site.rva + site.width;
   }
-  if (optional != unsigned(plan.offstoreRva != 0) + unsigned(plan.crxDownloadRva != 0) || optional == plan.count)
+  if (optional != unsigned(plan.offstoreRva != 0) + unsigned(plan.crxDownloadRva != 0) ||
+      (optional == plan.count && (!pe.isEdge() || optional != 2)))
     return decline("invalid optional decision metadata");
   if (!sameText(previous, info.textRva + info.textSize)) return decline("loaded code differs from the scanned file");
   if (done && done != plan.count) return decline("mixed stock and patched state");

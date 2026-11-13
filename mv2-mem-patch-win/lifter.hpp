@@ -235,6 +235,9 @@ inline LiftedInsn LiftX86(std::span<const uint8_t> bytes, uint32_t pc, bool x64)
   if (escaped && second >= 0x40 && second <= 0x4f) {
     other(Other::Cmov); out.dst = reg; out.src = mod == 3 ? rm : base; return out;
   }
+  if (!escaped && op == 0x03) {
+    other(Other::Overwrite); out.dst = reg; out.src = mod == 3 ? rm : base; out.encoding |= 0x40; return out;
+  }
   if (!escaped && x64 && op == 0x63) {
     other(Other::Overwrite); out.dst = reg; out.src = mod == 3 ? rm : base; return out;
   }

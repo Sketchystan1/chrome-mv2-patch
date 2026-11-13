@@ -64,6 +64,13 @@ class PeImage {
     auto b = at(rva, sizeof(T)); if (b.size() != sizeof(T)) return false;
     std::memcpy(&value, b.data(), sizeof value); return true;
   }
+  bool isEdge() const {
+    IMAGE_EXPORT_DIRECTORY exports{};
+    const auto& entry = directory(IMAGE_DIRECTORY_ENTRY_EXPORT);
+    if (entry.Size < sizeof(exports) || !rvaRead(entry.VirtualAddress, exports)) return false;
+    auto name = at(exports.Name, sizeof("msedge.dll"));
+    return name.size() == sizeof("msedge.dll") && !std::memcmp(name.data(), "msedge.dll", name.size());
+  }
   auto code(uint32_t rva) const {
     return text.contains(rva) ? at(rva, text.size - (rva - text.rva)) : std::span<const uint8_t>{};
   }
@@ -306,6 +313,27 @@ class Boundaries {
       if (!entry(n, current) || (n && previous.end > current.begin)) { error = "invalid unwind range or xdata"; return; }
       previous = current;
     }
+  }
+  bool chainedTo(uint32_t position, uint32_t function) const {
+    auto range = find(position, true);
+    if (!range) return false;
+    if (range.begin == function) return true;
+    uint32_t low = 0, high = entries_;
+    while (low < high) {
+      uint32_t mid = low + (high - low) / 2, begin = 0;
+      pe_.rvaRead(table_ + mid * stride_, begin);
+      if (begin <= range.begin) low = mid + 1; else high = mid;
+    }
+    X64RuntimeFunction record{};
+    if (!low || !pe_.rvaRead(table_ + (low - 1) * stride_, record) || record.BeginAddress != range.begin || record.EndAddress != range.end) return false;
+    for (unsigned depth = 0; depth < 8; ++depth) {
+      auto header = pe_.at(record.UnwindInfoAddress, 4);
+      if (header.empty() || !(header[0] & 0x20)) return false;
+      uint32_t offset = 4 + ((header[2] + 1) & ~1u) * 2;
+      if (!pe_.rvaRead(record.UnwindInfoAddress + offset, record)) return false;
+      if (record.BeginAddress == function) return true;
+    }
+    return false;
   }
   // Untrimmed queries return only authoritative x64 runtime-table bounds.
   Range find(uint32_t position, bool untrimmed = false) const {

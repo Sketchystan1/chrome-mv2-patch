@@ -54,6 +54,9 @@ The compact DLL's CMake tests and diagnostic scanner use
 `mv2-mem-patch-win/out/<arch>/`; see its [build instructions](../mv2-mem-patch-win/README.md).
 `check_autoscan_matrix.py` and `test_autoscan_runtime.py` use the x64 tools there
 by default, with the runtime DLL at `mv2-mem-patch-win/build/x64/version.dll`.
+For the carrier beside `chrome.exe`, use
+`--dll mv2-mem-patch-win/build/x64/secur32.dll`. Its runtime matrix also removes
+the cached scan plan before restarting the same profile to check a cold scan.
 
 On an x64 Windows host with MSVC ARM64 tools and WSLC, run
 `python scripts/test_memory.py --arm64`. This cross-compiles the legacy engine tests

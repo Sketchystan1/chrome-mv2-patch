@@ -70,7 +70,7 @@ struct RefBatch {
       unsigned count = 0, limit = provider ? 16 : 1;
       size_t begin = queries.size();
       for (size_t n = hay.find(name[0]); n != std::string_view::npos; n = hay.find(name[0], n + 1)) {
-        if (name.size() + 1 > data.size() - n || memcmp(data.data() + n, name.data(), name.size()) || data[n + name.size()]) continue;
+        if ((n && data[n - 1]) || name.size() + 1 > data.size() - n || memcmp(data.data() + n, name.data(), name.size()) || data[n + name.size()]) continue;
         RefQuery query; query.literal = pe.rdata.rva + static_cast<uint32_t>(n);
         if (++count > limit || !queries.push_back(query)) { ambiguous = true; queries.count = begin; break; }
       }
@@ -136,6 +136,54 @@ bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& fo
   RefQuery query; query.literal = literal; scanReferences(pe, {&query, 1}); found = query.found; return query.complete;
 }
 
+#if defined(AUTOSCAN_X64)
+bool providerProgram(const PeImage& pe, const Boundaries& boundaries, Program& program, Range range) {
+  if (!program.build(pe, range)) return false;
+  if (!pe.isEdge()) return true;
+  // shortcut: merge forward x64 cold blocks only; extend with ownership tests if Edge moves them before the provider.
+  for (unsigned pass = 0; pass < 4; ++pass) {
+    FixedList<uint32_t, 16> entries;
+    for (const auto& n : program.nodes) {
+      const auto& i = n.insn;
+      if ((i.op != Op::Jmp && !i.conditional()) || program.at(i.target()) || !boundaries.chainedTo(i.target(), range.begin)) continue;
+      bool seen = false; for (auto pc : entries) seen |= pc == i.target();
+      if (!seen && !entries.push_back(i.target())) return false;
+    }
+    if (entries.empty()) return true;
+    for (auto pc : entries) {
+      auto body = boundaries.find(pc, true);
+      Program cold;
+      if (pc < range.begin || !cold.build(pe, {pc, body.end})) return false;
+      for (const auto& n : cold.nodes) {
+        bool present = false;
+        for (const auto& old : program.nodes) if (n.pc < old.pc + old.insn.length() && old.pc < n.pc + n.insn.length()) {
+          if (n.pc != old.pc || n.insn.length() != old.insn.length()) return false;
+          present = true;
+        }
+        if (!present && !program.nodes.push_back(n)) return false;
+      }
+      for (auto call : cold.noReturns) if (!program.noReturns.push_back(call)) return false;
+      program.range.end = std::max(program.range.end, body.end);
+    }
+    std::sort(program.nodes.begin(), program.nodes.end(), [](const Node& a, const Node& b) { return a.pc < b.pc; });
+  }
+  return false;
+}
+bool trueReturn(const PeImage& pe, const Boundaries& boundaries, uint32_t pc, uint32_t function) {
+  if (!boundaries.chainedTo(pc, function)) return false;
+  auto i = Lift(pe.code(pc), pc);
+  if (i.op != Op::MovReg || i.dst != 0 || i.src != NoReg || i.imm != 1 || i.detail || (i.width() != 1 && i.width() != 4)) return false;
+  for (unsigned steps = 0; steps < 8; ++steps) {
+    pc += i.length(); i = Lift(pe.code(pc), pc);
+    if (!i.length() || !boundaries.chainedTo(pc, function)) return false;
+    if (i.op == Op::Ret) return true;
+    if ((i.op != Op::AddImm || i.dst != StackReg || i.src != StackReg || i.imm <= 0) &&
+        (i.op != Op::Other || i.other() != Other::Pop || i.dst == StackReg || i.dst == 0)) return false;
+  }
+  return false;
+}
+#endif
+
 void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& program, const std::array<int64_t, 5>& layout, Report& report, RefBatch& batch) {
   auto data = pe.at(pe.rdata.rva, pe.rdata.size), code = pe.at(pe.text.rva, pe.text.size);
   FixedList<uint32_t, 16> literals, getters;
@@ -171,17 +219,42 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
     if (!bounded) { report.installVerifier = "unbounded provider vtable"; return; }
   }
   FixedList<Gate, 16> candidates;
+  struct ProviderCall { uint32_t target; Gate gate; };
+  FixedList<ProviderCall, 16> helpers;
   for (auto start : methods) {
     auto range = boundaries.find(start);
-    if (!range || !program.build(pe, range)) continue;
+    if (!range) continue;
+#if defined(AUTOSCAN_X64)
+    if (!providerProgram(pe, boundaries, program, range)) continue;
+#else
+    if (!program.build(pe, range)) continue;
+#endif
     bool reason = false;
     for (const auto& n : program.nodes) {
       const auto& i = n.insn;
       if (i.op != Op::Other || i.other() != Other::Store || i.width() != 4 || (i.detail & 0x400)) continue;
       auto value = i.src == NoReg ? SymVal::constant(static_cast<uint32_t>(i.imm)) : program.constantBefore(pe, n.pc, i.src);
-      reason |= value.kind == SymKind::Const && value.value == 0x100;
+      reason |= value.kind == SymKind::Const && value.value == 0x100 &&
+        (!pe.isEdge() || program.fromArgument(n.pc, i.dst, 8));
     }
     if (!reason) continue;
+#if defined(AUTOSCAN_X64)
+    if (pe.isEdge()) for (const auto& n : program.nodes) {
+      const auto& call = n.insn;
+      if (call.op != Op::Other || call.other() != Other::Call || !call.target() || !program.fromArgument(n.pc, 1, 2)) continue;
+      const auto* test = program.at(n.pc + call.length());
+      const auto* jump = test ? program.at(test->pc + test->insn.length()) : nullptr;
+      if (!test || test->insn.op != Op::Other || test->insn.other() != Other::TestReg || test->insn.memory() ||
+          test->insn.width() != 1 || test->insn.dst != 0 || test->insn.src != 0 || !jump || !jump->insn.conditional() ||
+          (jump->insn.condition() != 4 && jump->insn.condition() != 5)) continue;
+      bool zero = jump->insn.condition() == 4;
+      Gate gate; gate.compare = test->pc; gate.rva = jump->pc; gate.function = range.begin;
+      gate.affected = zero ? jump->insn.target() : jump->pc + jump->insn.length();
+      gate.unaffected = zero ? jump->pc + jump->insn.length() : jump->insn.target(); gate.optional = InstallVerifier;
+      bool seen = false; for (const auto& old : helpers) seen |= old.gate.rva == gate.rva;
+      if (!seen && (!makePatch(pe, gate, zero) || !helpers.push_back({call.target(), gate}))) { report.installVerifier = "too many provider helpers"; return; }
+    }
+#endif
     for (const auto& n : program.nodes) {
       const auto& test = n.insn;
       const auto* decision = program.at(n.pc + test.length());
@@ -233,6 +306,23 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
       if (!makePatch(pe, gate, false) || !candidates.push_back(gate)) { report.installVerifier = "too many provider candidates"; return; }
     }
   }
+#if defined(AUTOSCAN_X64)
+  // Decode callees after their providers to fit rundll32's 512 KiB stack.
+  for (const auto& helper : helpers) {
+    auto body = boundaries.find(helper.target);
+    if (!body || body.begin != helper.target || body.end - body.begin > 256 || !program.build(pe, body)) continue;
+    for (const auto& node : program.nodes) {
+      const auto& test = node.insn;
+      const auto* jump = program.at(node.pc + test.length());
+      if (test.op != Op::Other || test.other() != Other::TestImm || !test.memory() || test.width() != 1 || test.imm != 8 ||
+          !program.fromArgument(node.pc, test.dst, 1) || !jump || !jump->insn.conditional() || jump->insn.condition() != 5 ||
+          !trueReturn(pe, boundaries, jump->insn.target(), body.begin)) continue;
+      // Scope the change to MustRemainDisabled; shared store detection also drives content verification.
+      bool seen = false; for (const auto& old : candidates) seen |= old.rva == helper.gate.rva;
+      if (!seen && !candidates.push_back(helper.gate)) { report.installVerifier = "too many provider candidates"; return; }
+    }
+  }
+#endif
   report.installVerifier = candidates.empty() ? "no recognized provider gate" : candidates.size() == 1 ? "structurally verified provider gate" : "ambiguous provider gates";
   if (candidates.size() == 1) report.gates.push_back(candidates.front());
 }
@@ -395,7 +485,7 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
          (zero.op == Op::MovReg && zero.src == NoReg && !zero.imm && !zero.detail));
       if (!returnsZero || Lift(pe.code(external->insn.target() + zero.length()), external->insn.target() + zero.length()).op != Op::Ret) continue;
       bool format = false;
-      for (uint32_t at = join->insn.target(), steps = 0; steps < 8; ++steps) {
+      for (uint32_t at = join->insn.target(), steps = 0; steps < 24; ++steps) {
         const auto* next = program.at(at); if (!next) break;
         const auto& i = next->insn;
 #if defined(AUTOSCAN_X86)
@@ -431,12 +521,27 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
     auto range = boundaries.find(pc);
     if (!range || !program.build(pe, range) || !call(program.at(pc))) continue;
     const Node* argument = program.predecessor(pc);
+    unsigned installerReg = argumentReg;
+#if defined(AUTOSCAN_X64)
+    for (unsigned steps = 0; argument && steps < 64; ++steps) {
+      const auto& i = argument->insn;
+      if (i.op == Op::LoadField && i.dst == installerReg) break;
+      if (i.conditional() || i.op == Op::Jmp || Writes(i, StackReg) ||
+          (i.op == Op::Other && i.other() == Other::Call && VolatileReg(installerReg))) { argument = nullptr; break; }
+      if (Writes(i, installerReg)) {
+        if (i.op != Op::MovReg || i.width() != sizeof(void*) || i.src >= 16) { argument = nullptr; break; }
+        installerReg = i.src;
+      }
+      argument = program.predecessor(argument->pc);
+    }
+#else
     for (unsigned steps = 0; argument && steps < 4 && !Writes(argument->insn, argumentReg); ++steps) {
       bool push = sizeof(void*) == 4 && argument->insn.op == Op::Other && argument->insn.other() == Other::Push;
       if (call(argument) || argument->insn.conditional() || argument->insn.op == Op::Jmp || (!push && Writes(argument->insn, StackReg))) { argument = nullptr; break; }
       argument = program.predecessor(argument->pc);
     }
-    if (!argument || argument->insn.op != Op::LoadField || argument->insn.dst != argumentReg ||
+#endif
+    if (!argument || argument->insn.op != Op::LoadField || argument->insn.dst != installerReg ||
         argument->insn.src != StackReg || argument->insn.width() != sizeof(void*)) continue;
     for (const auto& node : program.nodes) {
       const auto& store = node.insn;
@@ -532,6 +637,19 @@ Report Analyze(std::span<const uint8_t> bytes) {
   Boundaries boundaries(pe);
   if (boundaries.error) { report.error = boundaries.error; return report; }
   Program program;
+  if (pe.isEdge()) {
+#if defined(AUTOSCAN_X64)
+    RefBatch batch(pe);
+    installVerifier(pe, boundaries, program, {}, report, batch);
+    crxDownload(pe, boundaries, program, report, batch);
+    if (report.gates.size() != 2 || report.gates[0].optional != InstallVerifier || report.gates[1].optional != CrxDownload)
+      report.error = "need both verified Edge source and CRX download gates";
+    std::sort(report.gates.begin(), report.gates.end(), [](const Gate& a, const Gate& b) { return a.rva < b.rva; });
+#else
+    report.error = "Edge installer recognition requires x64";
+#endif
+    return report;
+  }
   auto issue = [&](uint32_t pc, std::string_view reason) {
     if (!report.unresolved.push_back({pc, reason})) report.error = "too many unresolved candidates";
   };

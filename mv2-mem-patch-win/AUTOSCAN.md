@@ -1,7 +1,7 @@
 # Compact Windows automatic scanner
 
-This C++20 build produces `version.dll` for x86, x64 and ARM64. It discovers MV2
-decisions from the installed `chrome.dll`, without a maintained offset table,
+This C++20 build produces `version.dll` and `secur32.dll` for x86, x64 and ARM64.
+It discovers MV2 decisions from the installed `chrome.dll`, without a maintained offset table,
 symbols, Capstone or Z3. A read-only `mv2-scan.exe` is available for development.
 
 The Release build fails if the DLL or diagnostic scanner reaches **300,000 bytes**.
@@ -51,6 +51,8 @@ the copy to restore normal enforcement. The browser's disk image is unchanged.
   `PAGE_READONLY`. The pinned inline-hook engine is excluded: stock Detours
   allocates heap memory and uses RWX pages. Generated assembly tail jumps forward
   the 17 system version exports; ordinal 18 is the private scan helper.
+  `secur32.dll` forwards 98 system exports and exposes the same private helper
+  at ordinal 1000.
 
 Scanner, solver, IPC and hashing buffers use fixed caller-owned
 storage, principally `std::array` on the stack. Shipped project code has no
@@ -115,7 +117,8 @@ The optional x64 CRX download gate is anchored to `apps-gallery-url` in
 `CrxInstaller::InstallCrx`. The scanner identifies its existing CRX3 format path,
 infers the off-store allow-reason field, then finds a unique caller whose Boolean
 decision guards only the `OffStoreInstallAllowedBecausePref` store to that field.
-The store and installer call must load the same stack-held installer, without a
+The store and installer call must load the same stack-backed installer, including
+x64 copies kept in nonvolatile registers across calls, without a
 recognized intervening frame change or overwrite of that slot. Unrecognized or
 ambiguous layouts are skipped. The existing JE becomes NOPs, allowing the normal
 download installer to request CRX3 verification and reach its confirmation dialog.
@@ -123,8 +126,22 @@ The CRX verifier itself is unchanged: developer proofs, signature validation,
 package parsing and requested file hashes still apply. Drag-and-drop already uses
 Chrome's external verifier format. See [CRX installation](README.md#installing-downloaded-crx-files).
 
-The proxy swaps Chrome's loader imports during startup. After `chrome.dll` loads,
-it locks and maps the disk image read-only and computes its full-file BLAKE3.
+An x64 PE exporting the name `msedge.dll` uses a separate Edge installer path:
+both optional gates must be verified, and no Chrome MV2 predicate is required.
+String anchors must begin at a string boundary, so `ms-apps-gallery-url` does not
+make `apps-gallery-url` ambiguous. Edge's provider body can include forward cold
+blocks whose x64 unwind chains identify the same owning method. The scanner
+corroborates its third-argument `DISABLE_NOT_VERIFIED` store and extension argument
+with the out-of-line store helper's flag test and existing true return. It patches
+only the caller's source decision in `MustRemainDisabled`, preserving shared store
+detection and content verification. The same decode buffer is reused for callees
+to stay within `rundll32`'s 512 KiB stack. [Edge validation](EDGE-CRX-RESULTS.json).
+
+`version.dll` swaps Chrome's loader imports during startup. `secur32.dll` uses a
+temporary main-thread clock hook and a `ChromeMain` lookup hook, and waits for
+the loader lock to be released before scanning. Both use
+the same runtime: it locks and maps the browser disk image read-only and computes
+its full-file BLAKE3.
 The parent reads a valid cached plan directly. A miss launches System32
 `rundll32.exe` with a helper entry point in the same DLL. The helper has
 30 seconds to return a fixed 1,532-byte response with at most 64 sites. Analysis
@@ -141,7 +158,9 @@ security boundary for this cache.
 
 Protocol 5 uses explicit BLAKE3 identity and records separate RVAs for the optional InstallVerifier and CRX download
 sites. The parent validates every site, requires the former to identify a JNE
-and the latter a JE, and applies all verified sites together. The scanner hash
+(or Edge's verified-path JE) and the latter a JE, and applies all verified sites
+together. A plan consisting only of these two sites requires an Edge PE identity.
+The scanner hash
 prevents an older DLL's cache from being reused after an update.
 
 Before applying a plan, the parent validates its identity, stock instructions,

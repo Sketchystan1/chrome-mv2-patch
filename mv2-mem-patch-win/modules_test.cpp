@@ -47,6 +47,10 @@ void lengths() {
   constexpr std::array<uint8_t, 3> lea{0x8d,0x41,0xfc};
   i = LiftX86(lea, 0x1000, false);
   check(i.op == Op::AddImm && i.imm == -4 && !i.setsFlags(), "LEA preserves flags");
+  constexpr std::array<uint8_t, 5> stackRead{0x4c,0x03,0x74,0x24,0x48};
+  i = LiftX86(stackRead, 0x1000, true);
+  check(i.length() == 5 && i.other() == Other::Overwrite && i.dst == 14 && i.src == 4 && i.disp == 0x48 &&
+        i.memory() && i.setsFlags() && Writes(i, 14) && !Writes(i, 4), "ADD from a stack slot writes only its destination and flags");
   constexpr std::array<uint8_t, 6> back{0x0f,0x8d,0xf0,0xff,0xff,0xff};
   i = LiftX86(back, 0x1000, true);
   check(i.op == Op::JccSigned && i.target() == 0xff6 && i.condition() == 13, "near branch sign extension");

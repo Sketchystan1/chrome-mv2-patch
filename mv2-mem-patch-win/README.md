@@ -1,7 +1,7 @@
 # Windows MV2 DLL
 
-A C++20 `version.dll` proxy that discovers Chrome's MV2 checks at startup and
-patches them in memory. It supports x64, x86 and ARM64, with a 300,000-byte build
+C++20 `version.dll` and `secur32.dll` proxies discover Chrome's MV2 checks at
+startup and patch them in memory. They support x64, x86 and ARM64, with a 300,000-byte build
 limit. No signature table, Capstone or Z3 is used by this DLL.
 
 ## Build
@@ -19,8 +19,11 @@ The only files in `build/` are:
 
 ```text
 build/x64/version.dll
+build/x64/secur32.dll
 build/x86/version.dll
+build/x86/secur32.dll
 build/arm64/version.dll
+build/arm64/secur32.dll
 ```
 
 CMake intermediates, fetched Detours sources, test programs and diagnostic tools
@@ -28,7 +31,8 @@ go into ignored `out/<arch>/` directories. The default build produces only the D
 
 In Visual Studio, choose **File > Open > Folder**, open `mv2-mem-patch-win`,
 select **x64 Release**, **x86 Release** or **ARM64 Release**, and build the
-`version` target. Visual Studio and `build.bat` share the same CMake presets.
+`version` or `secur32` target. Visual Studio and `build.bat`
+share the same CMake presets.
 
 ## Install a local build
 
@@ -42,6 +46,52 @@ C++ runtime and Windows UCRT. Redistribute `out/<arch>/Detours-LICENSE.md` with 
 DLL; release packaging includes it outside the build directory.
 
 The [repository installers](../README.md) download the published release.
+
+### secur32.dll automatic patcher beside the executable
+
+Copy `build/<arch>/secur32.dll` beside **`chrome.exe` or `msedge.exe`**. Use one
+automatic proxy per browser copy, and test with a separate `--user-data-dir`.
+The placement is the same for both browsers:
+
+```text
+Chrome: Application/chrome.exe
+        Application/secur32.dll
+Edge:   Application/msedge.exe
+        Application/secur32.dll
+```
+
+It forwards all 98 system exports, including 91 Windows forwarders, to the
+absolute System32 path. The parent installs a temporary `QueryPerformanceCounter`
+import hook on the main browser DLL. The browser's main thread runs the existing
+scanner synchronously at its next safe clock call, before extension
+initialization in the measured runs. The clock import is then restored. An
+executable `ChromeMain` lookup hook also covers earlier loading. Children only
+forward; this carrier does not change their DLL-signing mitigation policy.
+
+The loader-lock address is checked against ownership during `DllMain`; failed
+calibration or an unreadable lock prevents scanning. A held loader lock also
+defers the scan. The main-thread selection and clock-call ordering require
+rechecking if a browser changes its startup model. No polling thread is used.
+Close the browser copy and remove `secur32.dll` to restore stock behavior.
+
+Verified on Windows 11 build 26300 with the **same x64 DLL** beside both
+executables:
+
+| Browser | Verified behavior |
+| --- | --- |
+| Chrome 157.0.8103.79 | Packed external MV2 enables and blocks requests; all nine memory gates match; warm and empty-cache restarts pass; removal restores MV2 deprecation. |
+| Edge 157.0.4341.46 | Developer-signed CRX3 installation from Downloads, enablement and MV2 background execution pass. Both installer gates apply; shared store detection stays unchanged. Tampered packages and missing developer proofs are rejected. |
+
+Native secur32 forwarding and loader-lock checks passed on x64 and x86.
+Ordinary browser-window startup also passed for both browsers on a private
+Windows desktop, without the headless flag; Chrome's nine memory gates matched.
+x64, x86 and ARM64 DLLs build below 300,000 bytes. Native x86/ARM64 browser
+launches, interactive browsing and updates were not validated. See the
+[carrier results](SECUR32-AUTOPATCH-RESULTS.json) and [Edge CRX results](EDGE-CRX-RESULTS.json).
+
+The Chrome runtime harness accepts
+`--dll mv2-mem-patch-win/build/x64/secur32.dll`, places it beside the executable,
+and also verifies a restart after removing the cached scan plan.
 
 ## Off-store extensions
 
@@ -67,6 +117,18 @@ optional recognition. Browser lifecycle validation covers x64 Chrome/Chromium
 The local **x64** build also recognizes Chrome's off-store download gate. On a
 recognized layout, a developer-signed CRX3 can install without Chrome Web Store
 publisher proof, avoiding `CRX_REQUIRED_PROOF_MISSING` for that missing proof.
+
+For **Edge x64**, close all Edge processes, copy `build/x64/secur32.dll` beside
+`msedge.exe`, and restart. Keep the downloaded file, open it from `edge://downloads`,
+and confirm **Add extension**. You can also enable **Developer mode** at
+`edge://extensions` and drag the CRX onto that page. Enable an existing extension
+there if the old source block left it disabled. Edge still labels off-store
+extensions as coming from an unknown source; they can remain enabled.
+
+Edge recognition requires both installer checks and is verified on
+157.0.4341.46 x64. Its MV2 support already works stock. Signature, package
+integrity and management-policy checks remain enforced; unknown Edge layouts
+are declined. See [validation](EDGE-CRX-RESULTS.json).
 
 After replacing the DLL and restarting Chrome:
 

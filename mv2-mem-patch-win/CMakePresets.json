@@ -31,9 +31,9 @@
     }
   ],
   "buildPresets": [
-    { "name": "x64", "configurePreset": "x64", "targets": ["version"], "jobs": 4 },
-    { "name": "x86", "configurePreset": "x86", "targets": ["version"], "jobs": 4 },
-    { "name": "arm64", "configurePreset": "arm64", "targets": ["version"], "jobs": 4 }
+    { "name": "x64", "configurePreset": "x64", "targets": ["version", "secur32"], "jobs": 4 },
+    { "name": "x86", "configurePreset": "x86", "targets": ["version", "secur32"], "jobs": 4 },
+    { "name": "arm64", "configurePreset": "arm64", "targets": ["version", "secur32"], "jobs": 4 }
   ],
   "testPresets": [
     { "name": "x64", "configurePreset": "x64", "output": { "outputOnFailure": true } },

@@ -136,10 +136,12 @@ def run_build(entry, args, extensions, state, port, crx, extension_id):
     app = workspace / 'app'
     assert app.resolve().is_relative_to(args.work)
     def skip_previous_proxy(directory, names):
-        return [name for name in names if Path(directory) == source_exe.parent and name.lower() in ('version.dll', 'version.dll.disabled')]
+        return [name for name in names if Path(directory) == source_exe.parent and
+                name.lower() in ('version.dll', 'version.dll.disabled', 'secur32.dll', 'secur32.dll.disabled')]
     shutil.copytree(source_exe.parent, app, ignore=skip_previous_proxy)
-    exe, binary, proxy = app / source_exe.name, app / source_binary.relative_to(source_exe.parent), app / 'version.dll'
-    assert not proxy.exists(), 'source browser already contains a version.dll proxy'
+    exe, binary = app / source_exe.name, app / source_binary.relative_to(source_exe.parent)
+    proxy = app / args.dll.name
+    assert not proxy.exists(), 'source browser already contains a proxy'
     scan = subprocess.run([str(BUILD / 'mv2-scan.exe'), str(binary)], capture_output=True, text=True, timeout=60)
     report = json.loads(scan.stdout)
     (workspace / 'scan.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
@@ -166,9 +168,11 @@ def run_build(entry, args, extensions, state, port, crx, extension_id):
     cache_hashes = {}
     try:
         phases = ('stock', 'core-only', 'patched', 'restart', 'restore') if baseline else ('stock', 'patched', 'restart', 'restore')
+        if args.dll.name.lower() == 'secur32.dll':
+            phases = phases[:-1] + ('cold-restart', 'restore')
         for phase in phases:
             patched = phase not in ('stock', 'restore')
-            allow_offstore = phase in ('patched', 'restart')
+            allow_offstore = phase in ('patched', 'restart', 'cold-restart')
             proxy_hash = entry['core_only_dll_sha256'] if phase == 'core-only' else args.dll_sha256
             if phase in ('core-only', 'patched'):
                 # Windows may retain an image lock briefly after browser shutdown.
@@ -183,10 +187,16 @@ def run_build(entry, args, extensions, state, port, crx, extension_id):
                 assert digest(proxy) == proxy_hash, 'DLL changed while copying'
             if phase == 'restore':
                 assert proxy.resolve().is_relative_to(args.work) and digest(proxy) == result['dll_sha256']
-                proxy.rename(app / 'version.dll.disabled')
+                proxy.rename(proxy.with_name(proxy.name + '.disabled'))
             profile = workspace / ('stock-profile' if phase == 'stock' else 'installed-profile')
             profile.mkdir(exist_ok=True)
             local = profile / 'localappdata'; local.mkdir(exist_ok=True)
+            if phase == 'cold-restart':
+                key = hashlib.sha256((proxy_hash + report['blake3']).encode('ascii')).hexdigest()
+                cache = local / 'chrome-mv2-patch/autoscan' / (key + '.bin')
+                assert cache.resolve().is_relative_to(args.work) and cache.exists()
+                cache.unlink()
+                cache_hashes.pop(proxy_hash, None)
             port_file = profile / 'DevToolsActivePort'
             if port_file.exists():
                 port_file.unlink()
@@ -269,6 +279,8 @@ def main():
     parser.add_argument('--work', type=Path, required=True)
     args = parser.parse_args()
     args.work = args.work.resolve(); args.dll = args.dll.resolve()
+    if args.dll.name.lower() not in ('version.dll', 'secur32.dll'):
+        parser.error('--dll must be named version.dll or secur32.dll')
     args.dll_sha256 = digest(args.dll)
     assert args.work.is_relative_to((REPO / '_scratch').resolve()), 'test output must stay beneath _scratch'
     args.work.mkdir(parents=True, exist_ok=False)

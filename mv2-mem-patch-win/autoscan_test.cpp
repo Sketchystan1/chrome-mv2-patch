@@ -198,12 +198,32 @@ static void crxTests() {
   check(report.ready() && report.gates.size() == 4 && report.gates.back().optional == autoscan::CrxDownload &&
         report.gates.back().rva == 0x130B && report.gates.back().patch[0] == 0x90,
         "download gate links the allow-reason field, normal CRX3 format and installer argument");
+  auto prefixed = crxImage(); memcpy(prefixed.data() + 0xF50, "ms-apps-gallery-url", 20);
+  check(autoscan::Discover(prefixed).gates.size() == 4, "a prefixed gallery switch is not a second standalone literal");
+  auto delayed = crxImage();
+  auto installerEnd = autoscan::ReadInsn<uint32_t>(delayed.data() + 0xC1C);
+  auto constructor = hex("488d5c2420");
+  auto insertion = std::search(delayed.begin() + 0x600, delayed.begin() + 0x680, constructor.begin(), constructor.end());
+  check(insertion != delayed.begin() + 0x680, "find the installer constructor fixture");
+  auto offset = insertion - delayed.begin();
+  std::move_backward(insertion, delayed.begin() + 0x600 + installerEnd - 0x1200, delayed.begin() + 0x60C + installerEnd - 0x1200);
+  std::fill_n(delayed.begin() + offset, 12, uint8_t{0x90}); put<uint32_t>(delayed, 0xC1C, installerEnd + 12);
+  check(autoscan::Discover(delayed).gates.size() == 4, "longer constructor initialization preserves the CRX3 format argument");
+  auto overwrite = hex("b801000000"); std::copy(overwrite.begin(), overwrite.end(), delayed.begin() + offset);
+  check(autoscan::Discover(delayed).gates.size() == 3, "constructor setup cannot overwrite the verifier format");
+  auto registered = crxImage();
+  auto method = hex("4883ec58e8c7ffffff84c0740f488b442430c7800802000002000000488b5c2430e8aaffffff4889d9488d542428e8cdfeffff4883c458c3");
+  std::copy(method.begin(), method.end(), registered.begin() + 0x700);
+  put<uint32_t>(registered, 0xC28, 0x1300 + static_cast<uint32_t>(method.size()));
+  check(autoscan::Discover(registered).gates.size() == 4, "a nonvolatile installer copy survives intervening calls");
+  registered[0x728] = 0xC1;
+  check(autoscan::Discover(registered).gates.size() == 3, "a volatile installer copy does not survive a call");
   auto shifted = crxImage();
   replace(shifted, "83b90802000000", "83b9b802000000");
   replace(shifted, "c7800802000002000000", "c780b802000002000000");
   check(autoscan::Discover(shifted).gates.size() == 4, "CRX installer field is inferred instead of pinned");
   auto nearImage = crxImage();
-  auto method = hex("4883ec58e8c7ffffff84c00f840f000000488b442430c7800802000002000000488b4c2430488d542428e8d1feffff4883c458c3");
+  method = hex("4883ec58e8c7ffffff84c00f840f000000488b442430c7800802000002000000488b4c2430488d542428e8d1feffff4883c458c3");
   std::copy(method.begin(), method.end(), nearImage.begin() + 0x700);
   put<uint32_t>(nearImage, 0xC28, 0x1300 + static_cast<uint32_t>(method.size()));
   report = autoscan::Discover(nearImage);
@@ -212,8 +232,12 @@ static void crxTests() {
         "near download gate selects the same allow-reason store");
   auto referenceCount = crxImage(); replace(referenceCount, "488d542428", "f0ff490890");
   check(autoscan::Discover(referenceCount).gates.size() == 4, "reference-count updates preserve the installer frame");
+  auto stackRead = crxImage(); replace(stackRead, "488d542428", "4c03742430");
+  check(autoscan::Discover(stackRead).gates.size() == 4, "ADD may read the installer slot without overwriting it");
+  replace(stackRead, "4c03742430", "4803642430");
+  check(autoscan::Discover(stackRead).gates.size() == 3, "ADD that changes RSP cannot preserve the installer frame");
   auto aliasImage = crxImage(), aliasCode = downloadCode;
-  auto overwrite = hex("4889e248894230");
+  overwrite = hex("4889e248894230");
   aliasCode.erase(aliasCode.begin() + 0x21, aliasCode.begin() + 0x26);
   aliasCode.insert(aliasCode.begin() + 0x21, overwrite.begin(), overwrite.end());
   put<int32_t>(aliasCode, 0x29, 0x1200 - 0x132D);
@@ -245,6 +269,78 @@ static void crxTests() {
     check(report.ready() && report.gates.size() == 3 && report.gates.back().optional == autoscan::InstallVerifier,
           "unknown or ambiguous download layouts preserve core and InstallVerifier gates");
   }
+}
+
+static Bytes edgeImage(bool zeroGuard = false) {
+  auto bytes = crxImage();
+  std::fill_n(bytes.begin() + 0x440, freeCode.size(), uint8_t{0xCC});
+  std::fill_n(bytes.begin() + 0x500, memberCode.size(), uint8_t{0xCC});
+  put<uint32_t>(bytes, 0x108, 0x1B00); put<uint32_t>(bytes, 0x10C, sizeof(IMAGE_EXPORT_DIRECTORY));
+  put<uint32_t>(bytes, 0xF0C, 0x1B40); memcpy(bytes.data() + 0xF40, "msedge.dll", 11);
+  memcpy(bytes.data() + 0xF50, "ms-apps-gallery-url", 20);
+  auto method = hex("4883ec284889d74c89c685c00f850000000031c04883c428c3");
+  auto cold = hex("4889f9e80000000084c00f8500000000c70600010000b001e900000000");
+  auto helper = hex("564883ec284889cef68654020000080f850000000031c04883c4285ec3");
+  auto verified = hex("b0014883c4285ec3");
+  put<int32_t>(method, 14, 0x1440 - 0x1192);
+  put<int32_t>(cold, 4, 0x14C0 - 0x1448); put<int32_t>(cold, 12, 0x1192 - 0x1450); put<int32_t>(cold, 25, 0x1194 - 0x145D);
+  if (zeroGuard) {
+    cold = hex("4889f9e87800000084c00f8405000000e900000000c70600010000b001e900000000");
+    put<int32_t>(cold, 17, 0x1192 - 0x1455); put<int32_t>(cold, 30, 0x1194 - 0x1462);
+  }
+  put<int32_t>(helper, 17, 0x1520 - 0x14D5);
+  std::fill_n(bytes.begin() + 0x580, 0x80, uint8_t{0xCC});
+  std::copy(method.begin(), method.end(), bytes.begin() + 0x580);
+  std::copy(cold.begin(), cold.end(), bytes.begin() + 0x840);
+  std::copy(helper.begin(), helper.end(), bytes.begin() + 0x8C0);
+  std::copy(verified.begin(), verified.end(), bytes.begin() + 0x920);
+  put<uint32_t>(bytes, 0xC10, 0x1180 + static_cast<uint32_t>(method.size()));
+  for (unsigned n = 0; n < 4; ++n) put<uint32_t>(bytes, 0xC08 + n * 12, 0x18F0);
+  put<uint32_t>(bytes, 0x124, 84); bytes[0xCF0] = 1;
+  for (auto entry : {std::array<uint32_t, 4>{4, 0x1440, 0x1440 + static_cast<uint32_t>(cold.size()), 0x1880},
+                     std::array<uint32_t, 4>{5, 0x14C0, 0x14C0 + static_cast<uint32_t>(helper.size()), 0x18F0},
+                     std::array<uint32_t, 4>{6, 0x1520, 0x1520 + static_cast<uint32_t>(verified.size()), 0x1890}}) {
+    for (unsigned n = 1; n < 4; ++n) put<uint32_t>(bytes, 0xC00 + entry[0] * 12 + (n - 1) * 4, entry[n]);
+  }
+  bytes[0xC80] = bytes[0xC90] = 0x21;
+  put<uint32_t>(bytes, 0xC84, 0x1180); put<uint32_t>(bytes, 0xC88, 0x1180 + static_cast<uint32_t>(method.size())); put<uint32_t>(bytes, 0xC8C, 0x18F0);
+  put<uint32_t>(bytes, 0xC94, 0x14C0); put<uint32_t>(bytes, 0xC98, 0x14C0 + static_cast<uint32_t>(helper.size())); put<uint32_t>(bytes, 0xC9C, 0x18F0);
+  return bytes;
+}
+static void edgeTests() {
+  auto report = autoscan::Discover(edgeImage());
+  if (!report.ready()) std::cerr << report.error << "; " << report.installVerifier << "; " << report.crxDownload << '\n';
+  check(report.ready() && report.gates.size() == 2 && !autoscan::MakePlan(report).status && report.unresolved.empty() && report.gates[1].rva == 0x144A,
+        "provider vtable, chained disable reason, extension argument and true return identify Edge's shared store helper");
+  report = autoscan::Discover(edgeImage(true));
+  check(report.ready() && report.gates[1].rva == 0x144A && report.gates[1].patch[0] == 0x90,
+        "the provider's zero-result branch selects its verified fall-through");
+  for (unsigned test = 0; test < 14; ++test) {
+    auto bytes = edgeImage();
+    if (test == 0) bytes[0xF40] = 'x';
+    if (test == 1) put<uint32_t>(bytes, 0x10C, 0);
+    if (test == 2) replace(bytes, "84c0740f", "84c0750f");
+    if (test == 3) bytes[0xF80] = 'X';
+    if (test == 4) { put<uint32_t>(bytes, 0xC84, 0x1200); put<uint32_t>(bytes, 0xC88, 0x1243); }
+    if (test == 5) { put<uint32_t>(bytes, 0xC94, 0x1180); put<uint32_t>(bytes, 0xC98, 0x1199); }
+    if (test == 6) bytes[0x921] = 0;
+    if (test == 7) replace(bytes, "c70600010000", "c70600020000");
+    if (test == 8) replace(bytes, "4c89c6", "4889ce");
+    if (test == 9) replace(bytes, "4889f9e8", "4889f1e8");
+    if (test == 10) replace(bytes, "f6865402000008", "f6865402000010");
+    if (test == 11) bytes[0x8D0] = 0x84;
+    if (test == 12) bytes[0x926] = 0x58;
+    if (test == 13) {
+      std::move_backward(bytes.begin() + 0xC3C, bytes.begin() + 0xC54, bytes.begin() + 0xC60);
+      put<uint32_t>(bytes, 0x124, 96); put<uint32_t>(bytes, 0xC3C, 0x1440);
+      put<uint32_t>(bytes, 0xC40, 0x1440); put<uint32_t>(bytes, 0xC44, 0x1880);
+    }
+    check(!autoscan::Discover(bytes).ready(), "incomplete Edge gates, foreign unwind chains and changed verifier semantics decline");
+  }
+}
+static DWORD WINAPI edgeStackTest(void*) {
+  try { edgeTests(); return 0; }
+  catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
 
 static unsigned protectCalls = 0, failProtect = 0, flushCalls = 0, failFlush = 0;
@@ -467,6 +563,20 @@ static void optionalPlanTests() {
     check(live.apply() == autoscan::ApplyResult::declined && live.bytesMatch(false) && live.protectedAgain(),
           "write failure rolls back download, off-store and core gates together");
   }
+  for (unsigned test = 0; test < 4; ++test) {
+    LiveImage live;
+    live.disk = edgeImage(test == 3); put<uint32_t>(live.disk, 0xD0, 0x4000);
+    live.plan = autoscan::MakePlan(autoscan::Discover(live.disk));
+    live.change(0, live.disk.data(), 0x400); live.change(0x1000, live.disk.data() + 0x400, 0x800);
+    live.change(0x1800, live.disk.data() + 0xC00, 0x200); live.change(0x1A00, live.disk.data() + 0xE00, 0x200);
+    if (test == 1) { live.disk[0xF40] = 'x'; live.plan.blake3 = autoscan::Blake3(live.disk); }
+    if (test == 2) failFlush = 1;
+    check(test == 1 || test == 2 ? live.apply() == autoscan::ApplyResult::declined && live.bytesMatch(false) && live.protectedAgain() :
+                 live.apply() == autoscan::ApplyResult::applied && live.bytesMatch(true),
+          "optional-only application requires Edge identity and rolls back either gate on failure");
+    check(!memcmp(live.base + 0x14CF, live.disk.data() + 0x8CF, 6), "Edge source checks never patch shared store detection");
+    if (!test || test == 3) check(live.apply() == autoscan::ApplyResult::alreadyApplied, "Edge application is idempotent");
+  }
 }
 
 static void cacheTests() {
@@ -680,6 +790,9 @@ int wmain(int argc, wchar_t** argv) {
     argumentTests();
     providerTests();
     crxTests();
+    HANDLE thread = CreateThread(nullptr, 512 * 1024, edgeStackTest, nullptr, STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    check(thread && WaitForSingleObject(thread, 10000) == WAIT_OBJECT_0, "Edge discovery completes within rundll32's stack budget");
+    DWORD threadExit = 1; check(GetExitCodeThread(thread, &threadExit) && !threadExit, "Edge checks pass with a 512 KiB stack"); CloseHandle(thread);
     applicationTests();
     relocationTests();
     optionalPlanTests();
