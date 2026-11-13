@@ -1,4 +1,4 @@
-// Windows VERSIONINFO shared by the automatic patcher proxy DLLs.
+// Windows VERSIONINFO for the automatic patcher.
 //
 // CMakeLists.txt supplies the project version through the MV2_* defines.
 //
@@ -16,7 +16,7 @@
 #define MV2_PROD "1.16.0"
 #endif
 #ifndef MV2_PROXY_STR
-#define MV2_PROXY_STR "version.dll"
+#define MV2_PROXY_STR "secur32.dll"
 #endif
 
 VS_VERSION_INFO VERSIONINFO

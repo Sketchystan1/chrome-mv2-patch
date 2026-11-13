@@ -18,7 +18,9 @@ autoscan::LoaderLock loaderLock;
 DWORD mainThread = 0;
 BOOL WINAPI counter(LARGE_INTEGER* value);
 
-DWORD firstThread() {
+DWORD firstThread(LPVOID startup) {
+  // Static process attachment runs on the initial thread; dynamic loads may not.
+  if (startup) return GetCurrentThreadId();
   HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
   if (snapshot == INVALID_HANDLE_VALUE) return 0;
   THREADENTRY32 entry{}; entry.dwSize = sizeof(entry);
@@ -89,7 +91,7 @@ FARPROC WINAPI lookup(HMODULE module, LPCSTR name) {
 }
 }  // namespace
 
-BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {
+BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID startup) {
   if (reason == DLL_PROCESS_DETACH) { autoscan::ReleaseHashTls(); return TRUE; }
   if (reason != DLL_PROCESS_ATTACH) return TRUE;
   DisableThreadLibraryCalls(self);
@@ -105,7 +107,7 @@ BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {
   auto command = GetCommandLineW();
   if (command && std::wcsstr(command, L"--type=")) return TRUE;
   // ChromeMain runs on the process's first thread, which owns browser initialization.
-  mainThread = firstThread();
+  mainThread = firstThread(startup);
   HMODULE pinned = nullptr;
   if (!mainThread || !loaderLock.initialize() || !GetModuleHandleExW(
       GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&counter), &pinned)) {

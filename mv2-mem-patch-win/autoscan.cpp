@@ -697,8 +697,10 @@ Report Analyze(std::span<const uint8_t> bytes) {
   auto text = pe.at(pe.text.rva, pe.text.size);
 #if defined(AUTOSCAN_ARM64)
   for (size_t p = 0; p + 8 <= text.size(); p += 4) {
-    auto cmp = Lift(text.subspan(p), pe.text.rva + static_cast<uint32_t>(p));
-    if (cmp.op == Op::CmpImm && (cmp.imm == 2 || cmp.imm == 3)) consider(pe.text.rva + static_cast<uint32_t>(p) + 4);
+    // Match both widths of unshifted CMP #2/#3; CMP with SP remains unsupported.
+    auto word = ReadInsn<uint32_t>(text.data() + p);
+    if ((word & 0x7ffff81f) == 0x7100081f && (word & 0x3e0) != 0x3e0)
+      consider(pe.text.rva + static_cast<uint32_t>(p) + 4);
   }
 #else
   auto probe = [&](size_t n) {

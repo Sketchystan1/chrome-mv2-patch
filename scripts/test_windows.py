@@ -7,6 +7,7 @@ PowerShell is unavailable (e.g. a Linux runner without pwsh); CI runs it on the
 Windows runner. Kept as .py so the whole suite lives flat in scripts/.
 """
 import os
+import json
 import shutil
 import subprocess
 import sys
@@ -345,6 +346,53 @@ try {
     Assert-True (-not (Test-ShouldPause -ExitCode 1 -IsElevatedChild $false -QuietMode $false -ChildAlreadyPaused $true -InputRedirected $false)) 'parent should not pause again after the child paused'
     Assert-True (-not (Test-ShouldPause -ExitCode 0 -IsElevatedChild $true -QuietMode $false -ChildAlreadyPaused $false -InputRedirected $true)) 'redirected input must never hang an unattended run'
 
+    # Release extraction and install/uninstall use only the current proxy.
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $releaseZip = Join-Path $temp 'secur32 release.zip'
+    $proxyBytes = [IO.File]::ReadAllBytes($pePath)
+    $zip = [IO.Compression.ZipFile]::Open($releaseZip, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($entryName in @('x64/SECUR32.dll', 'x86\secur32.dll', 'x64/version.dll')) {
+            $stream = $zip.CreateEntry($entryName).Open()
+            try { $stream.Write($proxyBytes, 0, $proxyBytes.Length) } finally { $stream.Dispose() }
+        }
+    } finally { $zip.Dispose() }
+    Assert-True ((Get-ByteHash (Get-DllFromReleaseZip $releaseZip 'x64')) -eq (Get-ByteHash $proxyBytes)) 'extract secur32 case-insensitively'
+    Assert-True ((Get-ByteHash (Get-DllFromReleaseZip $releaseZip 'x86')) -eq (Get-ByteHash $proxyBytes)) 'extract secur32 with backslash entry separators'
+    Assert-Throws { Get-DllFromReleaseZip $releaseZip 'arm64' } 'missing current proxy architecture must fail'
+    $app = Join-Path $temp 'Application'
+    New-Item -ItemType Directory -Path $app | Out-Null
+    $legacy = Join-Path $app 'version.dll'
+    [IO.File]::WriteAllBytes($legacy, $proxyBytes)
+    Assert-True (-not (Get-LegacyProxyPath $app)) 'unbranded version.dll must not be removed'
+    Assert-True (-not (Get-LegacyProxyPath '')) 'absent Application directory has no legacy proxy'
+    $target = [pscustomobject]@{ Path=(Join-Path $app 'chrome.dll'); AppDir=$app; ExePath=(Join-Path $app 'chrome.exe'); Channel='Test' }
+    [IO.File]::WriteAllBytes($target.Path, $proxyBytes)
+    [IO.File]::WriteAllBytes($target.ExePath, $proxyBytes)
+    $script:Mv2DataDir = Join-Path $temp 'legacy data'
+    function Get-LatestDllRelease { return [pscustomobject]@{ ZipName='secur32.dll-v1.17.0.zip'; ZipUrl='https://example.invalid/secur32.zip' } }
+    function Get-RemoteFile { param($Uri, $OutFile) Copy-Item -LiteralPath $releaseZip -Destination $OutFile }
+    function Get-PatchStateQuick { param($Path) return 'not patched' }
+    function Request-TargetUnlock { param($Target, $AssumeYes) return $true }
+    function Remove-ChromePolicies { }
+    function Remove-UboExtension { }
+    function Save-Signatures { throw 'current proxy must not fetch legacy signatures' }
+    $script:NoUblock = $true
+    Assert-True ((Invoke-Install $target $true) -eq 0) 'install secur32 without signature downloads'
+    Assert-True ((Get-FileHash (Join-Path $app 'secur32.dll')).Hash -eq (Get-ByteHash $proxyBytes)) 'install matching current DLL'
+    Assert-True (Test-Path -LiteralPath $legacy) 'install leaves unrelated version.dll alone'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $app 'signatures.json'))) 'current install adds no signature file'
+    Assert-True ((Invoke-Uninstall $target $true) -eq 0) 'uninstall current proxy'
+    Assert-True (-not (Test-Path -LiteralPath (Join-Path $app 'secur32.dll'))) 'uninstall removes secur32'
+    Assert-True (Test-Path -LiteralPath $legacy) 'uninstall leaves unrelated version.dll alone'
+    function Get-LegacyProxyPath { param($AppDir) $path = Join-Path $AppDir 'version.dll'; if (Test-Path -LiteralPath $path) { return $path }; return '' }
+    Assert-True ((Invoke-Install $target $true) -eq 0) 'install migrates a recognized legacy proxy'
+    Assert-True (-not (Test-Path -LiteralPath $legacy)) 'migration removes the recognized legacy proxy'
+    Assert-True (Test-Path -LiteralPath (Join-Path $app 'secur32.dll')) 'migration leaves current proxy installed'
+    [IO.File]::WriteAllBytes($legacy, $proxyBytes)
+    Assert-True ((Invoke-Uninstall $target $true) -eq 0) 'uninstall cleans a recognized legacy proxy too'
+    Assert-True (-not (Test-Path -LiteralPath $legacy)) 'uninstall removes the recognized legacy proxy'
+
     Write-Host "PowerShell tests passed: $passed assertions"
 } finally {
     if (-not [IO.Path]::GetFullPath($temp).StartsWith([IO.Path]::GetTempPath(), [StringComparison]::OrdinalIgnoreCase)) { throw 'test directory outside TEMP' }
@@ -499,6 +547,25 @@ def main():
     if not pwsh:
         print("PowerShell tests skipped: no pwsh/powershell on PATH")
         return 0
+    presets = json.loads((REPO / 'mv2-mem-patch-win/CMakePresets.json').read_text())
+    assert all(preset['targets'] == ['secur32'] for preset in presets['buildPresets'])
+    # Exercise the real batch control flow with failing external build commands.
+    source = (REPO / 'mv2-mem-patch-win/build.bat').read_text()
+    source = '@echo off\nsetlocal EnableExtensions\nset "MV2_ARCH=%~1"\n' + source[source.index('if /I "%MV2_ARCH%"=="all"'):]
+    source = source.replace('call "%MV2_VS%\\VC\\Auxiliary\\Build\\vcvarsall.bat" %MV2_ENV% >nul', 'cmd /d /c exit /b 0')
+    start = source.index('if not exist "%VCToolsInstallDir%bin')
+    end = source.index('cmake --preset', start)
+    source = source[:start] + source[end:]
+    with tempfile.TemporaryDirectory(prefix='mv2-build-status-') as directory:
+        work = Path(directory)
+        (work / 'build.cmd').write_text(source.replace('cmake --', f'"{sys.executable}" "%~dp0cmake.py" --'))
+        (work / 'cmake.py').write_text('import os,sys\nmode=os.environ["MV2_BUILD_FAILURE"]\nsys.exit(17 if mode=="configure" or mode=="build" and "--build" in sys.argv else 0)\n')
+        for arch in ('x64', 'all'):
+            for failure in ('', 'configure', 'build'):
+                result = subprocess.run(['cmd', '/d', '/c', str(work / 'build.cmd'), arch],
+                                        env=dict(os.environ, MV2_BUILD_FAILURE=failure), capture_output=True, text=True)
+                assert bool(result.returncode) == bool(failure), (arch, failure, result)
+    print('Build wrapper tests passed: secur32 presets and six success/failure cases')
     env = dict(os.environ, MV2_REPO=str(REPO))
 
     r = _run_ps(pwsh, PS_TEST, env)

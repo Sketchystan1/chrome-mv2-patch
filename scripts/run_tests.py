@@ -9,8 +9,8 @@ available. Each step's non-zero exit fails the run.
 
 Execution: the steps are independent (each uses its own tmp dir and only reads
 the shared tables), so they run CONCURRENTLY in two waves. Wave 1 is the fast,
-deterministic set (table audits, the PowerShell PE suite, and the Windows memory
-engine); if anything there
+deterministic set (table audits, the PowerShell PE suite, and discovery checks);
+if anything there
 fails, the run stops before the slow wave starts, so a real regression still
 fails in seconds. Wave 2 is the bash black-box tests (test_linux.py /
 test_macos.py), which shell out to chrome-mv2.sh: on a Windows host each of the
@@ -80,7 +80,7 @@ def main():
     # Table audits are seconds and catch defects no per-binary test can see - two
     # milestones with identical signature sets make the patcher decline every
     # build they match. The Windows PE suite
-    # shells to pwsh; the memory suite compiles the legacy table-based C++ engine.
+    # shells to pwsh.
     steps = [
         ("derivation unit checks (arm64 bcond safety)",
          py + [str(HERE / "test_derive.py")]),
@@ -89,7 +89,6 @@ def main():
         ("audit signatures.json",
          py + [str(HERE / "audit_signatures.py"), str(REPO / "signatures.json")]),
         ("Windows PE (chrome-mv2.ps1)", py + [str(HERE / "test_windows.py")]),
-        ("Legacy Windows memory engine", py + [str(HERE / "test_memory.py")]),
     ]
 
     # Syntax check for the shell patcher. Use the resolved bash (T.BASH): a bare

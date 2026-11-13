@@ -652,26 +652,8 @@ static void cacheTests() {
   check(std::distance(fs::directory_iterator(directory), fs::directory_iterator{}) == 1, "atomic writes leave no temporary files");
 }
 
-static void exportTests(const wchar_t* path) {
-  const char* names[] = {"GetFileVersionInfoA", "GetFileVersionInfoByHandle", "GetFileVersionInfoExA", "GetFileVersionInfoExW",
-    "GetFileVersionInfoSizeA", "GetFileVersionInfoSizeExA", "GetFileVersionInfoSizeExW", "GetFileVersionInfoSizeW", "GetFileVersionInfoW",
-    "VerFindFileA", "VerFindFileW", "VerInstallFileA", "VerInstallFileW", "VerLanguageNameA", "VerLanguageNameW", "VerQueryValueA", "VerQueryValueW", "VersionMV2ScanW"};
-  HMODULE dll = LoadLibraryW(path);
-  check(dll != nullptr, "experimental DLL loads with its bundled dependencies");
-  for (unsigned n = 0; n < std::size(names); ++n) {
-    auto byName = GetProcAddress(dll, names[n]);
-    check(byName && byName == GetProcAddress(dll, MAKEINTRESOURCEA(n + 1)), "proxy export name and ordinal are preserved");
-  }
-  FreeLibrary(dll);
-}
-
-int wmain(int argc, wchar_t** argv) {
+int wmain() {
   try {
-    if (argc == 2) {
-      exportTests(argv[1]);
-      std::cout << "PASS: " << checks << " proxy export checks\n";
-      return 0;
-    }
     auto basic = autoscan::Discover(image());
     check(basic.ready() && basic.gates.size() == 2, "complete free/member plan");
     check(basic.gates[0].rva == 0x1045 && basic.gates[1].rva == 0x1104, "RVA rather than file offset");

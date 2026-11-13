@@ -1,5 +1,5 @@
-# Manually builds the Windows version.dll proxy (x64/x86/arm64) and publishes
-# version.dll-v<ver>.zip (x64/, x86/, arm64/ folders inside) to a release
+# Manually builds the Windows secur32.dll proxy (x64/x86/arm64) and publishes
+# secur32.dll-v<ver>.zip (x64/, x86/, arm64/ folders inside) to a release
 # tagged v<ver>. <ver> is the DLL's ProductVersion, whose single source of
 # truth is CMakeLists.txt's project version. chrome-mv2.ps1 finds the asset by following the
 # releases/latest redirect to the tag (api.github.com is avoided - it
@@ -8,11 +8,11 @@
 # repo, minus gitignored build/ and out/ - which cannot be scoped or
 # disabled.)
 #
-# Manual runs only: Actions tab -> "Build Windows version.dll" -> Run workflow.
+# Manual runs only: Actions tab -> "Build Windows secur32.dll" -> Run workflow.
 # The file must exist on the default branch for the button to appear.
 #
 # Requires mv2-mem-patch-win/version.rc to be committed (build.bat compiles it).
-name: Build Windows version.dll
+name: Build Windows secur32.dll
 
 on:
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
 
       # windows-latest ships VS 2022 with the C++ workload; build.bat finds it
       # via vswhere and calls vcvarsall itself. All requested target tools are required.
-      - name: Build version.dll (x64/x86/arm64)
+      - name: Build secur32.dll (x64/x86/arm64)
         shell: cmd
         run: |
           call mv2-mem-patch-win\build.bat all
@@ -36,7 +36,7 @@ jobs:
 
       # Zip the arch dirs with bsdtar (Compress-Archive writes backslash entry
       # separators, which non-Windows unzip tools mishandle).
-      - name: Package version.dll-v<ver>.zip
+      - name: Package secur32.dll-v<ver>.zip
         id: package
         shell: pwsh
         run: |
@@ -44,19 +44,19 @@ jobs:
           New-Item -ItemType Directory -Force -Path $root | Out-Null
           $built = @()
           foreach ($a in 'x64', 'x86', 'arm64') {
-            $src = "mv2-mem-patch-win/build/$a/version.dll"
+            $src = "mv2-mem-patch-win/build/$a/secur32.dll"
             if (Test-Path $src) {
               New-Item -ItemType Directory -Force -Path (Join-Path $root $a) | Out-Null
               Copy-Item $src (Join-Path $root $a) -Force
               $built += $a
             } else {
-              throw "no version.dll for $a"
+              throw "no secur32.dll for $a"
             }
           }
-          if ($built -notcontains 'x64') { throw 'no x64 version.dll - refusing to release' }
-          $ver = (Get-Item (Join-Path $root 'x64/version.dll')).VersionInfo.ProductVersion
-          if (-not $ver) { throw "couldn't read ProductVersion from the x64 version.dll" }
-          $zip = "version.dll-v$ver.zip"
+          if ($built -notcontains 'x64') { throw 'no x64 secur32.dll - refusing to release' }
+          $ver = (Get-Item (Join-Path $root 'x64/secur32.dll')).VersionInfo.ProductVersion
+          if (-not $ver) { throw "couldn't read ProductVersion from the x64 secur32.dll" }
+          $zip = "secur32.dll-v$ver.zip"
           Write-Host "packaging $zip ($($built -join ', '))"
           $outDir = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null

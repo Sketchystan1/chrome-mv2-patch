@@ -7,10 +7,11 @@ changing any patching logic. This file is the short operating contract.
 
 ## Repository shape
 
-The platform scripts and legacy Windows memory engine share one signature model. Do not
+The platform buffer matchers share one signature model. The Windows DLL uses
+independent automatic discovery. Do not
 reintroduce the removed Go or Python patchers:
 
-- `chrome-mv2.ps1` — installs the Windows memory DLL; retains the PE buffer engine
+- `chrome-mv2.ps1` — installs the Windows `secur32.dll` automatic patcher; retains the PE buffer engine
   and legacy restore: `pe` (x64), `pe32` (x86), `pe-arm64` (Win-on-ARM).
 - `chrome-mv2.sh` — Unix, dispatched by file magic: Linux `elf`/`elf-arm64` and the
   macOS `macho-arm64` framework slice (then ad-hoc re-signs the app). Must stay
@@ -20,15 +21,18 @@ reintroduce the removed Go or Python patchers:
 - `scripts/*.py` — derivation/verification only; they never patch an install.
 - `mv2-mem-patch-win` — Windows in-process patcher, built with its own `build.bat`.
 
-This branch's Windows DLL (`build.bat` or Visual Studio) uses compact native
-discovery on x86, x64 and ARM64 without signature tables. DLLs go in `build/`;
+This branch's only deployment DLL is `secur32.dll` (`build.bat` or Visual Studio).
+It uses compact native discovery on x86, x64 and ARM64 without signature tables,
+and is placed beside `chrome.exe` or `msedge.exe`. DLLs go in `build/`;
 generated files, dependencies and test tools go in ignored `out/`. See
-[`mv2-mem-patch-win/AUTOSCAN.md`](../mv2-mem-patch-win/AUTOSCAN.md) for its bounded
-proof and runtime contract. Existing installers download the published release.
+[Windows implementation and limits](../mv2-mem-patch-win/README.md#implementation-and-limits)
+for its bounded proof and runtime contract. Existing installers download the
+published release.
 
-The patch re-enables MV2 by flipping the `IsExtensionAffected` branch at each
-inlined site, using per-milestone, container-tagged tables, applying only a
-complete unambiguous match by default. Supported: Chrome **152–159**.
+The patch re-enables MV2 by selecting the existing not-affected outcome at each
+recognized `IsExtensionAffected` site. Table-based platform matchers use
+per-milestone, container-tagged tables and apply only a complete unambiguous match.
+The native Windows DLL discovers the same predicate. Supported: Chrome **152–159**.
 
 ## Cardinal rule
 
@@ -114,7 +118,8 @@ Two table-level failures are invisible from a single binary — never skip the a
 
 Chrome 159 tables belong in `milestones_v2`. New readers concatenate both arrays;
 older Windows DLLs otherwise mistake unknown instruction kinds for short branches.
-Ship `version.dll` 1.16.0 or later with these tables, and the updated Unix script.
+Historical table-based DLLs required version 1.16.0 or later with these tables.
+Ship table updates with the updated Unix script; native `secur32.dll` uses no table.
 The old `jg`/`b.gt` finder cannot author inverted/CSEL sites automatically: review
 the source and both outcomes, then verify the complete resolved address set.
 
@@ -134,9 +139,10 @@ The audit is the stronger check: `--verify` only asks whether recorded sites mat
 while `audit --binary` reports which milestone the runtime selects, whether anything
 ties, and whether a gate in the binary is covered by nothing. Real-macOS runtime
 proof (re-sign → launch → MV2 A/B → restore, Apple Silicon) and native Windows ARM64
-browser behavior still need target hardware. `python scripts/test_memory.py --arm64`
-runs the legacy table-based engine and patched ARM64 instructions under WSLC with
-Wine/QEMU on x64 Windows. The release workflow only builds the Windows DLLs.
+browser behavior still need target hardware. Native scanner/proxy/application
+tests use `ctest --preset <arch>` in `mv2-mem-patch-win` after its CMake build.
+ARM64 runtime checks require ARM64 Windows. The release workflow only builds the
+three architecture variants of `secur32.dll`.
 
 Read-only diagnostics: `./chrome-mv2.sh check <path> --quiet` /
 `.\chrome-mv2.ps1 check <path> -Quiet`. Do not hand-patch a live install while

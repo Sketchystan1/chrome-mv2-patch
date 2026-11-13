@@ -5,34 +5,34 @@
 
 .DESCRIPTION
     Re-enables Manifest V2 extension support in Google Chrome by installing the
-    version.dll proxy (see mv2-mem-patch-win/). Chrome statically imports
-    version.dll and loads it before chrome.dll; version.dll patches the MV2 gate
-    IN MEMORY every launch, so chrome.dll on disk is never modified and Widevine
-    DRM keeps working. The DLL self-refreshes its signatures for new Chrome
-    versions, so a single install survives Chrome updates.
+    secur32.dll proxy (see mv2-mem-patch-win/). It discovers and patches the MV2
+    gates IN MEMORY every launch, so chrome.dll on disk is never modified and
+    Widevine DRM keeps working. The DLL uses a validated local cache and needs
+    no signature table or network request at launch.
 
     WHAT 'install' DOES:
       1. If Chrome was patched by the old on-disk byte-patcher (a chrome.dll.bak
-         is present), restore chrome.dll to stock first - the version.dll method
+         is present), restore chrome.dll to stock first - the secur32.dll method
          needs an unmodified chrome.dll for DRM.
-      2. Find the latest version.dll-v*.zip release on the project's GitHub,
-         download it, and take the matching version.dll (x64/x86/arm64) out of
-         it, plus signatures.json.
-      3. Place version.dll next to chrome.exe, and signatures.json beside it (and
-         in the per-user store the DLL falls back to).
+      2. Find the latest secur32.dll-v*.zip release on the project's GitHub,
+         download it, and take the matching secur32.dll (x64/x86/arm64) out of it.
+      3. Place secur32.dll next to chrome.exe and remove this project's older
+         version.dll proxy if present.
       4. Clear any HKLM Chrome policies (removes the "managed by your
          organization" banner left by the old policy route).
       5. Optionally force-install uBlock Origin (MV2) off-store via the
          Extensions registry key.
 
-    Other commands: 'uninstall' removes version.dll and the uBO key (and restores
+    Other commands: 'uninstall' removes secur32.dll and the uBO key (and restores
     chrome.dll if an old .bak is present); 'update' force-refreshes
-    signatures.json; 'check' is a read-only status report and never elevates.
+    signatures.json for legacy backup restore; 'check' is a read-only status
+    report and never elevates.
 
     The signature table lives in the project's signatures.json on GitHub and is
     fetched (raw) at runtime, so the script text alone is enough to run straight
-    from a URL (see the irm|iex example). A signatures.json installed next to the
-    script takes precedence; another file may be selected with -Signatures.
+    from a URL (see the irm|iex example). It is used only by the legacy backup
+    restore and diagnostics. A signatures.json installed next to the script
+    takes precedence; another file may be selected with -Signatures.
 
     RESTORE OF THE OLD METHOD: an old-style on-disk patch is undone from the
     chrome.dll.bak snapshot the old patcher saved. The backup is accepted only
@@ -65,7 +65,7 @@
     Skip the uBlock Origin prompt (do not install it).
 
 .PARAMETER Arch
-    Force the version.dll architecture (x64, x86, or arm64) instead of detecting
+    Force the secur32.dll architecture (x64, x86, or arm64) instead of detecting
     it from chrome.exe.
 
 .PARAMETER ForceRestore
@@ -112,7 +112,7 @@ param(
     [switch]$Ublock,
     [switch]$NoUblock,
 
-    # Force the version.dll architecture instead of detecting it from chrome.exe.
+    # Force the secur32.dll architecture instead of detecting it from chrome.exe.
     [string]$Arch,
 
     [switch]$AllowPartial,
@@ -136,7 +136,7 @@ $ErrorActionPreference = 'Stop'
 $AppVersion      = '1.16.0'
 $SignaturesFile  = 'signatures.json'
 $SignaturesUrl   = 'https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json'
-# version.dll release: the latest GitHub release's version.dll-v<ver>.zip asset
+# secur32.dll release: the latest GitHub release's secur32.dll-v<ver>.zip asset
 # (x64/, x86/, arm64/ folders inside). Found by following the releases/latest
 # redirect to the tag - NOT via api.github.com, which is rate-limited by IP
 # (403 for many shared/VPN addresses). win-build.yml names the asset after the
@@ -145,7 +145,7 @@ $DllReleaseLatest = 'https://github.com/Sketchystan1/chrome-mv2-patch/releases/l
 # Off-store uBlock Origin (MV2) force-install.
 $UboId           = 'fkgkibajhfbepljeaefdnfnegdcjomkh'
 $UboUpdateUrl    = 'https://github.com/gorhill/uBlock/raw/refs/heads/master/dist/chromium/update.xml'
-# The DLL's per-user data dir: config + the fallback signatures store it reads
+# The legacy per-user data dir: config + the fallback signature table.
 # when chrome.exe sits in a read-only Application dir.
 $Mv2DataDir      = Join-Path $env:LOCALAPPDATA 'mv2-mem-patch'
 $script:CsLoaded = $false
@@ -2480,7 +2480,7 @@ function Get-InstallDetails {
 
     if (-not $Channel) { $Channel = Get-ChannelFromPath $TargetPath }
 
-    # version.dll + signatures.json live next to chrome.exe (the Application dir),
+    # secur32.dll lives next to chrome.exe (the Application dir),
     # one level up from the versioned chrome.dll. Empty for a bare/offline dll.
     $exePath = Get-BrowserExePath $TargetPath
     $appDir  = if ($exePath) { Split-Path -Parent $exePath } else { '' }
@@ -2495,7 +2495,8 @@ function Get-InstallDetails {
         Holders   = $holders.Count
         HasBackup = (Test-Path -LiteralPath (Get-BackupPath $TargetPath) -PathType Leaf)
         State     = (Get-PatchStateQuick $TargetPath)
-        HasVersionDll = [bool]($appDir -and (Test-Path -LiteralPath (Join-Path $appDir 'version.dll') -PathType Leaf))
+        HasSecur32Dll = [bool]($appDir -and (Test-Path -LiteralPath (Join-Path $appDir 'secur32.dll') -PathType Leaf))
+        HasLegacyProxy = [bool](Get-LegacyProxyPath $appDir)
     }
 }
 
@@ -2552,11 +2553,12 @@ function Get-TargetLabel {
 
 # One numbered row of the browser table:
 #   "  1  Chrome Stable    152.0.7977.65       Installed".
-# version.dll presence is the current install state; the chrome.dll probe only
+# secur32.dll presence is the current install state; the chrome.dll probe only
 # detects legacy byte-patches underneath it.
 function Show-InstallRow {
     param([int]$Index, $Inst)
-    $status = if ($Inst.HasVersionDll) { "$($C.Grn)Installed$($C.Reset)" }
+    $status = if ($Inst.HasSecur32Dll) { "$($C.Grn)Installed$($C.Reset)" }
+              elseif ($Inst.HasLegacyProxy) { "$($C.Yel)Proxy (old)$($C.Reset)" }
               elseif ($Inst.State -eq 'patched') { "$($C.Yel)Patched (old)$($C.Reset)" }
               elseif ($Inst.State -eq 'not patched') { "$($C.Dim)Not installed$($C.Reset)" }
               else { '' }
@@ -2630,7 +2632,7 @@ function Select-Install {
     Write-Host "$($C.Bold)What would you like to do?$($C.Reset)"
     Write-Host ''
     Write-Host '  [i]  Install / repair MV2         (default)'
-    Write-Host '  [u]  Uninstall (remove version.dll + uBlock Origin)'
+    Write-Host '  [u]  Uninstall (remove secur32.dll + uBlock Origin)'
     Write-Host '  [s]  Update signatures'
     Write-Host '  [k]  Check status'
     Write-Host '  [q]  Quit'
@@ -2698,8 +2700,8 @@ function Resolve-Target {
 }
 
 # ============================================================================
-# version.dll installer. The old on-disk byte-patcher is gone; 'install' drops
-# the version.dll proxy next to chrome.exe (chrome.dll stays stock, so DRM
+# secur32.dll installer. The old on-disk byte-patcher is gone; 'install' drops
+# the secur32.dll proxy next to chrome.exe (chrome.dll stays stock, so DRM
 # works), clears leftover machine policies, and optionally force-installs uBO.
 # ============================================================================
 
@@ -2723,7 +2725,7 @@ function Get-PeArch {
     } catch { return '' }
 }
 
-# The arch of the version.dll to install: -Arch wins, else chrome.exe's machine
+# The arch of the secur32.dll to install: -Arch wins, else chrome.exe's machine
 # (falling back to chrome.dll for a bare copy).
 function Get-ChromeArch {
     param($Target, [string]$Override)
@@ -2732,13 +2734,26 @@ function Get-ChromeArch {
     return (Get-PeArch $probe)
 }
 
-# The Application dir (next to chrome.exe) where version.dll + signatures.json
+# The Application dir (next to chrome.exe) where secur32.dll
 # go. Empty for a bare/offline chrome.dll with no chrome.exe beside it.
 function Get-AppDir {
     param($Target)
     if ($Target.PSObject.Properties['AppDir'] -and $Target.AppDir) { return $Target.AppDir }
     $exe = Get-BrowserExePath $Target.Path
     if ($exe) { return (Split-Path -Parent $exe) }
+    return ''
+}
+
+# Remove only our branded legacy DLL, leaving unrelated version.dll files alone.
+function Get-LegacyProxyPath {
+    param([string]$AppDir)
+    if ($AppDir) {
+        $path = Join-Path $AppDir 'version.dll'
+        if ((Test-Path -LiteralPath $path -PathType Leaf) -and
+            [Diagnostics.FileVersionInfo]::GetVersionInfo($path).ProductName -eq 'chrome-mv2-patch mem-patch') {
+            return $path
+        }
+    }
     return ''
 }
 
@@ -2780,9 +2795,9 @@ function Get-LatestDllRelease {
     if ($loc -match '/(?:releases/)?(?:tag|tree)/([^/?#]+)') { $tag = $Matches[1] }
     if (-not $tag) { throw 'No release has been published yet (run the win-build workflow on GitHub).' }
     if ($tag -notmatch '^v[0-9][0-9.]*$') {
-        throw "The latest release tag '$tag' is not a version.dll build."
+        throw "The latest release tag '$tag' is not a secur32.dll build."
     }
-    $zip  = "version.dll-$tag.zip"
+    $zip  = "secur32.dll-$tag.zip"
     $base = $DllReleaseLatest -replace '/releases/latest/?$',''
     return [pscustomobject]@{
         ZipName = $zip
@@ -2790,7 +2805,7 @@ function Get-LatestDllRelease {
     }
 }
 
-# Pull <arch>/version.dll out of the downloaded version.dll.zip. Entry names are
+# Pull <arch>/secur32.dll out of the downloaded secur32.dll.zip. Entry names are
 # matched case-insensitively with either path separator, so zips made by bsdtar
 # ('/') and Compress-Archive ('\') both work. Throws when the arch is missing.
 function Get-DllFromReleaseZip {
@@ -2798,7 +2813,7 @@ function Get-DllFromReleaseZip {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $zip = [IO.Compression.ZipFile]::OpenRead($ZipPath)
     try {
-        $want = ($Arch + '/version.dll')
+        $want = ($Arch + '/secur32.dll')
         foreach ($entry in $zip.Entries) {
             if ((($entry.FullName -replace '\\', '/').TrimStart('/')) -ieq $want) {
                 $ms = New-Object IO.MemoryStream
@@ -2808,12 +2823,11 @@ function Get-DllFromReleaseZip {
                 return ,$ms.ToArray()
             }
         }
-        throw "The downloaded version.dll zip has no $Arch build."
+        throw "The downloaded secur32.dll zip has no $Arch build."
     } finally { $zip.Dispose() }
 }
 
-# Fetch + validate signatures.json and write it where the DLL looks: next to
-# chrome.exe, and the per-user fallback store. -Signatures (path or URL) wins.
+# Fetch + validate the legacy restore signature table. -Signatures wins.
 function Save-Signatures {
     param([string]$AppDir)
     Write-Info 'Fetching signatures...'
@@ -2905,7 +2919,7 @@ function Read-YesNo {
     }
 }
 
-# install: undo any old on-disk patch -> download version.dll (+ signatures) ->
+# install: undo any old on-disk patch -> download secur32.dll ->
 # place next to chrome.exe -> clear policies -> optional uBO. Returns 0 on
 # success, 1 if nothing was installed.
 function Invoke-Install {
@@ -2913,7 +2927,7 @@ function Invoke-Install {
 
     $appDir = Get-AppDir $Target
     if (-not $appDir) {
-        Write-Err "Couldn't find chrome.exe next to this Chrome - nowhere to install version.dll."
+        Write-Err "Couldn't find chrome.exe next to this Chrome - nowhere to install secur32.dll."
         return 1
     }
 
@@ -2928,17 +2942,17 @@ function Invoke-Install {
         Write-Host '    MV2 will still work; reinstall Chrome if Widevine DRM (Netflix, etc.) misbehaves.'
     }
 
-    # (2) Find the latest release, download its version.dll zip, and take the
+    # (2) Find the latest release, download its secur32.dll zip, and take the
     # matching DLL out of it.
     $arch = Get-ChromeArch -Target $Target -Override $Arch
     if (-not $arch) {
         Write-Err "Couldn't detect Chrome's architecture. Re-run with -Arch x64, x86, or arm64."
         return 1
     }
-    $tmpZip  = Join-Path ([IO.Path]::GetTempPath()) ('version.dll-' + [Guid]::NewGuid().ToString('N') + '.zip')
-    $tmpDll  = Join-Path ([IO.Path]::GetTempPath()) ('version-' + $arch + '-' + [Guid]::NewGuid().ToString('N') + '.dll')
+    $tmpZip  = Join-Path ([IO.Path]::GetTempPath()) ('secur32.dll-' + [Guid]::NewGuid().ToString('N') + '.zip')
+    $tmpDll  = Join-Path ([IO.Path]::GetTempPath()) ('secur32-' + $arch + '-' + [Guid]::NewGuid().ToString('N') + '.dll')
     try {
-        Write-Info 'Finding the latest version.dll release...'
+        Write-Info 'Finding the latest secur32.dll release...'
         $rel = Get-LatestDllRelease
         Write-Info "Downloading $($rel.ZipName) ($arch)..."
         Get-RemoteFile -Uri $rel.ZipUrl -OutFile $tmpZip
@@ -2946,27 +2960,28 @@ function Invoke-Install {
         [IO.File]::WriteAllBytes($tmpDll, $dllBytes)
         $gotArch = Get-PeArch $tmpDll
         if ($gotArch -ne $arch) {
-            Write-Err "The downloaded version.dll is '$gotArch', not '$arch' - not installing it."
+            Write-Err "The downloaded secur32.dll is '$gotArch', not '$arch' - not installing it."
             return 1
         }
-        if ($dllBytes.Length -eq 0) { Write-Err 'The downloaded version.dll is empty.'; return 1 }
+        if ($dllBytes.Length -eq 0) { Write-Err 'The downloaded secur32.dll is empty.'; return 1 }
 
-        # (3) Close Chrome so version.dll is unlocked, then place it + signatures.
+        # (3) Close Chrome so the proxy DLLs are unlocked, then install.
         if (-not (Request-TargetUnlock -Target $Target -AssumeYes $AssumeYes)) {
             Write-Err 'Chrome is still open - close it and try again.'
             return 1
         }
-        Write-Info 'Installing version.dll...'
-        Write-AtomicFile -TargetPath (Join-Path $appDir 'version.dll') -Buf $dllBytes
-        # Signatures are a prefetch convenience - the DLL fetches them itself on
-        # first launch, so a hiccup here must not fail an otherwise-good install.
-        try   { Save-Signatures -AppDir $appDir }
-        catch { Write-Warn ("Couldn't prefetch signatures (" + $_.Exception.Message + "); Chrome fetches them on first launch.") }
-        Write-Ok "Installed version.dll ($arch) next to chrome.exe."
+        Write-Info 'Installing secur32.dll...'
+        Write-AtomicFile -TargetPath (Join-Path $appDir 'secur32.dll') -Buf $dllBytes
+        $legacy = Get-LegacyProxyPath $appDir
+        if ($legacy) {
+            Remove-Item -LiteralPath $legacy -Force -ErrorAction Stop
+            Write-Ok 'Removed the old version.dll proxy.'
+        }
+        Write-Ok "Installed secur32.dll ($arch) next to chrome.exe."
     } catch {
         Write-Err ("Install failed: " + $_.Exception.Message)
         if ("$($_.Exception.Message)" -match '404|Not Found') {
-            Write-Host '    No published build yet. Run the "Build Windows version.dll" workflow on GitHub, then try again.'
+            Write-Host '    No published build yet. Run the "Build Windows secur32.dll" workflow on GitHub, then try again.'
         }
         return 1
     } finally {
@@ -2990,27 +3005,34 @@ function Invoke-Install {
     return 0
 }
 
-# uninstall: remove version.dll + the uBO key + the per-user store, and restore
+# uninstall: remove secur32.dll + the uBO key + the per-user store, and restore
 # chrome.dll from an old-style backup if one is present.
 function Invoke-Uninstall {
     param($Target, [bool]$AssumeYes)
 
     $appDir = Get-AppDir $Target
-    $dllPath = if ($appDir) { Join-Path $appDir 'version.dll' } else { '' }
-    $hasDll = ($dllPath -and (Test-Path -LiteralPath $dllPath -PathType Leaf))
+    $dllPaths = @()
+    if ($appDir) {
+        $current = Join-Path $appDir 'secur32.dll'
+        if (Test-Path -LiteralPath $current -PathType Leaf) { $dllPaths += $current }
+        $legacy = Get-LegacyProxyPath $appDir
+        if ($legacy) { $dllPaths += $legacy }
+    }
     $backupPath = Get-BackupPath $Target.Path
     $hasBak = (Test-Path -LiteralPath $backupPath -PathType Leaf)
 
-    if ($hasDll) {
+    if ($dllPaths.Count) {
         if (-not (Request-TargetUnlock -Target $Target -AssumeYes $AssumeYes)) {
             Write-Err 'Chrome is still open - close it and try again.'
             return 1
         }
-        Write-Info 'Removing version.dll...'
-        try   { Remove-Item -LiteralPath $dllPath -Force -ErrorAction Stop; Write-Ok 'version.dll removed.' }
-        catch { Write-Err "Couldn't delete version.dll: $_"; return 1 }
+        foreach ($dllPath in $dllPaths) {
+            Write-Info "Removing $(Split-Path -Leaf $dllPath)..."
+            try   { Remove-Item -LiteralPath $dllPath -Force -ErrorAction Stop; Write-Ok 'Proxy removed.' }
+            catch { Write-Err "Couldn't delete ${dllPath}: $_"; return 1 }
+        }
     } else {
-        Write-Info 'No version.dll to remove.'
+        Write-Info 'No secur32.dll to remove.'
     }
 
     Remove-UboExtension
@@ -3036,7 +3058,7 @@ function Invoke-Uninstall {
     return 0
 }
 
-# update: force-refresh signatures.json in both stores (next-launch effect).
+# update: force-refresh signatures.json for legacy restore and diagnostics.
 function Invoke-Update {
     param($Target)
     $appDir = Get-AppDir $Target
@@ -3047,7 +3069,7 @@ function Invoke-Update {
     try { Save-Signatures -AppDir $appDir }
     catch { Write-Err ("Update failed: " + $_.Exception.Message); return 1 }
     Write-Host ''
-    Write-Success 'Signatures updated. They take effect the next time Chrome starts.'
+    Write-Success 'Legacy restore signatures updated. The auto patcher needs no signature table.'
     return 0
 }
 
@@ -3111,28 +3133,22 @@ function Invoke-Restore {
 }
 
 # Read-only status: what's installed and any old-method leftovers. Never writes,
-# never elevates. Returns 0 when version.dll is installed, else 1.
+# never elevates. Returns 0 when secur32.dll is installed, else 1.
 function Invoke-Check {
     param($Target)
 
     $appDir = Get-AppDir $Target
     $installed = $false
     if ($appDir) {
-        $dll = Join-Path $appDir 'version.dll'
+        $dll = Join-Path $appDir 'secur32.dll'
         if (Test-Path -LiteralPath $dll -PathType Leaf) {
             $installed = $true
             $a = Get-PeArch $dll
-            Write-Ok ("version.dll is installed ({0})." -f $(if ($a) { $a } else { 'unknown arch' }))
+            Write-Ok ("secur32.dll is installed ({0})." -f $(if ($a) { $a } else { 'unknown arch' }))
         } else {
-            Write-Info 'version.dll is not installed.'
+            Write-Info 'secur32.dll is not installed.'
         }
-        if (Test-Path -LiteralPath (Join-Path $appDir 'signatures.json') -PathType Leaf) {
-            Write-Ok 'signatures.json is present next to chrome.exe.'
-        } elseif (Test-Path -LiteralPath (Join-Path $Mv2DataDir 'signatures.json') -PathType Leaf) {
-            Write-Info 'signatures.json is in the per-user store (the DLL refreshes it on launch).'
-        } else {
-            Write-Info 'No signatures.json yet (the DLL fetches it on first launch).'
-        }
+        if (Get-LegacyProxyPath $appDir) { Write-Warn 'An old version.dll proxy remains; run install to migrate.' }
     } else {
         Write-Warn "Couldn't find chrome.exe next to this Chrome."
     }
@@ -3220,9 +3236,9 @@ function Invoke-Main {
 
     # install/uninstall write HKLM (policies + uBO), so they always need admin;
     # update only writes files, so it needs admin only when the Application dir
-    # is read-only. The probe is where version.dll / signatures.json will go.
+    # is read-only. The probe is where secur32.dll will go.
     $appDirForElev = Get-AppDir $target
-    $elevProbe = if ($appDirForElev) { Join-Path $appDirForElev 'version.dll' } else { $target.Path }
+    $elevProbe = if ($appDirForElev) { Join-Path $appDirForElev 'secur32.dll' } else { $target.Path }
     $needsElevation = ($Command -in 'install', 'uninstall') -or (-not (Test-TargetDirectoryWritable -TargetPath $elevProbe))
     if ($needsElevation -and -not (Test-Elevated) -and -not $env:MV2_TEST_NO_ELEVATION) {
         # Loop guard: -Relaunched means we ALREADY tried to elevate. If we are

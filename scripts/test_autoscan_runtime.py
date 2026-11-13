@@ -275,12 +275,12 @@ def main():
                            '/mv2-started': 1}, '/probe/current') == {'/blocked': 2, '/mv2-started': 1}
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('matrix', type=Path)
-    parser.add_argument('--dll', type=Path, default=REPO / 'mv2-mem-patch-win/build/x64/version.dll')
+    parser.add_argument('--dll', type=Path, default=REPO / 'mv2-mem-patch-win/build/x64/secur32.dll')
     parser.add_argument('--work', type=Path, required=True)
     args = parser.parse_args()
     args.work = args.work.resolve(); args.dll = args.dll.resolve()
-    if args.dll.name.lower() not in ('version.dll', 'secur32.dll'):
-        parser.error('--dll must be named version.dll or secur32.dll')
+    if args.dll.name.lower() != 'secur32.dll':
+        parser.error('--dll must be named secur32.dll')
     args.dll_sha256 = digest(args.dll)
     assert args.work.is_relative_to((REPO / '_scratch').resolve()), 'test output must stay beneath _scratch'
     args.work.mkdir(parents=True, exist_ok=False)

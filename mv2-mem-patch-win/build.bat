@@ -12,7 +12,7 @@ if not defined MV2_VS (echo MSVC tools are required. & exit /b 1)
 if /I "%MV2_ARCH%"=="all" (
   for %%A in (x64 x86 arm64) do (
     call :build %%A
-    if errorlevel 1 exit /b 1
+    if errorlevel 1 goto :failed
   )
   exit /b 0
 )
@@ -38,3 +38,6 @@ cmake --preset %MV2_TARGET%
 if errorlevel 1 exit /b 1
 cmake --build --preset %MV2_TARGET%
 endlocal & exit /b %errorlevel%
+
+:failed
+exit /b 1

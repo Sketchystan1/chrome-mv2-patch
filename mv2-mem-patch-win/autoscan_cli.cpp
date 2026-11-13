@@ -1,4 +1,4 @@
-// Read-only diagnostic using the same bounded recognizer as version.dll.
+// Read-only diagnostic using the same bounded recognizer as secur32.dll.
 #define NOMINMAX
 #include <windows.h>
 #include <cstring>

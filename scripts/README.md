@@ -22,7 +22,8 @@ source and disassembly.
 The matcher, hardener, verifier, and audit support `short-nop`, `near-nop`,
 `bcond-nop`, and `csel`, plus 64-bit CBZ. Put 159 tables in `milestones_v2` so older
 DLLs ignore them. Both arrays are read by updated engines and verification tools.
-Windows requires `version.dll` 1.16.0 or later; updating JSON alone is insufficient.
+Historical table-based Windows DLLs required version 1.16.0 or later for these
+forms. The current native `secur32.dll` discovers them without a signature table.
 
 | Script | What it does | Deps |
 | :--- | :--- | :--- |
@@ -37,8 +38,7 @@ Windows requires `version.dll` 1.16.0 or later; updating JSON alone is insuffici
 
 The test suite is Python too and lives flat in this folder (no subfolder):
 `run_tests.py` (entry point) drives `test_linux.py` (ELF), `test_macos.py`
-(Mach-O), `test_windows.py` (PE, Windows-only), `test_memory.py` (the legacy C++
-table-based memory engine, with MSVC/Detours headers), `test_derive.py`
+(Mach-O), `test_windows.py` (PE, Windows-only), `test_derive.py`
 (arm64 finder unit checks), and `test_scan_windows.py`
 (skipped unless Capstone and Z3 are installed); `make_macho_fixture.py` builds a synthetic universal
 Mach-O and `_testutil.py` holds the shared fixture builders/helpers. Run all of
@@ -47,24 +47,15 @@ it with `python scripts/run_tests.py`.
 Checks run concurrently in two waves: table/engine checks first, then the Bash
 ELF/Mach-O tests. Use `--fast` to skip the slower Bash wave. On Windows, put Git
 Bash on PATH before the WSL launcher because the fixtures use `/c/...` paths.
-`test_memory.py` skips when MSVC or the Detours headers are unavailable; run
-`mv2-mem-patch-win/build.bat` first.
 
 The compact DLL's CMake tests and diagnostic scanner use
 `mv2-mem-patch-win/out/<arch>/`; see its [build instructions](../mv2-mem-patch-win/README.md).
 `check_autoscan_matrix.py` and `test_autoscan_runtime.py` use the x64 tools there
-by default, with the runtime DLL at `mv2-mem-patch-win/build/x64/version.dll`.
-For the carrier beside `chrome.exe`, use
-`--dll mv2-mem-patch-win/build/x64/secur32.dll`. Its runtime matrix also removes
-the cached scan plan before restarting the same profile to check a cold scan.
-
-On an x64 Windows host with MSVC ARM64 tools and WSLC, run
-`python scripts/test_memory.py --arm64`. This cross-compiles the legacy engine tests
-and runs them with `linaro/wine-arm64:10.2` (Wine + QEMU). It also executes the ARM64
-`bcond`, `bcond-nop`, `csel`, and `tbz` predicates before and after patching, checks
-repeat application and memory protection, and fails if its prerequisites are missing.
-The default test suite still runs x64; browser MV2 runtime testing is separate.
-
+by default, with the runtime DLL at `mv2-mem-patch-win/build/x64/secur32.dll`
+beside the browser executable. The runtime matrix also removes the cached plan
+before restarting the same profile to check an empty-cache scan. Native CMake
+tests cover the compact scanner, application, cache, forwarding and ownership;
+ARM64 native tests require ARM64 Windows.
 
 ## Verify the shipping table still fits a build
 
@@ -243,7 +234,7 @@ blocks after RET and handles partial registers, conditional moves and Boolean
 returns. Missing type-range guards and wrong location polarity fail the solver
 check. The investigated CSP selectors are excluded.
 
-The separate [native Windows x64 DLL](../mv2-mem-patch-win/AUTOSCAN.md) builds on
+The separate [native Windows x64 DLL](../mv2-mem-patch-win/README.md#implementation-and-limits) builds on
 this research and performs discovery at startup without an exported JSON plan.
 Its compiler coverage and validation results differ from this Python prototype.
 
@@ -255,14 +246,13 @@ prescreen entirely. Analysis is bounded, calls are opaque, and the enum values
 still depend on Chromium's source contract. Every report explicitly sets
 `complete_enforcement_coverage_proven` to `false`.
 
-`--plan FILE` generates JSON compatible with the existing runtime, containing
-byte windows derived from the current binary. No maintained signature table is
-read. Plan export declines unresolved candidates, unverified extra matches and
-branch forms the runtime cannot apply. Check the plan's `binary_sha256` against
-the tested DLL before use: the existing runtime does not enforce this additional
-hash field. A reviewed local experiment must configure the runtime to read this
-file without its normal remote table refresh. The default installers still use
-`signatures.json`. No permission-feature or InstallVerifier patches are generated.
+`--plan FILE` retains the research prototype's signature-window JSON export.
+It declines unresolved candidates, unverified extra matches and unsupported branch
+forms. That format targeted the retired table-based memory runtime; it is not an
+input to `secur32.dll`. The current native scanner uses its private validated
+protocol. Unix patchers and Windows legacy restore/diagnostics still use
+`signatures.json`. No permission-feature or InstallVerifier patches are generated
+by this Python prototype.
 
 **Measured on stripped Chromium 157.0.8103.39, Windows x64 (2026-11-08):** the
 supplied `chrome.exe` resolved to `157.0.8103.39/chrome.dll`. The scanner found

@@ -319,30 +319,9 @@ void pointers() {
   }
   VirtualFree(slot, 0, MEM_RELEASE);
 }
-void exports(const wchar_t* path) {
-  HMODULE proxy = LoadLibraryW(path);
-  check(proxy != nullptr, "native proxy loads with the dynamic runtime");
-  for (unsigned n = 1; n <= 18; ++n)
-    check(GetProcAddress(proxy, MAKEINTRESOURCEA(n)) != nullptr, "proxy preserves all export ordinals");
-  std::array<wchar_t, MAX_PATH + 16> system{};
-  auto length = GetSystemDirectoryW(system.data(), MAX_PATH);
-  check(length && length < MAX_PATH, "locate native system version DLL");
-  std::memcpy(system.data() + length, L"\\version.dll", sizeof(L"\\version.dll"));
-  HMODULE real = LoadLibraryExW(system.data(), nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
-  check(real != nullptr, "load native system version DLL");
-  using LanguageName = DWORD(WINAPI*)(DWORD, LPWSTR, DWORD);
-  auto forwarded = reinterpret_cast<LanguageName>(GetProcAddress(proxy, "VerLanguageNameW"));
-  auto direct = reinterpret_cast<LanguageName>(GetProcAddress(real, "VerLanguageNameW"));
-  check(forwarded && direct, "resolve representative version API");
-  std::array<wchar_t, 128> viaProxy{}, viaSystem{};
-  auto count = forwarded(0x409, viaProxy.data(), static_cast<DWORD>(viaProxy.size()));
-  check(count && count == direct(0x409, viaSystem.data(), static_cast<DWORD>(viaSystem.size())) && viaProxy == viaSystem,
-        "assembly forwarding preserves the native calling convention and arguments");
-  FreeLibrary(real); FreeLibrary(proxy);
+
 }
-}
-int wmain(int argc, wchar_t** argv) {
-  if (argc == 2) exports(argv[1]);
-  else { lengths(); intervals(); boundaries(); evaluator(); pointers(); }
+int wmain() {
+  lengths(); intervals(); boundaries(); evaluator(); pointers();
   std::printf("PASS: %u compact module checks\n", checks);
 }

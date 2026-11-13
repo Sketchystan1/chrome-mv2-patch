@@ -95,6 +95,30 @@ static Bytes fixture() {
 static bool has(const Report& report, OptionalGate kind) {
   return std::any_of(report.gates.begin(), report.gates.end(), [&](const auto& g) { return g.optional == kind; });
 }
+#if defined(AUTOSCAN_ARM64)
+static void compareFilter() {
+  auto bytes = fixture(); unsigned count = 0, expected = 0;
+  auto add = [&](uint32_t word) {
+    size_t at = 0x400 + count * 16;
+    put(bytes, at, word); put<uint32_t>(bytes, at + 4, 0x5400004c);
+    put<uint32_t>(bytes, at + 8, 0xd65f03c0); put<uint32_t>(bytes, at + 12, 0xd503201f);
+    auto insn = LiftArm64({bytes.data() + at, 4}, 0x1000 + count * 16);
+    expected += insn.op == Op::CmpImm && (insn.imm == 2 || insn.imm == 3);
+    if (++count == 256) {
+      check(Analyze(bytes).heads == expected, "ARM64 raw compare filter matches complete decoding");
+      count = expected = 0;
+    }
+  };
+  for (uint32_t opcode : {0x11u, 0x31u, 0x51u, 0x71u, 0x91u, 0xb1u, 0xd1u, 0xf1u, 0x70u, 0x72u})
+    for (uint32_t shift : {0u, 1u}) for (uint32_t imm : {0u, 1u, 2u, 3u, 4u, 4095u})
+      for (uint32_t source : {0u, 1u, 30u, 31u}) for (uint32_t dest : {0u, 30u, 31u})
+        add((opcode << 24) | (shift << 22) | (imm << 10) | (source << 5) | dest);
+  for (unsigned bit = 0; bit < 32; ++bit) add(0x7100083f ^ (1u << bit));
+  uint32_t random = 1;
+  for (unsigned n = 0; n < 4096; ++n) { random = random * 1664525u + 1013904223u; add(random); }
+  while (count) add(0xd503201f);
+}
+#endif
 static unsigned flushes = 0;
 static BOOL WINAPI failFirstFlush(HANDLE process, LPCVOID address, SIZE_T size) {
   return ++flushes == 1 ? FALSE : FlushInstructionCache(process, address, size);
@@ -152,6 +176,7 @@ int main() {
           "wrong source, polarity, slot or frame leaves core and the independent optional gate usable");
   }
 #if defined(AUTOSCAN_ARM64)
+  compareFilter();
   for (auto mutation : {std::pair{"48218052", "68218052"}, {"44184a7a", "40184a7a"}, {"20119f1a", "20019f1a"}}) {
     auto changed = bytes; replace(changed, mutation.first, mutation.second);
     check(!Discover(changed).ready(), "changed membership, conditional flags or select cannot satisfy the MV2 predicate");

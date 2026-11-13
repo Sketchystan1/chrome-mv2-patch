@@ -10,12 +10,13 @@ per-build byte tables themselves are **not** here — `signatures.json` is canon
 and `scripts/audit_signatures.py --binary <file>` reports coverage.
 
 The gate is the same C++ across platforms; only the container, the toolchain's
-codegen, and the OS plumbing differ. All engines relocate signatures across point
-releases and **decline without writing** on layouts they do not recognize.
+codegen, and the OS plumbing differ. Table engines relocate signatures across
+point releases; the native Windows DLL discovers the predicate. Both **decline
+without writing** on layouts they do not recognize.
 
 **Supported (v1.16.0):** Chrome **152–159**.
 - **Windows** (`chrome-mv2.ps1`): x64 `pe`, x86 `pe32`, arm64 `pe-arm64` (PE32+, COFF
-  machine `0xAA64`). The default installer uses `version.dll` to patch memory;
+  machine `0xAA64`). The current installer uses `secur32.dll` to patch memory;
   `chrome.dll` on disk keeps its signature. Legacy buffer edits strip the signature.
 - **Linux** (`chrome-mv2.sh`): x86-64 `elf`, aarch64 `elf-arm64`. One stripped PIE;
   `.deb` and `.rpm` ship the identical ELF.
@@ -23,8 +24,12 @@ releases and **decline without writing** on layouts they do not recognize.
   `Google Chrome Framework`, ad-hoc re-signed so it launches. Intel x86_64 was
   dropped in v1.10.0.
 
-The platform scripts and Windows memory DLL read `signatures.json` (no embedded
-tables — see §4). The former universal Python patcher has been removed.
+The platform buffer matchers read `signatures.json` (no embedded tables — see §4).
+The native `secur32.dll` uses automatic discovery; see its
+[implementation](mv2-mem-patch-win/README.md#implementation-and-limits).
+The former universal Python patcher and table-based Windows memory engine have
+been removed. The version-specific evidence below remains useful for the shared
+predicate and Unix/legacy-restoration tables.
 
 ---
 
@@ -148,8 +153,9 @@ pre-tokenized embed to avoid it). Publish `signatures.json` so the raw URL serve
 the change. Chrome 159 also requires the
 updated engine: its entries live in `milestones_v2`, which new readers concatenate
 with `milestones`. Legacy DLLs ignore that array rather than misinterpreting the
-new kinds as short branches. Windows needs `version.dll` **1.16.0 or later**;
-refreshing signatures alone does not upgrade the DLL. Each milestone is
+new kinds as short branches. Historical table-based Windows DLLs required
+version **1.16.0 or later**; refreshing signatures alone did not upgrade that DLL.
+The current native `secur32.dll` does not read these tables. Each milestone is
 `container`-tagged so a target only probes its own container, and the runtime applies
 the **best full match** (`satisfied == total`); equal-rank ties and partial matches
 are declined by default.
