@@ -5,6 +5,7 @@
 #include "autoscan_runtime.h"
 #include "secur32-forward-exports.h"
 #include <tlhelp32.h>
+#include <processsnapshot.h>
 #include "loader_lock.h"
 
 extern "C" {
@@ -21,6 +22,26 @@ BOOL WINAPI counter(LARGE_INTEGER* value);
 DWORD firstThread(LPVOID startup) {
   // Static process attachment runs on the initial thread; dynamic loads may not.
   if (startup) return GetCurrentThreadId();
+  HPSS processSnapshot = nullptr;
+  if (!PssCaptureSnapshot(GetCurrentProcess(), PSS_CAPTURE_THREADS, 0, &processSnapshot)) {
+    HPSSWALK marker = nullptr;
+    DWORD result = 0, status = ERROR_INVALID_HANDLE;
+    if (!PssWalkMarkerCreate(nullptr, &marker)) {
+      PSS_THREAD_ENTRY entry{};
+      ULONGLONG earliest = ~ULONGLONG{};
+      while (!(status = PssWalkSnapshot(processSnapshot, PSS_WALK_THREADS, marker, &entry, sizeof(entry)))) {
+        if (entry.ProcessId != GetCurrentProcessId()) { result = 0; break; }
+        if (entry.Flags & PSS_THREAD_FLAGS_TERMINATED) continue;
+        ULONGLONG stamp = (static_cast<ULONGLONG>(entry.CreateTime.dwHighDateTime) << 32) | entry.CreateTime.dwLowDateTime;
+        if (!stamp) { result = 0; break; }
+        if (stamp < earliest) { earliest = stamp; result = entry.ThreadId; }
+        else if (stamp == earliest) result = 0;
+      }
+      if (PssWalkMarkerFree(marker)) status = ERROR_INVALID_HANDLE;
+    }
+    // Incomplete walks and tied creation times use the original enumeration order.
+    if (!PssFreeSnapshot(GetCurrentProcess(), processSnapshot) && status == ERROR_NO_MORE_ITEMS && result) return result;
+  }
   HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
   if (snapshot == INVALID_HANDLE_VALUE) return 0;
   THREADENTRY32 entry{}; entry.dwSize = sizeof(entry);

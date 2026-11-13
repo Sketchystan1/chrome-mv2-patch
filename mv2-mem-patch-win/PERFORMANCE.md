@@ -5,7 +5,8 @@ full-file BLAKE3 identity, protected plan cache and complete loaded-code validat
 The best supported improvements already in that path are `/O2`/LTCG, upstream SIMD
 hashing, balanced adaptive hash workers, parent cache reads, bounded search filters,
 shared reference searches, exact function-trim reuse, lazy x64 trimming, batched
-page-protection checks, dynamic hash TLS and deferred view cleanup.
+page-protection checks, dynamic hash TLS, deferred view cleanup and process-only
+initial-thread capture during dynamic DLL loading.
 
 This is the single record for the former performance Markdown/JSON reports and the
 scanner, carrier and Edge result files. It retains measured summaries, validation,
@@ -55,6 +56,10 @@ static process-start attach path without adding a worker or changing scan orderi
 Native tests exercise static-startup and dynamic-load paths from the primary
 thread and a worker. It is a small startup-path optimization; no complete-browser
 percentage gain is established.
+
+This static-attach change and the following first-pass measurements were committed
+with the cleanup in `92dcb45`. Dynamic loading was subsequently improved by the
+process-only snapshot work recorded in the continuation below.
 
 Twenty-call primitive averages were 55.993780 ms for the x64 enumeration fallback
 versus 0.000010 ms for the static-attach shortcut, and 92.116235 versus 0.000035 ms
@@ -138,6 +143,183 @@ archive must be published before that new asset URL is usable. Existing branded
 project `version.dll` carriers are removed during migration; unrelated files are
 left alone. These checks do not include deployment to installed browsers or a
 paired real-browser latency experiment.
+
+## November 13 continuation after `92dcb45`
+
+### Process-only initial-thread capture
+
+Dynamic DLL loading now first captures the current process's threads with
+`PssCaptureSnapshot(PSS_CAPTURE_THREADS)`, instead of enumerating every thread in
+the system with ToolHelp. It selects the earliest creation time and releases the
+snapshot and walk marker before returning. No thread contexts, process clone or
+suspension are requested. Capture/walk/cleanup errors, partial results, foreign
+process entries, zero creation times or an ambiguous earliest time retain the
+original ToolHelp path. The existing process-start static shortcut is retained.
+These Kernel32 APIs fit the existing Windows 10 minimum and add no dependency.
+
+| Live workers in the measured process | x64 ToolHelp | x64 process snapshot | x86 ToolHelp | x86 process snapshot |
+| --- | ---: | ---: | ---: | ---: |
+| 0 | 55.6144 ms | 0.1886 ms | 76.7621 ms | 0.2041 ms |
+| 8 | 55.4757 ms | 0.2329 ms | 54.0025 ms | 0.2573 ms |
+| 32 | 52.1564 ms | 0.3539 ms | 54.3950 ms | 0.4194 ms |
+
+Each case used twelve alternating observations per implementation with live
+waiting workers. Preliminary samples collected during compiler activity were
+discarded before this quiet paired pass. Actual DLL DllMain probes from primary
+and worker LoadLibrary calls, with 0/8/32 live workers, identified the correct
+initial thread. Every captured creation time matched `GetThreadTimes`; the
+corresponding probe timings were 0.1661–0.4639 ms for PSS versus 53.2221–71.2034 ms
+for ToolHelp. Permanent fault-injection checks cover complete/failed/partial
+captures, marker/walk/cleanup failure, foreign IDs, zero times, ties, empty results
+and a tie followed by an earlier valid thread. These are isolated initial-thread
+operations, not whole-browser startup speedups. Frozen probes, commands and raw
+measurements are in ignored `_scratch/secur32-thread-pss/{x64,x86}/bench-final.txt`
+and its adjacent sources.
+
+The production builds passed x64 19/19 and x86 16/16 native tests; all ARM64
+targets compiled, with no native ARM64 execution. Final PSS-build identities:
+
+| Deployment DLL | Bytes | SHA-256 |
+| --- | ---: | --- |
+| x64 secur32.dll | 241,152 | `a9d50f5c667d300c56765b13f7e67ec075118ca983817a40e339190b026884ea` |
+| x86 secur32.dll | 243,712 | `6135661fd96d3dba23bc3cb010039b0428643f2bc4b085afa89d18b3a28e8d47` |
+| ARM64 secur32.dll | 172,032 | `3f45988da087d22e5eec17540253968e5135e3618f78e2a360354813990ef7ee` |
+
+### First actual-browser PSS comparison
+
+The first headless Chrome comparison did not establish a startup gain:
+
+| Cached launch endpoint, twelve samples per mode | Before PSS | PSS build |
+| --- | ---: | ---: |
+| Median | 943.8135 ms | 966.46895 ms |
+| Observed range | About 850–1,067 ms | About 815–1,256 ms |
+
+This population's candidate median was 2.40% slower. Each mode warmed a separate
+profile seed, so profile differences and overlapping timing ranges confound
+attribution. A common frozen profile seed is required to assess the change more
+cleanly; the faster isolated PSS primitive does not prove a 50 ms Chrome saving.
+
+The interval begins at native QPC immediately before ResumeThread and ends when
+the observer receives successful `Browser.getVersion` and
+`SystemInfo.getProcessInfo` RPC responses with the browser PID checked. The
+observer signals readiness before launch and polls the port every 10 ms; this is
+an API-response endpoint, not usable desktop-window or extension readiness.
+All 26 successful launches including warm-ups checked 234 final instructions,
+unchanged cache bytes/mtime, renderer Win32k lockdown, original-file hashes and
+private-registry cleanup. Raw observations are retained under ignored
+`_scratch/pss-browser/results.json`.
+
+A subsequent diagnostic launch confirmed the PSS path in actual Chrome
+157.0.8103.79: `secur32.dll` loaded dynamically on a worker, captured and walked
+all 20 live threads, and selected the process's initial thread. Capture, marker,
+walk and cleanup succeeded; enumeration ended normally with
+`ERROR_NO_MORE_ITEMS` (259), with no zero creation times or minimum-time ties.
+ToolHelp was not called, and the complete PSS operation took 0.308 ms. All nine
+final instructions, three renderer-policy checks, stock-file identity and private
+registry cleanup passed. This proves one real-browser fast-path execution, not
+the path or latency distribution of every launch. Diagnostic details are in
+ignored `_scratch/secur32-thread-diagnostic/diagnostic.json`.
+
+### Common-frozen-profile browser controls
+
+The stronger comparison copied the same frozen before-profile seed fresh for
+both modes on every launch. Each mode kept its own protected plan cache, filled
+by one excluded warm-up per mode. Twelve cached observations per mode used
+alternating AB/BA order within pairs:
+
+| Same-profile headless API endpoint | Before PSS | PSS build |
+| --- | ---: | ---: |
+| Median | 944.55225 ms | 864.69755 ms |
+| Minimum | 861.0249 ms | 826.2211 ms |
+| p95 / maximum with twelve samples | 1,094.6614 ms | 998.8778 ms |
+
+The candidate median was **8.45% lower**, and eleven of twelve pairs were faster.
+This is the measured whole-launch endpoint improvement for this population;
+it is not the sum of prior optimizations or a guarantee for other machines,
+profiles, browsers or desktop windows. The initial separate-seed population's
+2.40% slower result remains above as evidence of the confounding and variability.
+
+Timing starts at native QPC immediately before ResumeThread and ends when the
+already-ready Node observer receives both successful browser-version/process-info
+RPC responses and forwards completion through stdout IPC. The browser PID is
+checked. Ten-millisecond port polling, observer/RPC/IPC overhead and ordinary
+background activity remain included. This is a warm cached, headless,
+GPU-disabled workload; genuinely cold disk and desktop-window latency were not
+measured. It does not isolate every compiler-layout or scheduler contribution.
+
+All 26 launches including warm-ups passed 234 final-instruction checks, with
+three sandboxed renderers checked per launch. Cache contents and mtime stayed
+unchanged on measured hits; stock-file identity and private-registry cleanup
+passed. The common seed corrects the first comparison's known profile difference.
+Raw results remain in ignored `_scratch/pss-browser/common-seed/results.json`.
+
+The final production PSS DLL then passed a separate packed-MV2 functional
+lifecycle on Chrome 157.0.8103.79: stock, patched, cached restart,
+cache-deleted restart and restore. All 45 instruction checks, MV2 enable/disable,
+background HTTP request cancellation, MV3 behavior and renderer Win32k checks
+passed. Original disk hashes stayed unchanged and the private test registry was
+removed. Single startup observations were 2.606/3.835/0.815/1.203/0.402 seconds
+respectively; these validate behavior and restoration, not a performance
+comparison. Raw results remain in ignored `_scratch/secur32-pss-runtime/results.json`.
+
+### Unique-predecessor index: rejected after controls
+
+The previously unbuilt 16 KiB predecessor-index idea was tested after `92dcb45`.
+The prototype constructs one bounded index per decoded Program, including Edge
+cold-block merges. Unique targets use the indexed predecessor; joins, external
+PCs and changed graph counts retain the original ordered traversal. It passed
+212,847 differential assertions with a 512 KiB stack and 144 complete report
+comparisons across the two experiments. The index was not selected for production.
+
+| Analyze-only retained-map experiment | Chrome 157.0.8103.79 | Edge 157.0.4341.46 |
+| --- | ---: | ---: |
+| Separate frozen builds, baseline→index median | 421.02405→361.7079 ms | 344.4493→341.6245 ms |
+| Initial apparent reduction | 14.09% | 0.82% |
+| Same executable, index off→on median | 357.61665→357.19415 ms | 323.81135→313.42605 ms |
+| Reduction after controls | 0.12%, neutral | 3.21%, with substantial block drift |
+
+ABBA ordering used nine analyses/process with the first excluded, leaving sixteen
+observations per variant/image. Both controlled cases used the exact same
+executable and input; an immutable process flag alone skipped index construction.
+The initial Chrome gain did not survive the stronger controls. Background/cache
+load and block drift were uncontrolled, so the small Edge result does not justify
+extra stack storage and index maintenance. Hashing, IO, browser launch and patch
+application are excluded; valid cached plans already bypass this discovery work.
+Compilers finished before the controlled pass, but brief correctness probes near
+its start may have overlapped initial work; exact overlap is unknown. Excluding
+the first observation does not make the population a controlled quiet run.
+
+The Chrome/Edge input hashes were respectively
+`db7ebeb22a6f731d85af882d314fecbab770eac22744dca033811d4c61cbd087` and
+`cb4951a5e61986871b698cdb5e74f7dbf27577dd5eaffe157ef8a57dd499672d`.
+The control executable SHA-256 was
+`0a3f3c905d9c427b5d89165083249f9d4d19539116220efd068541c0ec456ad3`.
+Frozen commands, sources, differential checks and raw observations are retained
+under ignored `_scratch/secur32-graph-2026-11-13/`; no new tracked report file was
+added.
+
+### Release-DLL SPGO: attempted, no samples collected
+
+A complete x64 `secur32.dll` from frozen commit `92dcb45` was rebuilt with MSVC
+14.52, `/Zi /DEBUG /spgo`. The training DLL was 244,736 bytes and its SPD metadata
+file was 1,413,156 bytes. It contained no collected samples.
+
+The documented LBR setup using `BranchInstructionRetired` failed counter
+configuration. Timer sampling then failed at `xperf -setProfInt` with status
+`0xd0000061` (`STATUS_PRIVILEGE_NOT_HELD`). The execution token was checked and
+has no `SeSystemProfilePrivilege`. This establishes a profiling-permission limit
+for the current token, not lack of SPGO/LBR hardware support. No browser training
+started, no profile samples were generated, and no profiling logger remained
+active. No SPGO optimization was selected, and no elevation was requested.
+
+SPGO remains a future release-DLL experiment with a suitable execution token.
+Classic instrumented MSVC PGO (`/GENPROFILE`, training, `/USEPROFILE`) is a separate
+route that does not require system sampling permission, but its profiling runtime
+and altered training layout must stay outside deployment. Historical scanner PGO
+showed modest discovery gains; neither approach removes compulsory file reads,
+mapping faults or loaded-code validation, and upstream assembly is not optimized
+by the C++ profile. A permanent build configuration still needs a complete-path
+win on representative held-out browser starts.
 
 ## Measured improvements already selected
 
@@ -389,7 +571,7 @@ ReadFile/WriteFile; keep the exact input immutable and hash/compare the same byt
 | Merge allocation/readability region walks | 585 checks passed; removed one text query while retaining 13 allocation checks | 0.04–0.07 ms serial saving; whole returns inconsistent |
 | Merged region walks after preflight | 4.2–8.2 ms application saving; diagnostic whole-return 352→373 ms | Unselected without complete-browser benefit |
 | File-view prefault switches | SOFT_FAULT_PAGES/NONPAGED/64K combinations returned ERROR_INVALID_PARAMETER 87; ordinary view succeeded with zero resident pages | No supported drop-in switch found on this host |
-| SPGO readiness | SPTAggregate/SPDConvert and LBR/PMC providers available locally | No speedup measured yet |
+| SPGO readiness | Toolchain/provider setup exists; November 13 training-DLL build passed, but sampling was blocked by the current token's missing SeSystemProfilePrivilege | No samples or speedup measured; see continuation |
 
 ## Remaining optimization catalogue
 
@@ -404,7 +586,7 @@ separately.
 
 | Technique | Potential and condition |
 | --- | --- |
-| Reverse predecessor edges once per Program | Current repeated checks reached about 1.55M/1.70M/14.93M; bounded index must preserve all-path agreement and order. The 16 KiB draft was never built. |
+| Reverse predecessor edges once per Program | Repeated checks reached about 1.55M/1.70M/14.93M. The 16 KiB unique-predecessor prototype was later tested and rejected: its initial Chrome gain disappeared under same-executable controls; see the November 13 continuation. |
 | Exact constant/provenance/call-summary memoization | Count repeated immutable-image/callee/PC/register/depth keys first; cache unknown/limit outcomes correctly and invalidate per Program generation. |
 | Reuse complete optional Programs | Only 4–7 builds/stage and little same-range reuse were observed; retain noReturns/unsupported-decode semantics. |
 | Cache authoritative runtime-table entry | Avoid nearby binary searches only inside proven bounds; never memoize heuristic leaf boundaries by containment. |
@@ -609,6 +791,11 @@ git show e48491de76ea280fed94ae6ccd58e8e136784c5a:mv2-mem-patch-win/PERFORMANCE-
 
 ## Primary sources
 
+- [Capture a process snapshot](https://learn.microsoft.com/windows/win32/api/processsnapshot/nf-processsnapshot-psscapturesnapshot)
+- [Walk snapshot entries](https://learn.microsoft.com/windows/win32/api/processsnapshot/nf-processsnapshot-psswalksnapshot)
+- [Captured thread identity and creation time](https://learn.microsoft.com/windows/win32/api/processsnapshot/ns-processsnapshot-pss_thread_entry)
+- [Process snapshot capture flags](https://learn.microsoft.com/windows/win32/api/processsnapshot/ne-processsnapshot-pss_capture_flags)
+- [Create a snapshot walk marker](https://learn.microsoft.com/windows/win32/api/processsnapshot/nf-processsnapshot-psswalkmarkercreate)
 - [DllMain process-start parameters](https://learn.microsoft.com/en-us/windows/win32/dlls/dllmain#parameters)
 - [Synchronous and asynchronous IO tradeoffs](https://learn.microsoft.com/en-us/windows/win32/fileio/synchronous-and-asynchronous-i-o)
 - [Delay-loaded DLL constraints](https://learn.microsoft.com/en-us/cpp/build/reference/linker-support-for-delay-loaded-dlls?view=msvc-170#constraints-on-delay-load-dlls)
