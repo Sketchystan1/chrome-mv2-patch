@@ -1,3 +1,4 @@
+// Test-only simulated Windows CPU replies check that hashing respects the CPUs available to it.
 #define NOMINMAX
 #include <windows.h>
 #include <array>

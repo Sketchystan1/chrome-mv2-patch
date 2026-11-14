@@ -1,3 +1,5 @@
+// Chrome loads this DLL in place of secur32.dll; normal security calls go to Windows' real DLL.
+// The extra startup work identifies Chrome or Edge and requests one checked memory patch.
 #include <windows.h>
 #include <array>
 #include <cstring>
@@ -20,7 +22,8 @@ DWORD mainThread = 0;
 BOOL WINAPI counter(LARGE_INTEGER* value);
 
 DWORD firstThread(LPVOID startup) {
-  // Static process attachment runs on the initial thread; dynamic loads may not.
+  // Find the browser's original thread so patching happens before it starts normal work.
+  // If Windows loads us at process startup, we are already running on that thread.
   if (startup) return GetCurrentThreadId();
   HPSS processSnapshot = nullptr;
   if (!PssCaptureSnapshot(GetCurrentProcess(), PSS_CAPTURE_THREADS, 0, &processSnapshot)) {
@@ -39,7 +42,7 @@ DWORD firstThread(LPVOID startup) {
       }
       if (PssWalkMarkerFree(marker)) status = ERROR_INVALID_HANDLE;
     }
-    // Incomplete walks and tied creation times use the original enumeration order.
+    // If the snapshot is incomplete or ambiguous, try Windows' other thread-list API.
     if (!PssFreeSnapshot(GetCurrentProcess(), processSnapshot) && status == ERROR_NO_MORE_ITEMS && result) return result;
   }
   HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
@@ -63,6 +66,7 @@ DWORD firstThread(LPVOID startup) {
 }
 
 bool forward() {
+  // Use the full Windows system path so another local DLL cannot become the forwarding target.
   std::array<wchar_t, MAX_PATH + 32> path{};
   DWORD length = GetSystemDirectoryW(path.data(), MAX_PATH);
   if (!length || length >= MAX_PATH) return false;
@@ -72,7 +76,7 @@ bool forward() {
   HMODULE real = LoadLibraryExW(path.data(), nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
   if (!real) return false;
   auto& exports = g_secur32Exports;
-  // shortcut: requires every listed host export; revise before supporting older Windows.
+  // shortcut: requires all listed Windows functions; update the list before supporting older Windows.
   for (size_t n = 0; n < exports.size(); ++n) {
     auto entry = mv2ForwardExports[n];
     exports[n] = reinterpret_cast<void*>(GetProcAddress(real,
@@ -83,15 +87,18 @@ bool forward() {
 }
 
 void patch(HMODULE module) {
+  // Run once, on the original browser thread, after Windows finishes loading DLLs.
   if (GetCurrentThreadId() != mainThread || !loaderLock.outside()) return;
   if (!module || InterlockedCompareExchange(&patchStarted, 1, 0)) return;
   autoscan::ImportHook restore{reinterpret_cast<void*>(&counter), reinterpret_cast<void*>(&QueryPerformanceCounter)};
+  // Put the normal clock call back before scanning; the clock was only a startup trigger.
   if (!autoscan::HookImports(module, restore))
     OutputDebugStringA("[mv2patch autoscan] clock import restore failed; forwarding continues");
   autoscan::Patch(module);
 }
 
 BOOL WINAPI counter(LARGE_INTEGER* value) {
+  // A clock call can trigger the patch, then receives the real Windows result and error state.
   DWORD error = GetLastError();
   if (!InterlockedCompareExchange(&patchStarted, 0, 0) && GetCurrentThreadId() == mainThread)
     patch(GetModuleHandleW(browserName));
@@ -104,7 +111,7 @@ FARPROC WINAPI lookup(HMODULE module, LPCSTR name) {
   DWORD error = GetLastError();
   if (result && reinterpret_cast<uintptr_t>(name) > 0xffff && !std::strcmp(name, "ChromeMain") &&
       module == GetModuleHandleW(browserName)) {
-    // ChromeMain is resolved after the loader returns, before browser initialization.
+    // Looking up ChromeMain signals that loading has finished and browser startup is next.
     patch(module);
   }
   SetLastError(error);
@@ -126,9 +133,10 @@ BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID startup) {
   else if (!_wcsicmp(filename, L"msedge.exe")) browserName = L"msedge.dll";
   else return TRUE;
   auto command = GetCommandLineW();
+  // Other applications and the browser's child processes only receive normal DLL forwarding.
   if (command && std::wcsstr(command, L"--type=")) return TRUE;
-  // ChromeMain runs on the process's first thread, which owns browser initialization.
   mainThread = firstThread(startup);
+  // Keep this DLL loaded while the browser can call its startup-trigger functions.
   HMODULE pinned = nullptr;
   if (!mainThread || !loaderLock.initialize() || !GetModuleHandleExW(
       GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN, reinterpret_cast<LPCWSTR>(&counter), &pinned)) {
@@ -136,6 +144,7 @@ BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID startup) {
     return TRUE;
   }
   HMODULE browser = GetModuleHandleW(browserName);
+  // Replace only these imported function addresses in this process to catch browser startup.
   autoscan::ImportHook clock{reinterpret_cast<void*>(&QueryPerformanceCounter), reinterpret_cast<void*>(&counter)};
   if (browser && (!autoscan::HookImports(browser, clock) || !clock.count))
     OutputDebugStringA("[mv2patch autoscan] clock import unavailable; lookup trigger remains");

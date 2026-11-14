@@ -1,19 +1,15 @@
-// Windows VERSIONINFO for the automatic patcher.
-//
-// CMakeLists.txt supplies the project version through the MV2_* defines.
-//
-// Branding is HONEST and deliberately does NOT impersonate Microsoft: an
-// unsigned DLL claiming Microsoft identity is both deceptive and an AV red flag.
+// Labels shown in the DLL's Windows Properties; they identify this independent project.
+// CMakeLists.txt supplies the version below during normal builds.
 #include <windows.h>
 
 #ifndef MV2_VERC
-#define MV2_VERC 1,16,0,0
+#define MV2_VERC 2,0,0,0
 #endif
 #ifndef MV2_VER_STR
-#define MV2_VER_STR "1.16.0.0"
+#define MV2_VER_STR "2.0.0.0"
 #endif
 #ifndef MV2_PROD
-#define MV2_PROD "1.16.0"
+#define MV2_PROD "2.0.0"
 #endif
 #ifndef MV2_PROXY_STR
 #define MV2_PROXY_STR "secur32.dll"

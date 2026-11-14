@@ -1,4 +1,5 @@
-// Test-only DLL: isolate the external-extension provider without changing real registrations.
+// Test-only DLL: redirect Chrome extension registry open/create requests to a separate test folder of keys.
+// Other registry requests keep their original destination; this DLL is not part of the shipped patcher.
 #define NOMINMAX
 #include <windows.h>
 #include <string>
@@ -7,6 +8,7 @@
 static std::wstring testRoot;
 static auto realOpen = ::RegOpenKeyExW;
 static auto realCreate = ::RegCreateKeyExW;
+// Only matching Chrome extension keys are redirected into the test area named by MV2_TEST_REGISTRY.
 static std::wstring redirect(HKEY& root, LPCWSTR key) {
   const wchar_t* prefix = L"Software\\Google\\Chrome\\Extensions";
   size_t length = wcslen(prefix);

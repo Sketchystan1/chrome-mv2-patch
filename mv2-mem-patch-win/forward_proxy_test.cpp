@@ -1,3 +1,5 @@
+// Test-only: load the supplied proxy and the real Windows DLL, then compare their results.
+// The account-name check reads the current user's name and compares it only in this test's memory.
 #include <windows.h>
 #include <array>
 #include <cstdio>

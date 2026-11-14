@@ -1,10 +1,11 @@
 #pragma once
+// Translate browser instruction bytes into descriptions for analysis; nothing decoded here is executed.
 #include <array>
 #include <cstdint>
 #include <cstring>
 #include <span>
 
-// Host tests analyze ARM64 bytes without executing ARM64 instructions.
+// Tests can inspect ARM64 instructions on an x64 computer because the scanner only reads their bytes.
 #if defined(_M_ARM64) || defined(AUTOSCAN_TEST_ARM64)
 #define AUTOSCAN_ARM64
 #elif defined(_M_X64)
@@ -26,7 +27,7 @@ constexpr unsigned StackReg = 31;
 #else
 constexpr unsigned StackReg = 4;
 #endif
-// detail is a branch RVA, an Other tag, or the high half of a MOV immediate.
+// This compact record describes one instruction: "detail" holds a destination, instruction kind, or part of a constant.
 struct LiftedInsn {
   int32_t imm = 0, disp = 0;
   uint32_t detail = 0;
@@ -110,6 +111,7 @@ inline uint8_t escapedLength(uint8_t b) {
 } // namespace x86
 
 inline LiftedInsn LiftX86(std::span<const uint8_t> bytes, uint32_t pc, bool x64) {
+  // x86 instructions are at most 15 bytes long; incomplete or unsupported forms stay unknown.
   LiftedInsn out;
   const size_t limit = bytes.size() < 15 ? bytes.size() : 15;
   size_t p = 0; bool operand16 = false, addressOverride = false, segment = false, lock = false, repeat = false;
@@ -344,6 +346,7 @@ inline LiftedInsn LiftX86(std::span<const uint8_t> bytes, uint32_t pc, bool x64)
 
 #if defined(AUTOSCAN_ARM64) || defined(AUTOSCAN_ALL_ARCH_TESTS)
 inline LiftedInsn LiftArm64(std::span<const uint8_t> bytes, uint32_t pc) {
+  // ARM64 instructions must occupy four bytes at a four-byte boundary; reject other positions.
   if (bytes.size() < 4 || (pc & 3)) return {};
   uint32_t word = ReadInsn<uint32_t>(bytes.data());
   LiftedInsn out; out.encoding = 4 | ((word & 0x80000000) ? 0x30 : 0x20);
@@ -494,6 +497,7 @@ inline LiftedInsn LiftArm64(std::span<const uint8_t> bytes, uint32_t pc) {
 #endif
 
 inline LiftedInsn Lift(std::span<const uint8_t> bytes, uint32_t pc) {
+  // Interpret only the processor type this scanner was built to understand.
 #if defined(AUTOSCAN_X64)
   return LiftX86(bytes, pc, true);
 #elif defined(AUTOSCAN_X86)

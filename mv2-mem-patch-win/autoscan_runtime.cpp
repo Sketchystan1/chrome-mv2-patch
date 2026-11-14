@@ -1,5 +1,6 @@
+// Read the browser DLL, obtain a checked patch plan, and apply it to this process's memory.
+// A cache miss starts a hidden Windows helper; the browser DLL on disk is opened read-only.
 #include "autoscan_runtime.h"
-#include "autoscan_cache.h"
 #include <algorithm>
 #include <cstring>
 #include <cstdio>
@@ -18,6 +19,7 @@ void CALLBACK releaseView(PTP_CALLBACK_INSTANCE instance, void*) {
   FreeLibraryWhenCallbackReturns(instance, task.module);
 }
 bool queueView(const uint8_t* view) {
+  // Release the read-only file view in the background, keeping our DLL loaded until that job ends.
   if (InterlockedCompareExchange(&cleanupActive, 1, 0)) return false;
   HMODULE module = nullptr;
   if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS, reinterpret_cast<LPCWSTR>(&releaseView), &module)) {
@@ -28,6 +30,7 @@ bool queueView(const uint8_t* view) {
   FreeLibrary(module); InterlockedExchange(&cleanupActive, 0); return false;
 }
 struct Handle {
+  // Close Windows file/process handles when leaving a function, including early failures.
   HANDLE value = nullptr;
   explicit Handle(HANDLE h = nullptr) : value(h) {}
   Handle(const Handle&) = delete;
@@ -36,6 +39,7 @@ struct Handle {
   ~Handle() { close(); }
 };
 struct View {
+  // This is a read-only window onto file bytes; closing it does not delete or edit the file.
   const uint8_t* data = nullptr;
   explicit View(HANDLE mapping, size_t size) : data(static_cast<const uint8_t*>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, size))) {}
   void close() { if (data) UnmapViewOfFile(data); data = nullptr; }
@@ -55,11 +59,13 @@ struct Attributes {
   ~Attributes() { if (list) DeleteProcThreadAttributeList(list); }
 };
 void trace(std::string_view message) {
+  // Send local diagnostic messages to Windows' debugger output; no log upload is made here.
   std::array<char, 512> buffer{};
   _snprintf_s(buffer.data(), buffer.size(), _TRUNCATE, "[mv2patch autoscan] %.*s", static_cast<int>(message.size()), message.data());
   OutputDebugStringA(buffer.data());
 }
 bool scanInHelper(HANDLE mapping, size_t size, const autoscan::HashValue& hash, autoscan::WirePlan& plan) {
+  // Windows' own rundll32.exe loads this DLL to scan without holding up DLL loading in Chrome.
   HMODULE self = nullptr;
   if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                          reinterpret_cast<LPCWSTR>(&scanInHelper), &self)) return false;
@@ -73,6 +79,7 @@ bool scanInHelper(HANDLE mapping, size_t size, const autoscan::HashValue& hash, 
   Handle read, write;
   if (!CreatePipe(&read.value, &write.value, &security, 4096) || !SetHandleInformation(read.value, HANDLE_FLAG_INHERIT, 0)) return false;
   HANDLE inherited[] = {mapping, write.value}; Attributes attributes;
+  // Inherit only the read-only browser mapping and reply pipe; the helper still runs with this user's permissions.
   if (!attributes.init(inherited, std::size(inherited))) return false;
   if (_snwprintf_s(command.data(), command.size(), _TRUNCATE, L"\"%ls\" \"%ls\",VersionMV2Scan %llu %llu %llu %.*hs",
       executable.data(), dll.data(), static_cast<unsigned long long>(reinterpret_cast<uintptr_t>(mapping)),
@@ -85,6 +92,7 @@ bool scanInHelper(HANDLE mapping, size_t size, const autoscan::HashValue& hash, 
   Handle child(process.hProcess), thread(process.hThread); write.close();
   size_t received = 0; bool exited = false, valid = true;
   ULONGLONG deadline = GetTickCount64() + 30000;
+  // Accept exactly one complete reply; malformed output or a 30-second timeout cancels patching.
   while (GetTickCount64() < deadline) {
     DWORD available = 0;
     if (!PeekNamedPipe(read.value, nullptr, 0, nullptr, &available, nullptr) && GetLastError() != ERROR_BROKEN_PIPE) { valid = false; break; }
@@ -100,10 +108,12 @@ bool scanInHelper(HANDLE mapping, size_t size, const autoscan::HashValue& hash, 
   }
   DWORD code = 1;
   bool success = valid && exited && received == sizeof(plan) && GetExitCodeProcess(child.value, &code) && code == 0;
+  // Stop only the helper we created if it has not finished; Chrome continues without a patch.
   if (!exited) { TerminateProcess(child.value, ERROR_TIMEOUT); WaitForSingleObject(child.value, 2000); }
   return success;
 }
 autoscan::HashValue scannerHash() {
+  // Fingerprint our own DLL so updating the patcher also invalidates old cached plans.
   HMODULE self = nullptr;
   if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
                          reinterpret_cast<LPCWSTR>(&scannerHash), &self)) return {};
@@ -132,6 +142,7 @@ bool number(const wchar_t*& command, uint64_t& value) {
 } // namespace
 
 extern "C" void CALLBACK VersionMV2ScanW(HWND, HINSTANCE, LPWSTR input, int) {
+  // Helper entry point: reject malformed arguments before reading the shared file view.
   if (!input) return;
   const wchar_t* command = input;
   uint64_t mapValue = 0, size = 0, pipeValue = 0;
@@ -150,12 +161,14 @@ extern "C" void CALLBACK VersionMV2ScanW(HWND, HINSTANCE, LPWSTR input, int) {
   std::string_view scannerView(scanner.data(), scanner.size()), imageView(imageHash.data(), imageHash.size());
   autoscan::CachePath(scannerView, imageView, cache);
   autoscan::WirePlan plan;
+  // Reuse a valid local cache or inspect the read-only bytes and save a successful plan.
   if (!autoscan::ReadCache(cache.data(), scannerView, imageView, plan)) {
     auto report = autoscan::Analyze({view.data, static_cast<size_t>(size)});
     report.blake3 = imageHash; plan = autoscan::MakePlan(report);
     if (!plan.status) autoscan::WriteCache(cache.data(), scannerView, plan);
   }
   size_t offset = 0;
+  // Send the plan back through the inherited local pipe; the helper does not patch Chrome.
   while (offset < sizeof(plan)) {
     DWORD sent = 0;
     if (!WriteFile(pipe.value, reinterpret_cast<const uint8_t*>(&plan) + offset, static_cast<DWORD>(sizeof(plan) - offset), &sent, nullptr) || !sent) break;
@@ -170,6 +183,7 @@ void Patch(HMODULE chrome) noexcept {
   std::array<wchar_t, 32768> path{};
   DWORD length = GetModuleFileNameW(chrome, path.data(), static_cast<DWORD>(path.size()));
   if (!length || length == path.size()) { trace("cannot resolve chrome.dll"); return; }
+  // Lock the installed DLL for reading so its bytes cannot change underneath this check.
   Handle file(CreateFileW(path.data(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr));
   LARGE_INTEGER size{};
   if (file.value == INVALID_HANDLE_VALUE || !GetFileSizeEx(file.value, &size) || size.QuadPart <= 0 || size.QuadPart > ULONG_MAX) {
@@ -201,6 +215,7 @@ void Patch(HMODULE chrome) noexcept {
   std::string_view reason;
   auto result = ApplyPlan({reinterpret_cast<uint8_t*>(chrome), stockImage.info().imageSize}, stockImage, plan, reason);
   if (result == ApplyResult::fatal) {
+    // End this browser process if restoring bytes or memory permissions failed.
     trace("rollback failed; stopping before Chrome can run partially patched code");
     __fastfail(FAST_FAIL_FATAL_APP_EXIT);
   }

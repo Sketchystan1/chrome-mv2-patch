@@ -1,3 +1,4 @@
+// Read the browser DLL, recognize supported extension decisions, and propose replacement bytes; this file does not write them.
 #include "solver.hpp"
 #include <bcrypt.h>
 #include "blake3.h"
@@ -9,6 +10,7 @@
 namespace autoscan {
 namespace {
 bool prefilter(const PeImage& pe, Head head, Range range, bool* complete = nullptr) {
+  // Quickly discard unrelated comparisons; surviving matches still need the full proof below.
   if (complete) *complete = true;
   FixedList<uint32_t, 256> todo, seen;
   todo.push_back(head.affected); unsigned constants = 0; bool bit = false;
@@ -30,6 +32,7 @@ bool prefilter(const PeImage& pe, Head head, Range range, bool* complete = nullp
   return (constants & 28) == 28 && (bit || (constants & 3) == 3);
 }
 bool makePatch(const PeImage& pe, Gate& gate, bool inverted) {
+  // Describe a change to the browser's existing branch, keeping its original bytes for validation and rollback.
   auto jump = Lift(pe.code(gate.rva), gate.rva);
   gate.width = jump.length();
   if (!gate.width || gate.width > gate.stock.size()) return false;
@@ -72,6 +75,7 @@ struct RefBatch {
   uint32_t gallery = 0;
   bool providerAmbiguous = false, galleryAmbiguous = false, scanned = false;
   explicit RefBatch(const PeImage& pe) {
+    // These browser names are search clues in the DLL; searching for "apps-gallery-url" makes no network request.
     auto data = pe.at(pe.rdata.rva, pe.rdata.size);
     std::string_view hay(reinterpret_cast<const char*>(data.data()), data.size());
     for (auto name : {std::string_view("InstallVerifier"), std::string_view("apps-gallery-url")}) {
@@ -227,6 +231,7 @@ bool trueReturn(const PeImage& pe, const Boundaries& boundaries, uint32_t pc, ui
 #endif
 
 void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& program, const std::array<int64_t, 5>& layout, Report& report, RefBatch& batch) {
+  // Find the optional decision that keeps off-store extensions disabled; ambiguous matches are left out of the plan.
   auto data = pe.at(pe.rdata.rva, pe.rdata.size), code = pe.at(pe.text.rva, pe.text.size);
   FixedList<uint32_t, 16> literals, getters;
   auto unique = [](auto& list, uint32_t value) {
@@ -349,7 +354,7 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
     }
   }
 #if defined(AUTOSCAN_X64)
-  // Decode callees after their providers to fit rundll32's 512 KiB stack.
+  // Analyze called helpers after their callers so the helper process stays within its 512 KiB stack limit.
   for (const auto& helper : helpers) {
     auto body = boundaries.find(helper.target);
     if (!body || body.begin != helper.target || body.end - body.begin > 256 || !program.build(pe, body)) continue;
@@ -359,7 +364,7 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
       if (test.op != Op::Other || test.other() != Other::TestImm || !test.memory() || test.width() != 1 || test.imm != 8 ||
           !program.fromArgument(node.pc, test.dst, 1) || !jump || !jump->insn.conditional() || jump->insn.condition() != 5 ||
           !trueReturn(pe, boundaries, jump->insn.target(), body.begin)) continue;
-      // Scope the change to MustRemainDisabled; shared store detection also drives content verification.
+      // Change only the "must remain disabled" decision; the shared store check also controls content verification.
       bool seen = false; for (const auto& old : candidates) seen |= old.rva == helper.gate.rva;
       if (!seen && !candidates.push_back(helper.gate)) { report.installVerifier = "too many provider candidates"; return; }
     }
@@ -405,7 +410,7 @@ bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Progra
     if (config.Size >= offset + 4 && pe.rvaRead(config.VirtualAddress + offset, guard) && guard &&
         i.memory() && static_cast<uint32_t>(i.disp) == guard) { pop = 0; return true; }
     const auto* next = program.at(call.pc + i.length());
-    // Caller-cleaned callbacks use cdecl; other unresolved indirect calls decline.
+    // Accept this callback only when its caller visibly cleans up the arguments; otherwise its effect is unknown.
     if (!i.memory() && next && next->insn.op == Op::AddImm && next->insn.dst == 4 && next->insn.imm > 0) { pop = 0; return true; }
     if (!i.memory() || static_cast<uint32_t>(i.disp) < pe.imageBase) return false;
     uint32_t slotRva = static_cast<uint32_t>(i.disp - pe.imageBase);
@@ -485,6 +490,7 @@ bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Progra
 #endif
 
 void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& program, Report& report, RefBatch& batch) {
+  // Recognize the optional CRX extension-package download decision without changing package verification or confirmation.
   auto data = pe.at(pe.rdata.rva, pe.rdata.size), code = pe.at(pe.text.rva, pe.text.size);
   constexpr unsigned argumentReg = StackReg == 31 ? 0 : 1;
   uint32_t literal = 0, installer = 0; int32_t reasonOffset = 0;
@@ -628,7 +634,7 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
       }
 #endif
       if (!stable) continue;
-      // Select ShouldOpenDownload's existing allow-reason store; verification and confirmation still run.
+      // Select the browser's existing permission-to-open path; package verification and user confirmation still run.
       Gate gate; gate.compare = test->pc; gate.rva = jump->pc; gate.function = range.begin;
       gate.affected = jump->insn.target(); gate.unaffected = load->pc; gate.optional = CrxDownload;
       if (!makePatch(pe, gate, true) || !candidates.push_back(gate)) { report.crxDownload = "ambiguous CRX download gates"; return; }
@@ -645,6 +651,7 @@ ImageInfo Inspect(std::span<const uint8_t> bytes) {
   return {pe.text.rva, pe.text.raw, pe.text.size, pe.imageSize};
 }
 HashValue Hash(std::span<const uint8_t> bytes) {
+  // SHA-256 produces a local file fingerprint for the report; this calculation sends no network requests.
   HashValue result{}; std::array<uint8_t, 32> digest{};
   alignas(void*) std::array<uint8_t, 512> object{};
   DWORD required = 0, received = 0; BCRYPT_HASH_HANDLE hash = nullptr;
@@ -662,6 +669,7 @@ HashValue Hash(std::span<const uint8_t> bytes) {
   return result;
 }
 HashValue Blake3(std::span<const uint8_t> bytes) {
+  // BLAKE3 fingerprints the file quickly so a patch plan can be matched to the exact browser file.
   blake3_hasher hasher;
   blake3_hasher_init(&hasher);
   blake3_hasher_update_tbb(&hasher, bytes.data(), bytes.size());
@@ -673,6 +681,7 @@ HashValue Blake3(std::span<const uint8_t> bytes) {
   return result;
 }
 Report Analyze(std::span<const uint8_t> bytes) {
+  // A damaged file or a different processor type cannot supply a usable patch plan.
   Report report; PeImage pe(bytes);
   if (!pe.valid()) { report.error = pe.error; return report; }
   if (pe.machine != NativeMachine()) { report.error = "scanner architecture differs from PE machine"; return report; }
@@ -680,6 +689,7 @@ Report Analyze(std::span<const uint8_t> bytes) {
   if (boundaries.error) { report.error = boundaries.error; return report; }
   Program program;
   if (pe.isEdge()) {
+    // Edge uses a separate recognized layout: both installer decisions are required, and only x64 is supported.
 #if defined(AUTOSCAN_X64)
     RefBatch batch(pe);
     installVerifier(pe, boundaries, program, {}, report, batch);
@@ -730,6 +740,7 @@ Report Analyze(std::span<const uint8_t> bytes) {
     }
     if (!plausible) { ++report.rejected; return; }
     ++report.screened;
+    // A plausible but unproven MV2 decision blocks the report instead of being silently ignored.
     if (variants.size() != 1) { issue(jumpPc, "missing or ambiguous instruction boundary"); return; }
     auto [head, bounds] = variants.front();
     if (program.range.begin != bounds.begin || program.range.end != bounds.end) program.build(pe, bounds);
@@ -768,6 +779,7 @@ Report Analyze(std::span<const uint8_t> bytes) {
 #endif
   std::sort(report.gates.begin(), report.gates.end(), [](const Gate& a, const Gate& b) { return a.rva < b.rva; });
   bool free = false, hasLayout = false, coherent = true;
+  // Require independent evidence that the matches describe the same extension data, rather than coincidental comparisons.
   std::array<int64_t, 5> layout{}; FixedList<uint32_t, 64> paired;
   for (const auto& gate : report.gates) {
     free |= gate.freePredicate;
@@ -786,6 +798,7 @@ Report Analyze(std::span<const uint8_t> bytes) {
   report.installVerifier = "optional provider not recognized by the bounded lifter";
   report.crxDownload = "optional CRX downloads not recognized by the bounded lifter";
   if (report.ready() && report.gates.size() < 64) {
+    // Optional installer changes are considered only after the core MV2 decisions have passed their checks.
     RefBatch batch(pe);
     installVerifier(pe, boundaries, program, layout, report, batch);
     if (report.gates.size() < 64) crxDownload(pe, boundaries, program, report, batch);

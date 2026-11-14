@@ -1,4 +1,4 @@
-// Directly test the production bounded reference collector/search on native encodings.
+// Test-only made-up code checks that searches find the right references and respect their size limits.
 #include "autoscan.cpp"
 #include <cstdio>
 #include <cstdlib>

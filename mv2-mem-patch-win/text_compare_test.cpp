@@ -1,3 +1,5 @@
+// Test-only made-up byte arrays check that code comparisons detect differences in either half.
+// Also check that background comparisons finish before the memory they read can be released.
 #define NOMINMAX
 #include <windows.h>
 #include "autoscan.h"

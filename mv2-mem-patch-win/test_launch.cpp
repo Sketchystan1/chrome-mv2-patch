@@ -1,4 +1,5 @@
-// Launch only the requested test browser; closing this launcher kills its remaining children.
+// Test-only tool: start the browser named on the command line with the registry-isolation test DLL.
+// Closing this tool stops that test browser and its remaining child processes.
 #define NOMINMAX
 #include <windows.h>
 #include <iostream>

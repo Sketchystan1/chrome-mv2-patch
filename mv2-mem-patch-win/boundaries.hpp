@@ -1,4 +1,5 @@
 #pragma once
+// Read a Windows DLL's layout and locate functions; these routines never run the browser's instructions.
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -33,7 +34,7 @@ constexpr uint16_t NativeMachine() {
 #endif
 }
 
-// File-layout PE view: every RVA is translated through its owning section.
+// Windows stores code at different positions in a file and in memory; translate each address using the file's section table.
 class PeImage {
   std::span<const uint8_t> bytes_;
   std::array<Section, 96> sections_{};
@@ -80,6 +81,7 @@ class PeImage {
     return false;
   }
  private:
+  // Reject damaged headers and overlapping sections before using any address supplied by the file.
   void parse() {
     auto fail = [&](const char* message) { error = message; };
     IMAGE_DOS_HEADER dos{}; IMAGE_FILE_HEADER file{}; uint32_t signature = 0;
@@ -131,6 +133,7 @@ class PeImage {
   }
 };
 
+// Use Windows' function tables where available so a similar byte pattern in another function is not mistaken for this one.
 class Boundaries {
   const PeImage& pe_;
   uint32_t table_ = 0, entries_ = 0, stride_ = 0;
@@ -209,7 +212,7 @@ class Boundaries {
     if (at == pe_.text.rva) return true;
     auto b = pe_.at(at - 1, 1); return !b.empty() && (b[0] == 0xcc || b[0] == 0x90);
   }
-  // One immutable PE view owns the cached trim result.
+  // Reuse the last padding check only within this unchanged browser file.
   mutable Range trimSource_{}, trimResult_{};
   Range trim(Range range) const {
     if (range.begin == trimSource_.begin && range.end == trimSource_.end) return trimResult_;
@@ -235,6 +238,7 @@ class Boundaries {
     return range;
   }
   Range leaf(uint32_t position, uint32_t after = 0) const {
+    // Small functions may lack table entries; accept only the limited code-and-padding patterns below.
     if (arm_) {
       if (!after || after > position || position - after > 4096) return {};
       uint32_t begin = after;
@@ -316,7 +320,7 @@ class Boundaries {
       previousBegin = begin;
       if (!arm_) {
         X64RuntimeFunction record{}; tableRead(n, record);
-        // LLVM emits some empty/reversed x64 entries; they provide no boundary evidence.
+        // Some compiler table entries are empty or reversed; they cannot tell us where a function ends.
         if (record.BeginAddress >= record.EndAddress || !pe.text.contains(record.BeginAddress, record.EndAddress - record.BeginAddress)) continue;
       }
       if (!entry(n, current) || (n && previous.end > current.begin)) { error = "invalid unwind range or xdata"; return; }
@@ -344,7 +348,7 @@ class Boundaries {
     }
     return false;
   }
-  // Untrimmed queries return only authoritative x64 runtime-table bounds.
+  // Requests without padding removal require x64 function-table evidence; the fallback search cannot satisfy them.
   Range find(uint32_t position, bool untrimmed = false) const {
     if (error || !pe_.text.contains(position) || (untrimmed && pe_.machine != IMAGE_FILE_MACHINE_AMD64)) return {};
     uint32_t low = 0, high = entries_;

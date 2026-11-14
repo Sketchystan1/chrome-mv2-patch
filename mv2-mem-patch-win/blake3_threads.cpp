@@ -1,3 +1,5 @@
+// Calculate file fingerprints with BLAKE3, using Windows background workers for large inputs.
+// These workers read supplied bytes; this file does not open files or send their contents anywhere.
 #define NOMINMAX
 #include <windows.h>
 #include <algorithm>
@@ -7,6 +9,7 @@
 
 namespace autoscan {
 unsigned HashThreadCount() noexcept {
+  // Stay within the processors Windows allows this process to use.
   DWORD_PTR mask = 0, system = 0;
   unsigned count = GetProcessAffinityMask(GetCurrentProcess(), &mask, &system) && mask
     ? std::popcount(mask) : GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
@@ -42,6 +45,7 @@ bool enabled() {
     InterlockedCompareExchange(&budgetEnabled, 0, 0);
 }
 Budget currentBudget() {
+  // If per-thread bookkeeping fails, fingerprint with one worker instead of guessing a limit.
   if (!enabled()) return {1, 1};
   auto value = static_cast<const Budget*>(TlsGetValue(budgetIndex));
   return value ? *value : Budget{};
@@ -61,7 +65,7 @@ struct BudgetScope {
   ~BudgetScope() {
     if (installed && InterlockedCompareExchange(&budgetEnabled, 0, 0) &&
         !TlsSetValue(budgetIndex, previous)) {
-      // A failed restore can leave a dead stack pointer: retire lookups first.
+      // Stop using this bookkeeping if Windows cannot restore it before its storage expires.
       InterlockedExchange(&budgetEnabled, 0);
     }
     SetLastError(lastError);
@@ -89,6 +93,7 @@ void CALLBACK compress(PTP_CALLBACK_INSTANCE instance, void* raw, PTP_WORK) {
 
 namespace autoscan {
 void ReleaseHashTls() noexcept {
+  // Release only the Windows bookkeeping slot owned by this fingerprinting code.
   DWORD error = GetLastError();
   InterlockedExchange(&budgetEnabled, 0);
   if (budgetIndex != TLS_OUT_OF_INDEXES) {
@@ -98,12 +103,13 @@ void ReleaseHashTls() noexcept {
 }
 }
 
-// Upstream names this join hook "tbb"; scheduling uses Windows without a TBB dependency.
+// BLAKE3 names this callback "tbb", but this implementation uses Windows' own worker pool.
 extern "C" void blake3_compress_subtree_wide_join_tbb(
     const uint32_t key[8], uint8_t flags, bool use_tbb,
     const uint8_t* l_input, size_t l_input_len, uint64_t l_chunk_counter, uint8_t* l_cvs, size_t* l_n,
     const uint8_t* r_input, size_t r_input_len, uint64_t r_chunk_counter, uint8_t* r_cvs, size_t* r_n) noexcept {
   if (use_tbb && l_input_len + r_input_len >= 16 * 1024 * 1024) {
+    // Split large jobs only when another worker fits the processor limit; small jobs stay local.
     BudgetScope scope;
     auto allowed = currentBudget();
     if (!allowed.threads) allowed.threads = allowed.total = autoscan::HashThreadCount();

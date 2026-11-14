@@ -1,3 +1,5 @@
+// Test-only: load a fixture DLL and briefly hold Windows' loading lock in this process.
+// Check that the patcher would wait or refuse to scan when the lock's state cannot be trusted.
 #include "loader_lock.h"
 #include <cstdio>
 #include <cstdlib>

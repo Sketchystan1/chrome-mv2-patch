@@ -1,3 +1,5 @@
+// Check a proposed plan against the installed DLL before changing any browser code in memory.
+// Only verified decisions are rewritten; the rest of the DLL's main code section (.text) must match the file.
 #include "autoscan_runtime.h"
 
 #include <algorithm>
@@ -8,6 +10,7 @@
 
 namespace autoscan {
 WirePlan MakePlan(const Report& report) {
+  // Send only a complete recognized result to the browser; an incomplete scan stays rejected.
   WirePlan plan;
   std::copy_n(report.blake3.begin(), std::min(report.blake3.size(), plan.blake3.size()), plan.blake3.begin());
   std::string_view error = report.error.empty() && !report.unresolved.empty() ? report.unresolved.front().reason : report.error;
@@ -31,6 +34,7 @@ WirePlan MakePlan(const Report& report) {
 
 ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
                       const WirePlan& plan, std::string_view& reason, MemoryOps ops) {
+  // A helper or cached plan must match this exact browser file and the supported reply format.
   auto decline = [&](const char* why) { reason = why; return ApplyResult::declined; };
   const auto& info = stockImage.info();
   auto disk = stockImage.bytes();
@@ -42,6 +46,7 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
   uintptr_t base = reinterpret_cast<uintptr_t>(image.data());
   if (image.size() > UINTPTR_MAX - base) return decline("loaded image address overflows");
   uintptr_t textStart = base + info.textRva, textEnd = textStart + info.textSize;
+  // Confirm all addresses belong to this loaded DLL and its code can be read before comparing.
   bool codeReadable = true;
   for (uintptr_t p = base; p < base + image.size();) {
     MEMORY_BASIC_INFORMATION region{};
@@ -58,6 +63,7 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
   if (!codeReadable) return decline("loaded code is not fully readable");
 
   const auto& reloc = pe.directory(IMAGE_DIRECTORY_ENTRY_BASERELOC);
+  // Windows may adjust built-in addresses when loading a DLL at a different memory location.
   auto table = pe.at(reloc.VirtualAddress, reloc.Size);
   bool validRelocations = !reloc.Size || table.size() == reloc.Size, sortedBlocks = true;
   uint32_t previousBlock = 0;
@@ -71,7 +77,8 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
     previousBlock = block.VirtualAddress;
     offset += block.SizeOfBlock;
   }
-  // Reuse only blocks whose entire possible relocation span precedes the next gap.
+  // Compare all unchanged code, allowing only those address adjustments that Windows recorded.
+  // Skip a previously checked address-adjustment block only after every byte it can affect is behind us.
   size_t firstBlock = 0;
   auto sameText = [&](uint32_t from, uint32_t to) {
     uint32_t cursor = from;
@@ -79,7 +86,7 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
     uint64_t delta = static_cast<uint64_t>(base) - pe.imageBase;
     for (size_t offset = sortedBlocks ? firstBlock : 0; offset < table.size();) {
       auto block = ReadInsn<IMAGE_BASE_RELOCATION>(table.data() + offset);
-      // A 12-bit offset plus an eight-byte relocation can cross the block's page.
+      // An adjusted address can cross its listed memory page, so include those trailing bytes.
       uint64_t blockEnd = uint64_t{block.VirtualAddress} + 0xfff + 8;
       if (block.VirtualAddress >= to && sortedBlocks) break;
       if (block.VirtualAddress >= to || blockEnd <= from) {
@@ -108,8 +115,10 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
   };
   uint32_t previous = info.textRva;
   unsigned done = 0, optional = 0;
+  // Rebuild each allowed branch change ourselves instead of trusting the helper's replacement.
   for (uint32_t n = 0; n < plan.count; ++n) {
     const auto& site = plan.sites[n];
+    // Optional changes relax store-source and downloaded-CRX checks when those checks were recognized.
     bool offstore = site.rva == plan.offstoreRva, crxDownload = site.rva == plan.crxDownloadRva;
     if (offstore && crxDownload) return decline("overlapping optional decisions");
     optional += offstore || crxDownload;
@@ -168,9 +177,11 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
     return decline("invalid optional decision metadata");
   if (!sameText(previous, info.textRva + info.textSize)) return decline("loaded code differs from the scanned file");
   if (done && done != plan.count) return decline("mixed stock and patched state");
+  // A fully patched browser needs no further writes; a partly patched state was refused above.
   if (done == plan.count) return ApplyResult::alreadyApplied;
 
   SYSTEM_INFO system{}; GetSystemInfo(&system);
+  // Collect only the memory pages containing the few verified decision instructions.
   struct Page { uintptr_t address; DWORD old = 0; bool changed = false; };
   FixedList<Page, 128> pages;
   auto addPage = [&](uintptr_t address) {
@@ -205,6 +216,7 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
     return ok;
   };
   for (auto& page : pages) {
+    // Temporarily allow writing but remove execution permission while changing these pages.
     if (!ops.protect(reinterpret_cast<void*>(page.address), system.dwPageSize, PAGE_READWRITE, &page.old)) {
       reason = "could not make every decision writable";
       return restore() ? ApplyResult::declined : ApplyResult::fatal;
@@ -212,6 +224,7 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
     page.changed = true;
   }
   auto write = [&](bool rollback) {
+    // Write only verified bytes, refresh the CPU's instruction cache, and read the bytes back to check the edit.
     for (uint32_t n = 0; n < plan.count; ++n) {
       const auto& site = plan.sites[n];
       memcpy(image.data() + site.rva, (rollback ? site.stock : site.patch).data(), site.width);
@@ -227,6 +240,7 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
   if (written && protectedAgain) return ApplyResult::applied;
 
   reason = "post-write check failed; rolling back all decisions";
+  // A failed write or permission restore requires putting every decision back to its original form.
   for (auto& page : pages) {
     DWORD ignored;
     if (!ops.protect(reinterpret_cast<void*>(page.address), system.dwPageSize, PAGE_READWRITE, &ignored)) return ApplyResult::fatal;

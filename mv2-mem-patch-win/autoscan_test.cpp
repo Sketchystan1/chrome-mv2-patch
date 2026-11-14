@@ -1,5 +1,6 @@
+// Test-only checks use made-up browser code to verify recognition, refusal and undoing failed edits.
+// Edits stay in this test's memory and temporary cache folder; this test does not launch a browser.
 #include "autoscan_runtime.h"
-#include "autoscan_cache.h"
 #include "solver.hpp"
 
 #include <algorithm>
@@ -18,6 +19,7 @@ static void check(bool ok, const char* why) {
   ++checks;
   if (!ok) throw std::runtime_error(why);
 }
+// Turn readable hexadecimal examples into test bytes; these are invented inputs, not downloaded code.
 static Bytes hex(const char* text) {
   Bytes out;
   auto digit = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
@@ -65,6 +67,7 @@ static Bytes image(const Bytes& leaf = freeCode, const Bytes& member = memberCod
 }
 
 static const Bytes providerCode = hex("4889d6f6865402000008750c4889f1e82c00000084c0740331c0c341c70100010000b001c3");
+// Broken or overlapping instructions must be refused rather than guessed.
 static void programDecodeTests() {
   autoscan::Program program;
   for (unsigned size : {255u, 1u, 64u, 2u, 128u, 4u, 31u, 16u}) {
@@ -361,6 +364,7 @@ static DWORD WINAPI edgeStackTest(void*) {
   catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }
 
+// Pretend selected Windows calls fail so the test can check that earlier edits are undone.
 static unsigned protectCalls = 0, failProtect = 0, flushCalls = 0, failFlush = 0;
 static BOOL WINAPI testProtect(LPVOID address, SIZE_T size, DWORD mode, PDWORD old) {
   check(mode == PAGE_READWRITE || mode == PAGE_EXECUTE_READ, "code edits never request RWX");
@@ -371,6 +375,7 @@ static BOOL WINAPI testFlush(HANDLE process, LPCVOID address, SIZE_T size) {
   if (++flushCalls == failFlush) return FALSE;
   return FlushInstructionCache(process, address, size);
 }
+// This imitation of a loaded browser lives only in memory allocated by the test.
 struct LiveImage {
   Bytes disk;
   autoscan::WirePlan plan;
@@ -597,6 +602,7 @@ static void optionalPlanTests() {
   }
 }
 
+// Write, damage and replace a plan in a new temporary folder; cleanup removes its file and folder.
 static void cacheTests() {
   namespace fs = std::filesystem;
   auto cachePath = [](std::string_view scanner, std::string_view image) {

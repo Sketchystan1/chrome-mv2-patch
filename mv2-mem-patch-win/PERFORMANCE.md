@@ -1,7 +1,9 @@
 # Windows automatic patcher performance
 
 `secur32.dll` is the deployment DLL for x64, x86 and ARM64. This record summarizes
-the current implementation and the completed November 14, 2026 experiments.
+the implementation measured in the November 14, 2026 experiments, before the
+2.0.0 version and documentation cleanup. Browser results and artifact hashes
+below refer to those measured builds; they do not certify a rebuilt 2.0.0 DLL.
 
 ## Current path
 
@@ -86,7 +88,7 @@ behavior, browser updates and DRM remain unvalidated. Timings use one host, warm
 files and headless/GPU-disabled browsers; controlled cold-disk and desktop-window
 performance were not measured. A new scanner identity refills its cache on first use.
 
-| Current deployment artifact | Bytes | SHA-256 |
+| Deployment artifact from the recorded experiments | Bytes | SHA-256 |
 | --- | ---: | --- |
 | x64 `secur32.dll` | 243,200 | `3e5238381af1280bdce4fdfb31d85f9e45ac7535eecea21468cbf90c25366898` |
 | x86 `secur32.dll` | 245,760 | `15f6d0cf296e15350081839e433a524d0c190993bce6cfd70d7d15c078c37ddd` |

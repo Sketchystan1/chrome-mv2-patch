@@ -1,4 +1,5 @@
 #pragma once
+// Compare browser code in memory with the original file; this helper only reads bytes.
 
 #include "autoscan.h"
 #include <windows.h>
@@ -17,6 +18,7 @@ inline void CALLBACK compareText(PTP_CALLBACK_INSTANCE instance, void* context, 
   task.equal = !memcmp(task.live, task.stock, task.size);
 }
 inline bool SameBytes(const uint8_t* live, const uint8_t* stock, size_t size) {
+  // For large ranges, compare two halves at once when Windows allows more than one CPU.
   if (size >= 16 * 1024 * 1024 && HashThreadCount() > 1) {
     size_t half = size / 2;
     TextCompareTask task{live + half, stock + half, size - half};
@@ -24,7 +26,7 @@ inline bool SameBytes(const uint8_t* live, const uint8_t* stock, size_t size) {
     if (work) {
       SubmitThreadpoolWork(work);
       bool equal = !memcmp(live, stock, half);
-      // Join even on mismatch: the callback reads caller-owned mappings and storage.
+      // Wait even after a mismatch so the worker finishes before its input memory is released.
       WaitForThreadpoolWorkCallbacks(work, FALSE);
       CloseThreadpoolWork(work);
       return equal && task.equal;

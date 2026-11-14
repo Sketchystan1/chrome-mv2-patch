@@ -1,4 +1,6 @@
-#include "autoscan_cache.h"
+// Save scan plans in the user's app-data folder; browser DLLs and browser profiles are not edited here.
+// The cache is an optimization: missing or invalid entries cause a fresh scan.
+#include "autoscan_runtime.h"
 #include <wincrypt.h>
 #include <algorithm>
 #include <cstring>
@@ -23,6 +25,7 @@ bool complete(const WirePlan& plan) {
 }
 }
 bool CachePath(std::string_view scannerHash, std::string_view imageHash, std::span<wchar_t> path) noexcept {
+  // Both file fingerprints determine the name, so a new browser or patcher gets a different cache.
   if (path.empty()) return false;
   path[0] = 0;
   if (!validHash(scannerHash) || !validHash(imageHash)) return false;
@@ -30,6 +33,7 @@ bool CachePath(std::string_view scannerHash, std::string_view imageHash, std::sp
   memcpy(key.data(), scannerHash.data(), 64); memcpy(key.data() + 64, imageHash.data(), 64);
   auto hash = Hash(key); if (!hash[0]) return false;
   DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", path.data(), static_cast<DWORD>(path.size()));
+  // Use the folder Windows supplies; it may be on a network share in a redirected user profile.
   if (!length || length >= path.size() || length + 110 >= path.size() ||
       !((length >= 3 && path[1] == L':' && path[2] == L'\\') || (length >= 2 && path[0] == L'\\' && path[1] == L'\\'))) {
     path[0] = 0; return false;
@@ -40,6 +44,7 @@ bool CachePath(std::string_view scannerHash, std::string_view imageHash, std::sp
   std::copy_n(L".bin", 5, path.data() + length); return true;
 }
 bool ReadCache(const wchar_t* path, std::string_view scannerHash, std::string_view imageHash, WirePlan& plan) noexcept {
+  // Limit the file size, ask Windows to decrypt it, and verify its contents before reuse.
   if (!path || !*path || !validHash(scannerHash) || !validHash(imageHash)) return false;
   HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
   if (file == INVALID_HANDLE_VALUE) return false;
@@ -54,6 +59,7 @@ bool ReadCache(const wchar_t* path, std::string_view scannerHash, std::string_vi
   auto checksum = Hash(bytes.subspan(64));
   if (!checksum[0] || memcmp(bytes.data(), checksum.data(), 64) || memcmp(bytes.data() + 64, scannerHash.data(), 64)) return false;
   WirePlan cached; memcpy(&cached, bytes.data() + 128, sizeof(cached));
+  // This is still only a proposed plan; ApplyPlan rechecks the loaded browser before writing.
   if (!complete(cached) || memcmp(cached.blake3.data(), imageHash.data(), 64)) return false;
   cached.cacheHit = 1; plan = cached; return true;
 }
@@ -64,11 +70,11 @@ bool WriteCache(const wchar_t* path, std::string_view scannerHash, const WirePla
   auto checksum = Hash(std::span(clear).subspan(64));
   if (!checksum[0]) return false;
   memcpy(clear.data(), checksum.data(), 64);
-  // User-scoped DPAPI keeps verified plans usable after Windows logoff or restart.
+  // Windows encrypts the cache for this user; other programs running as this user can still access it.
   DATA_BLOB input{static_cast<DWORD>(clear.size()), clear.data()}; Blob encrypted;
   if (!CryptProtectData(&input, nullptr, nullptr, nullptr, nullptr, CRYPTPROTECT_UI_FORBIDDEN, &encrypted.value) ||
       !encrypted.value.cbData || encrypted.value.cbData > ProtectedCacheSize || !encrypted.value.pbData) return false;
-  // shortcut: cache paths are bounded to 1024 characters; longer profiles still scan without caching.
+  // shortcut: cache paths stop at 1024 characters; add longer-path support if profiles need it.
   std::array<wchar_t, 1152> temporary{};
   if (wcslen(path) > 1024) return false;
   wcscpy_s(temporary.data(), temporary.size(), path);
@@ -81,11 +87,13 @@ bool WriteCache(const wchar_t* path, std::string_view scannerHash, const WirePla
   if (_snwprintf_s(temporary.data(), temporary.size(), _TRUNCATE, L"%ls.%lu.%llu.tmp", path,
                   GetCurrentProcessId(), GetTickCount64()) < 0) return false;
   HANDLE file = CreateFileW(temporary.data(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+  // Write a new temporary cache first so a failed save does not destroy the previous valid cache.
   if (file == INVALID_HANDLE_VALUE) return false;
   DWORD written = 0;
   bool ok = WriteFile(file, encrypted.value.pbData, encrypted.value.cbData, &written, nullptr) && written == encrypted.value.cbData && FlushFileBuffers(file);
   ok = CloseHandle(file) && ok;
   if (ok && MoveFileExW(temporary.data(), path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+  // Delete only this failed temporary cache file; leave the old cache in place.
   DeleteFileW(temporary.data()); return false;
 }
 } // namespace autoscan

@@ -1,9 +1,11 @@
 @echo off
+rem Compile the requested Windows DLLs locally; this script does not install them.
 setlocal EnableExtensions
 cd /d "%~dp0"
 set "MV2_ARCH=%~1"
 if not defined MV2_ARCH set "MV2_ARCH=all"
 set "VSWHERE=%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe"
+rem Locate the installed Visual Studio compiler rather than downloading a compiler.
 if not exist "%VSWHERE%" set "VSWHERE=%ProgramFiles%\Microsoft Visual Studio\Installer\vswhere.exe"
 if not exist "%VSWHERE%" (echo Visual Studio Installer is required. & exit /b 1)
 set "MV2_VS="
@@ -28,12 +30,13 @@ set "MV2_ENV=x64_%MV2_TARGET%"
 if "%MV2_TARGET%"=="x64" set "MV2_ENV=x64"
 call "%MV2_VS%\VC\Auxiliary\Build\vcvarsall.bat" %MV2_ENV% >nul
 if errorlevel 1 exit /b 1
-rem vcvarsall can succeed while leaving the host compiler on PATH.
+rem Check that the compiler for the requested processor type is actually installed.
 if not exist "%VCToolsInstallDir%bin\Hostx64\%MV2_TARGET%\cl.exe" (
   echo Install the MSVC C++ %MV2_TARGET% compiler tools.
   exit /b 1
 )
 set "PATH=%MV2_VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin;%MV2_VS%\Common7\IDE\CommonExtensions\Microsoft\CMake\Ninja;%PATH%"
+rem Configure the build (including checked library downloads), then create the DLL.
 cmake --preset %MV2_TARGET%
 if errorlevel 1 exit /b 1
 cmake --build --preset %MV2_TARGET%

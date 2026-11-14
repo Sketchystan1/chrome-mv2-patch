@@ -1,3 +1,4 @@
+// Change imported function addresses in the current process without rewriting Windows functions.
 #pragma once
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -16,7 +17,7 @@ struct MemoryOps {
   decltype(&FlushInstructionCache) flush = ::FlushInstructionCache;
 };
 
-// Only read-only data slots are eligible; making executable pages writable is never a fallback.
+// Accept only a read-only address slot pointing to the expected function; code pages are refused.
 inline ApplyResult SwapPointer(void* volatile* slot, void* expected, void* replacement, MemoryOps ops = {}) {
   if (!slot || !expected || !replacement || (reinterpret_cast<uintptr_t>(slot) % alignof(void*))) return ApplyResult::declined;
   MEMORY_BASIC_INFORMATION data{}, code{};
@@ -28,6 +29,7 @@ inline ApplyResult SwapPointer(void* volatile* slot, void* expected, void* repla
   DWORD old = 0, ignored = 0;
   if (!ops.protect(const_cast<void**>(slot), sizeof(void*), PAGE_READWRITE, &old)) return ApplyResult::declined;
   void* previous = InterlockedCompareExchangePointer(slot, replacement, expected);
+  // Restore read-only protection; undo our pointer change if that restoration fails.
   if (ops.protect(const_cast<void**>(slot), sizeof(void*), PAGE_READONLY, &ignored))
     return previous == expected ? ApplyResult::applied : previous == replacement ? ApplyResult::alreadyApplied : ApplyResult::declined;
   if (previous == expected && InterlockedCompareExchangePointer(slot, expected, replacement) != replacement) return ApplyResult::fatal;
@@ -35,7 +37,7 @@ inline ApplyResult SwapPointer(void* volatile* slot, void* expected, void* repla
 }
 
 struct ImportHook { void* original; void* replacement; unsigned count = 0; };
-// Detours' import enumerator is read-only and allocation-free; its inline transaction code is not linked.
+// Detours lists imported addresses without changing them; only the checked pointer swap above writes.
 inline bool HookImports(HMODULE module, ImportHook& hook) {
   struct Context {
     ImportHook* hook;
@@ -59,6 +61,7 @@ inline bool HookImports(HMODULE module, ImportHook& hook) {
     if (result != ApplyResult::applied && result != ApplyResult::alreadyApplied) break;
   }
   if (applied == context.count) { hook.count += applied; return true; }
+  // Undo earlier swaps if any slot fails; stop the process if an original address cannot be restored.
   while (applied) {
     auto result = SwapPointer(context.slots[--applied], hook.replacement, hook.original);
     if (result != ApplyResult::applied && result != ApplyResult::alreadyApplied) __fastfail(FAST_FAIL_FATAL_APP_EXIT);

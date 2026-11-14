@@ -1,3 +1,5 @@
+// Test-only made-up instructions check reading code, number ranges and safe pointer changes.
+// Pointer changes use memory allocated by this test, which is released afterward.
 #include "solver.hpp"
 #include "autoscan_runtime.h"
 #include <cstdio>

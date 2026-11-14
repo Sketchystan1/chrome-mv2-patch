@@ -1,4 +1,4 @@
-// Read-only diagnostic using the same bounded recognizer as secur32.dll.
+// Read the requested browser DLL and print proposed edits; this tool never applies them.
 #define NOMINMAX
 #include <windows.h>
 #include <cstring>
@@ -39,6 +39,7 @@ struct Json {
   }
 };
 bool reportJson(const autoscan::Report& report) {
+  // Include declined checks and limits so a ready plan is not mistaken for complete coverage.
   Json out;
   out.text("{\"protocol\":1,\"sha256\":"); out.string({report.sha256.data(), report.sha256[0] ? report.sha256.size() : 0});
   out.text(",\"blake3\":"); out.string({report.blake3.data(), report.blake3[0] ? report.blake3.size() : 0});
@@ -74,6 +75,7 @@ void error(const char* message) { DWORD written; WriteFile(GetStdHandle(STD_ERRO
 }
 int wmain(int argc, wchar_t** argv) {
   if (argc != 2) { error("usage: mv2-scan.exe <chrome.dll>\n"); return 2; }
+  // Open the existing file for reading; no browser is launched or modified by this command.
   HANDLE file = CreateFileW(argv[1], GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
   if (file == INVALID_HANDLE_VALUE) { error("cannot open binary\n"); return 2; }
   LARGE_INTEGER size{};

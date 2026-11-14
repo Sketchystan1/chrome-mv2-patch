@@ -1,3 +1,5 @@
+// Test-only: force failures in hash workers' private storage and check fallback and cleanup.
+// A fixture DLL is also loaded and unloaded inside this test process to check memory is released.
 #define NOMINMAX
 #include <windows.h>
 #include <array>
@@ -28,7 +30,7 @@ BOOL WINAPI testFree(DWORD index) {
   return result;
 }
 }
-// Compile the production TLS lifetime path with fallible API substitutes.
+// Pretend selected Windows storage calls fail, without adding failure switches to the shipped DLL.
 #define TlsAlloc testAlloc
 #define TlsGetValue testGet
 #define TlsSetValue testSet

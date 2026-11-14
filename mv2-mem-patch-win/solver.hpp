@@ -1,10 +1,12 @@
 #pragma once
+// Simulate the recognized browser decisions on paper, using value ranges rather than executing browser code.
 #include "autoscan.h"
 #include "boundaries.hpp"
 #include <limits>
 
 namespace autoscan {
 struct S32Interval {
+  // A range represents every possible value between its ends, so the proof does not rely on a few examples.
   int32_t low = INT32_MIN, high = INT32_MAX;
   bool empty() const { return low > high; }
   bool contains(int32_t n) const { return n >= low && n <= high; }
@@ -25,6 +27,7 @@ inline IntervalSplit SplitSigned(S32Interval path, unsigned cc, int32_t immediat
   return less ? IntervalSplit{below, above} : IntervalSplit{above, below};
 }
 enum class SymKind : uint8_t { Unknown, Const, PtrOffset, FieldVal, BitShift };
+// Track what each value came from; "Unknown" means it cannot be used as proof of a browser decision.
 struct SymVal {
   uint64_t value = 0;
   int32_t disp = 0, add = 0;
@@ -65,7 +68,7 @@ inline unsigned StoreWidth(const LiftedInsn& i) {
   return i.detail & 0x400 ? i.width() * 2 : i.detail & 0x200 ? 16 : i.width();
 }
 
-// Instruction occupancy prevents a branch into an immediate from becoming a second decode.
+// Mark every byte belonging to an instruction so a jump into its middle cannot create a false second instruction.
 struct Program {
   FixedList<Node, 8192> nodes;
   FixedList<uint32_t, 16> noReturns;
@@ -195,6 +198,7 @@ struct Program {
   }
 #endif
   bool fromArgument(uint32_t pc, unsigned reg, unsigned argument, int32_t stackSlot = 0) const {
+    // Trace all incoming paths back to the same function input instead of trusting one matching load.
     if (reg >= 32 || (argument >= 32 && argument != NoReg)) return false;
     struct Point { uint32_t pc; unsigned reg; int32_t slot = 0; };
     FixedList<Point, 256> todo, seen; todo.push_back({pc,reg}); bool entry = false;
@@ -256,6 +260,7 @@ struct Program {
     return entry;
   }
   bool guardedNoReturn(const PeImage& pe, const Node& call) const {
+    // Recognize compiler failure checks so analysis stops on their fatal paths; this does not alter those checks.
 #if defined(AUTOSCAN_ARM64)
     auto literalLoad = [&](uint32_t pc, uint32_t& address, unsigned& reg) {
       uint32_t word = 0;
@@ -382,6 +387,7 @@ struct Program {
     return noReturns.empty() || decode(pe, bounds);
   }
   unsigned callEffect(const PeImage& pe, uint32_t pc, unsigned reg, unsigned depth = 0) const {
+    // If a called function's effect cannot be established within the limit, assume it may change the value.
     if (!pc || depth == 3) return 3;
     struct Point { uint32_t pc; bool dirty; };
     FixedList<Point, 64> todo, seen;
@@ -449,6 +455,7 @@ struct Head { uint32_t compare = 0, jump = 0, affected = 0, unaffected = 0; bool
 struct Field { uint16_t base = 0; int32_t disp = 0; uint8_t width = 0; unsigned comparisons = 0; };
 struct Role { unsigned version = 0, type = 0, location = 0; int flag = -1; std::array<int64_t, 5> offsets{}; };
 class Evaluator {
+  // Each state is a possible route through the decision, with the values and comparisons known on that route.
   static constexpr size_t MaxFields = 32;
   struct Flags { SymVal value{}; uint64_t immediate = 0; unsigned width = 4; enum { Unknown, Compare, Test, Bit, BitZero, Literal } kind = Unknown; };
   struct State {
@@ -668,7 +675,7 @@ class Evaluator {
       else return false;
     }
     for (auto range : allowed) if (!range.empty()) {
-      // Invert 32-bit addition in three mathematical copies of the signed domain.
+      // Include values that wrap around at the 32-bit limit when undoing an addition.
       for (int64_t wrap : {-0x100000000ll, 0ll, 0x100000000ll}) {
         int64_t low = static_cast<int64_t>(range.low) - value.add + wrap;
         int64_t high = static_cast<int64_t>(range.high) - value.add + wrap;
@@ -679,6 +686,7 @@ class Evaluator {
     return true;
   }
   bool falseFlagsSafe() const {
+    // Taking the existing non-MV2 route must not depend on leftover comparison results we cannot establish.
     FixedList<uint32_t, 128> todo, seen; todo.push_back(head_.unaffected);
     while (!todo.empty()) {
       auto pc = todo.back(); --todo.count;
@@ -746,6 +754,7 @@ class Evaluator {
     return false;
   }
   bool walk(uint32_t affectedExit = 0) {
+    // Explore both possible sides of comparisons; unsupported operations or too much work prevent a proof.
     outcomes_.count = 0;
     FixedList<State, 64> todo; todo.push_back(initial_);
     unsigned budget = 0;
@@ -896,6 +905,7 @@ class Evaluator {
     return (members ? 2u : 0u) | (static_cast<int64_t>(interval.high) - interval.low + 1 > members ? 1u : 0u);
   }
   bool proves(const Role& role) const {
+    // Every modeled outcome must match the expected extension type, install location, and converted-script rule.
     for (const auto& result : outcomes_) {
       if (result.result < 0) return false;
       auto type = membership(result.constraints[role.type]);
@@ -944,6 +954,7 @@ class Evaluator {
   unsigned decoded = 0;
   Evaluator(const PeImage& pe, const Program& program, Head head) : pe_(pe), program_(program), head_(head) {}
   bool verify(Gate& gate, std::string_view& reason) {
+    // Accept one connected, unambiguous interpretation; otherwise explain why this decision will not be patched.
     if (!falseFlagsSafe()) { reason = "not-affected path consumes unknown flags"; return false; }
     for (unsigned r = 0; r < 32; ++r) {
       auto value = program_.constantBefore(pe_, head_.compare, r);

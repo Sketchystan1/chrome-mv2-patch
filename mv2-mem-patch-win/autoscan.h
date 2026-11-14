@@ -1,11 +1,13 @@
 #pragma once
 
+// Shared descriptions for the scanner: a "gate" is a browser decision, and an RVA is its position inside the DLL.
 #include <array>
 #include <cstdint>
 #include <span>
 #include <string_view>
 
 namespace autoscan {
+// Fixed limits keep an unexpected browser file from growing the scanner's lists without a bound.
 template<class T, size_t Capacity> struct FixedList {
   std::array<T, Capacity> items{};
   size_t count = 0;
@@ -40,6 +42,7 @@ struct Report {
   unsigned heads = 0, screened = 0, rejected = 0;
   FixedList<Gate, 64> gates;
   FixedList<Issue, 64> unresolved;
+  // A possible match is not enough: every suspicious candidate must be resolved before the report is usable.
   bool ready() const { return error.empty() && !gates.empty() && unresolved.empty(); }
 };
 
@@ -48,10 +51,10 @@ struct ImageInfo { uint32_t textRva, textRaw, textSize, imageSize; };
 HashValue Hash(std::span<const uint8_t> bytes);
 HashValue Blake3(std::span<const uint8_t> bytes);
 unsigned HashThreadCount() noexcept;
-// Call only after all hash users have joined, including during DLL unload.
+// Free hashing helpers only after all their work has finished, including when Windows unloads this DLL.
 void ReleaseHashTls() noexcept;
 ImageInfo Inspect(std::span<const uint8_t> bytes);
-// The caller keeps these bytes locked and unchanged for this object's lifetime.
+// Keep the original browser file open and unchanged while comparing it with the running browser.
 class StockImage {
   std::span<const uint8_t> bytes_;
   ImageInfo info_;
@@ -63,7 +66,8 @@ class StockImage {
   const auto& blake3() const { return blake3_; }
 };
 
-// Analysis alone has no identity: the helper binds it to the parent's locked shared mapping.
+// Analyze only reads bytes; its caller must attach the fingerprint of the original file it supplied.
 Report Analyze(std::span<const uint8_t> bytes);
+// Discover adds file fingerprints to the same read-only analysis for the command-line report.
 Report Discover(std::span<const uint8_t> bytes);
 }  // namespace autoscan

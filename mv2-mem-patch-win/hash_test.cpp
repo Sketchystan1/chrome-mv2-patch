@@ -1,3 +1,5 @@
+// Test-only known byte arrays check that file fingerprints match with one worker or several.
+// CPU limits are changed for this test process and restored after each successful check.
 #define NOMINMAX
 #include <windows.h>
 #include "autoscan.h"

@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
-project(mv2_autoscan VERSION 1.17.0 LANGUAGES C CXX RC)
+project(mv2_autoscan VERSION 2.0.0 LANGUAGES C CXX RC)
+# This version also appears in the DLL's Windows Properties and release filename.
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "The compact scanner requires MSVC on Windows")
 endif()
@@ -35,6 +36,7 @@ else()
   set(disol disolx86.cpp)
   set(assembler ml)
 endif()
+# Building downloads these two libraries; fixed checksums reject changed archives.
 include(FetchContent)
 FetchContent_Declare(detours_src
   URL https://codeload.github.com/microsoft/Detours/tar.gz/e4bfd6b03e50de46b47abfbd1e46b384f0c5f833
@@ -94,6 +96,7 @@ else()
   target_sources(blake3 PRIVATE "${b3}/blake3_neon.c")
 endif()
 
+# Keep read-only analysis separate from code that can change browser memory.
 add_library(autoscan_core STATIC autoscan.cpp)
 target_link_libraries(autoscan_core PUBLIC bcrypt blake3)
 add_library(autoscan_apply STATIC autoscan_apply.cpp autoscan_cache.cpp)
@@ -101,8 +104,8 @@ target_link_libraries(autoscan_apply PUBLIC autoscan_core detours crypt32)
 add_executable(mv2-scan autoscan_cli.cpp)
 target_link_libraries(mv2-scan PRIVATE autoscan_core)
 
-# Tail jumps preserve both documented and undocumented export ABIs without writable code.
-# Bare names get sequential ordinals from 1; name@N keeps the host ordinal.
+# Generate small forwarding entries so Windows security calls reach the real system DLL.
+# Preserve each function's name and number, including functions Windows does not document.
 function(proxy_exports proxy)
   set(definition "LIBRARY ${proxy}\nEXPORTS\n")
   if(arch STREQUAL "arm64")
@@ -184,6 +187,7 @@ add_custom_command(TARGET mv2-scan POST_BUILD COMMAND ${CMAKE_COMMAND}
 
 include(CTest)
 if(BUILD_TESTING)
+  # These programs and helper DLLs check the patcher; none are installed with the browser.
   add_executable(startup-thread-test startup_thread_test.cpp)
   target_include_directories(startup-thread-test PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
   target_link_libraries(startup-thread-test PRIVATE blake3 detours)

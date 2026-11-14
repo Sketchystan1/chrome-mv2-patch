@@ -1,3 +1,5 @@
+// Test-only: load a fixture DLL and check that background cleanup releases its mapped memory.
+// Simulated failures check that the DLL stays loaded until its cleanup work has finished.
 #define NOMINMAX
 #include <windows.h>
 #include <cstdio>
@@ -25,7 +27,7 @@ BOOL WINAPI testRetain(DWORD flags, LPCWSTR address, HMODULE* module) {
   return GetModuleHandleExW(flags, address, module);
 }
 }
-// Compile the production ownership path into a DLL to exercise callback unload safety.
+// Use the real cleanup code in a test DLL so unloading it while work is pending can be checked.
 #define TrySubmitThreadpoolCallback testSubmit
 #define GetModuleHandleExW testRetain
 #include "autoscan_runtime.cpp"

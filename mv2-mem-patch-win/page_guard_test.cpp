@@ -1,3 +1,5 @@
+// Test-only: deliberately try unsuitable memory permissions to check that unsafe edits are refused.
+// All changed pages belong to this test, including an unused page in its own executable.
 #include "autoscan_runtime.h"
 #include <psapi.h>
 #include <algorithm>
@@ -47,7 +49,7 @@ BOOL WINAPI testProtect(LPVOID address, SIZE_T size, DWORD protection, PDWORD ol
   return VirtualProtect(address, size, protection, old);
 }
 }
-// Exercise the production guard without adding failure controls to the shipped API.
+// Pretend Windows queries fail or return unsuitable permissions; these switches are only for this test.
 #define K32QueryWorkingSetEx testBatch
 #define VirtualQuery testQuery
 #include "autoscan_apply.cpp"

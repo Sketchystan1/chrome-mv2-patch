@@ -1,3 +1,5 @@
+// Test-only made-up x86/ARM64 browser code checks recognition of extension-source restrictions.
+// Patch and failure checks change only this test's allocated memory and then release it.
 #include "autoscan_runtime.h"
 #include "solver.hpp"
 #include <cstdio>

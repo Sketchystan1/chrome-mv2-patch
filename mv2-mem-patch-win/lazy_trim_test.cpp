@@ -1,4 +1,4 @@
-// Test the production raw-bound prescreen against its original trimmed path.
+// Test-only made-up code checks that the faster search never discards a valid result from the full search.
 #include "autoscan.cpp"
 #include <cstdio>
 #include <cstdlib>

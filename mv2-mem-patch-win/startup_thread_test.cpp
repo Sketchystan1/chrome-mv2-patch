@@ -1,3 +1,5 @@
+// Test-only: simulated Windows query failures and a real test thread check startup-thread selection.
+// The browser patch operation is replaced with an empty function in this test.
 #include <windows.h>
 #include <tlhelp32.h>
 #include <processsnapshot.h>
