@@ -78,7 +78,8 @@ struct Program {
   bool decode(const PeImage& pe, Range bounds) {
     nodes.count = 0; range = bounds; complete = false;
     if (!bounds || bounds.end - bounds.begin > 65536) return false;
-    std::array<uint8_t, 65536> occupied{};
+    std::array<uint8_t, 65536> occupied;
+    std::fill_n(occupied.begin(), bounds.end - bounds.begin, uint8_t{});
     FixedList<uint32_t, 512> todo; todo.push_back(bounds.begin);
     while (!todo.empty()) {
       uint32_t pc = todo.back(); --todo.count;

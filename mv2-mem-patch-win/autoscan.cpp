@@ -78,7 +78,9 @@ struct RefBatch {
       bool provider = name[0] == 'I', ambiguous = false;
       unsigned count = 0, limit = provider ? 16 : 1;
       size_t begin = queries.size();
-      for (size_t n = hay.find(name[0]); n != std::string_view::npos; n = hay.find(name[0], n + 1)) {
+      size_t anchor = provider ? 0 : 4; // The gallery hyphen has fewer false matches than its initial 'a'.
+      for (size_t at = hay.find(name[anchor], anchor); at != std::string_view::npos; at = hay.find(name[anchor], at + 1)) {
+        size_t n = at - anchor;
         if ((n && data[n - 1]) || name.size() + 1 > data.size() - n || memcmp(data.data() + n, name.data(), name.size()) || data[n + name.size()]) continue;
         RefQuery query; query.literal = pe.rdata.rva + static_cast<uint32_t>(n);
         if (++count > limit || !queries.push_back(query)) { ambiguous = true; queries.count = begin; break; }

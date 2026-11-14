@@ -8,7 +8,8 @@ shared reference searches, exact function-trim reuse, lazy x64 trimming, batched
 page-protection checks, dynamic hash TLS, deferred view cleanup and process-only
 initial-thread capture during dynamic DLL loading. Further November 13 changes
 add exact x86/x64 CMP-start filtering, ordered SIMD reference-mask draining,
-relocation-block cursor reuse and two-way large-gap code comparison.
+relocation-block cursor reuse and two-way large-gap code comparison. November 14
+adds active-range occupancy clearing and a rarer gallery-literal anchor.
 
 This is the single record for the former performance Markdown/JSON reports and the
 scanner, carrier and Edge result files. It retains measured summaries, validation,
@@ -48,6 +49,151 @@ timestamp, file ID, USN or page-sharing shortcut authorizes a patch. Site/branch
 stock-byte, target/order, allocation, relocation, full-code and rollback checks
 remain compulsory. Pages transition RX→RW→write→flush→RX; rollback failure stops
 the process. This is a startup operation before the patched code executes.
+
+## November 14 additional optimization pass
+
+This pass assessed the 30 concrete routes below. Selected changes retain full
+identity, complete discovery, ambiguity handling and transactional patch checks.
+Potential routes are not claims of measured gains, and separate percentages must
+not be added together.
+
+| # | Acceleration route | Decision and evidence |
+| --- | --- | --- |
+| 1 | Clear only the active instruction-occupancy range | Selected: retain the same 64 KiB bound and byte-ownership checks; avoid clearing unused bytes. |
+| 2 | Use one-call CNG SHA-256 | Unselected: warmed kernels improved, but the three-change browser candidate regressed; retain the existing caller-owned object and API. |
+| 3 | Choose a rarer literal-search anchor byte | Selected for the gallery switch: search `-` at offset four; retain every full string, NUL, bounds and ambiguity check. Provider search stays unchanged. |
+| 4 | Overlap stock hashing with loaded-code equality | Rejected in this pass: complete browser readiness regressed about 4%. |
+| 5 | Cache the last authoritative runtime-table range | Rejected: Chrome improved about 2.8% paired, Edge regressed about 6.9%. |
+| 6 | Replace locked TLS retirement reads with acquire loads | Primitive improved, complete hashing inconclusive; unselected. |
+| 7 | Reuse comparison work across large gaps | Conditional: measure complete startup against work-item lifetime complexity. |
+| 8 | Reuse the current operation's CPU budget across comparison gaps | Conditional: avoid repeated topology calls; likely a small saving. |
+| 9 | Tune comparator concurrency | Conditional: retained-map wins do not establish fresh-view or browser wins. |
+| 10 | Train the actual release DLL with instrumented PGO | Conditional: earlier scanner-only PGO gains do not establish DLL gains. |
+| 11 | Train the actual release DLL with SPGO | Conditional: this token lacks the sampling privilege; no samples collected. |
+| 12 | Use measured hot/cold function ordering and CPU scheduling options | Conditional: profile before changing `/ORDER` or `/favor`. |
+| 13 | Read entries directly from a once-validated runtime-table span | Conditional: preserve entry, unwind and chained-record validation. |
+| 14 | Memoize exact constant queries within one Program | Conditional: include PC/register/depth/generation and unknown/limit results. |
+| 15 | Memoize exact pointer and argument provenance | Conditional: preserve predecessor ambiguity and register effects. |
+| 16 | Memoize exact callee return summaries | Conditional: bind to immutable code and all input assumptions. |
+| 17 | Find both optional anchor names in one physical `.rdata` pass | Conditional: compare with native `memchr` before adding a multi-pattern engine. |
+| 18 | Share core/reference SIMD loads | Conditional: preserve independent order, capacity and ambiguity handling. |
+| 19 | Filter x86 absolute references by byte pairs | Conditional: requires native distributions and bounded-window parity tests. |
+| 20 | Filter ARM64 references/calls with NEON | Conditional: native ARM64 performance hardware is unavailable. |
+| 21 | Widen scanner masks to AVX2/AVX-512 | Conditional: dispatch and match-density checks; this CPU supports neither ISA. |
+| 22 | Run independent miss-path recognizers concurrently | Conditional: separate mutable solver state and deterministic merge are required. |
+| 23 | Merge sorted relocations and patch-site gaps in one traversal | Conditional: mainly dense x86 relocations; preserve malformed-table rejection. |
+| 24 | Normalize relocated words into bounded contiguous comparison runs | Conditional: copying must outweigh the cost of many tiny comparisons. |
+| 25 | Fuse equality with coarse BLAKE3 subtree reads | Conditional: retain the exact cryptographic tree and relocation/site checks. |
+| 26 | Tune hash threshold and physical/logical CPU budgets | Conditional: complete-path hardware measurements; the earlier 8 MiB browser trial lost. |
+| 27 | Resolve `TlsGetValue2` opportunistically | Conditional: older Windows fallback and measured TLS cost required. |
+| 28 | Apply rolling prefetch to genuinely cold views | Conditional: whole-view warm prefetch previously lost; count hint/fault costs. |
+| 29 | Cache deterministic unsupported-image results | Conditional: authenticate full image/scanner identities; never cache transient failures. |
+| 30 | Prepare plans at install/update time or single-flight concurrent misses | Conditional: exact final identities, DPAPI scope, abandoned-owner recovery and bounded waits. |
+
+The short-range decode kernel used 10 alternating pairs, each containing 10,000
+64-byte decode calls. Median time fell from 36.869 to 2.197 ms, about 94%, with
+every pair faster. Complete `Analyze` comparisons showed only about 1.9% paired
+improvement on Chrome and Edge, with substantial noise. All 104 full discovery
+reports across the tested variants matched exactly. New tests cover changing
+range lengths, branches into immediates, the last byte at the 64 KiB limit and
+oversized-range rejection. These are cache-miss savings, not cached-start gains.
+
+One-call SHA-256 used 12 alternating pairs per input. Median scanner-DLL hashing
+fell from 1.437 to 1.405 ms (10/12 pairs faster), and 1,536-byte plan hashing from
+10.063 to 9.620 microseconds (9/12 faster). The 128-byte key and empty input were
+slightly slower. Empty/abc/key/plan vectors, the exact 310,481,560-byte Chrome
+file, and inaccessible oversized-input rejection passed. Whole-browser identity
+continues to use the unchanged parallel BLAKE3 implementation.
+
+The gallery-only literal filter was confirmed with 16 alternating pairs per
+browser. Median complete `Analyze` time was 350.065 to 339.712 ms on Chrome and
+310.090 to 303.929 ms on Edge; paired reductions were 1.97% and 2.16%, with 15/16
+and 12/16 pairs faster. Name collection alone fell from 136.234 to 79.279 ms per
+ten calls on Chrome and 192.240 to 115.781 ms on Edge, all eight pairs per image
+faster. All 220 complete reports in the initial/confirmation populations matched.
+The provider-only alternative regressed and was rejected. New tests cover name
+starts at section boundaries, preceding/following bytes and truncated literals.
+
+The discarded overlap prototype used a joined comparator, an exact private
+one-use proof, worker-local access/in-page fault handling and all original
+relocation/site checks. It passed 21 x64 and 18 x86 test cases and all architecture
+builds, but 12 alternating cached browser pairs measured 836.171 ms baseline
+versus 869.089 ms candidate median readiness; p95 was 949.971 versus 1,129.410 ms.
+Only 3/12 candidate pairs were faster. All 234 final memory decisions and 78
+renderer sandbox observations passed; the 24 measured cache hits preserved
+contents/mtime and the stock image stayed unchanged. Correctness alone did not
+justify selecting the slower implementation.
+
+TLS acquire-load guard reads fell from 25.892 to 18.373 ns. Over 24 retained-map
+hash pairs the candidate was faster in only 10, with large overlapping ranges;
+this is insufficient evidence for changing the production scheduler or TLS guard.
+
+Raw samples, exact artifact hashes, discarded overlap sources and the paired
+browser harness are in `_scratch/autopatch-speed-2026-11-14/`; discovery kernels
+and parity reports are in `_scratch/discovery-speed-2026-11-14/`, and the TLS
+experiment is in `_scratch/hash-speed-2026-11-14/`. Measurements are warm-file,
+headless, GPU-disabled observations on one four-core/eight-thread host. They do
+not establish controlled cold-disk, native ARM64, AVX2/AVX-512 or desktop-window
+latency. The final two-change build passed all 20 x64 and 17 x86 CTest cases and
+cross-built ARM64, including the new SHA, decode-range and literal-boundary tests.
+All three DLLs remain below the 300,000-byte limit. The final source retains
+only active-range clearing and the gallery anchor; both the one-call SHA and
+overlap experiments were removed.
+
+| Final artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| x64 `secur32.dll` | 242,688 | `6cc736b7b4800ff121bdca5d3705b694e7ba12be482043add0362deefb7899e0` |
+| x86 `secur32.dll` | 244,224 | `e5ff358d7c5241e9d495d6c6a82baa2f2e69562e7ed2a0c9cd51f3fc15a734c1` |
+| ARM64 `secur32.dll` | 172,544 | `047326359842eb69dbea70e731491165b9b4ef9090283a50ff2d635f0d184eb2` |
+
+The three-change candidate (`1b6ac926...`, including one-call SHA) passed a packed
+MV2 lifecycle, but the subsequent 12-pair cached browser comparison measured
+871.264 ms baseline versus 986.768 ms candidate median readiness (13.3% slower).
+The warmed SHA saving was only about 32 microseconds and did not justify that
+whole-path result, so the SHA change was removed. Rebuilding HEAD verified that
+the saved baseline used the same compiler and equivalent code: all function
+bounds/opcodes matched, with only global-data address displacements changing.
+A four-way control then encountered a baseline-independent startup timeout before
+completion. An earlier attempt also stalled during the original DLL's excluded
+warm-up. Neither incomplete run is presented as a completed performance population.
+Final cached-start improvement is unproven; the selected gains are discovery
+work reductions. Logs, discarded artifacts and completed samples remain in the
+scratch campaign, including `browser-final-retry/results.json`.
+
+The final `6cc736b7...` DLL separately passed the packed-MV2 stock, patched,
+cached restart, cache-deleted restart and removal/restoration lifecycle. All 45
+memory decisions and 39 renderer sandbox checks passed, including MV2 request
+blocking, continued MV3 operation, cache reuse and unchanged original files.
+The phase starts (1.003/2.449/0.602/1.203/0.411 seconds) validate behavior and
+restoration, not a paired performance gain. The result is recorded in
+`_scratch/ap-life-14-final/results.json`; final native checks are in
+`_scratch/autopatch-speed-2026-11-14/native-checks-two.log`.
+
+### Follow-up: old versus final DLL until patches are verified
+
+Twelve cached launches per DLL used the same isolated Chrome copy and frozen
+profile seed, alternating the launch order, with one excluded cache-fill launch
+per DLL. The endpoint was browser `ResumeThread` to two stable observations of
+all nine patched instructions with exact execute/read page protection. It
+includes loader/trigger and 2 ms polling overhead; it is not exact `Patch()`
+return, eventual view cleanup or usable-browser readiness.
+
+| Cached launch result | Before (`d42b07e6...`) | Final (`6cc736b7...`) |
+| --- | ---: | ---: |
+| Launches | 12 | 12 |
+| Median to verified patches | 432.421 ms | 441.303 ms |
+| Median of successful verifications | 432.421 ms | 440.119 ms |
+| p95 | 1,188.105 ms | At least 30 seconds |
+| Verification timeouts | 0 | 1 |
+
+The final median was 8.882 ms (2.1%) slower in this population. One final-build
+launch failed to reach the verified state within 30 seconds; it was retained as
+a censored timeout rather than discarded. This does not establish a cached-start
+speedup or the timeout's cause. The selected discovery kernels improve, but that
+gain does not extend to this cached-start endpoint. Successful cache hits preserved
+contents/mtime, original browser files stayed unchanged, and owned jobs, proxy
+files and registry state were restored. Full observations and exact identities
+are in `_scratch/autopatch-speed-2026-11-14/patch-timing/results.json`.
 
 ## November 13 implementation and checks
 
@@ -688,10 +834,10 @@ ReadFile/WriteFile; keep the exact input immutable and hash/compare the same byt
 
 These are research routes, not promises or a claim that every possible future
 technique has been exhausted. Profile the residual cost and choose the smallest
-experiment whose complete path improves. The two first priorities are actual
-`secur32.dll` paired-launch attribution and release-DLL SPGO training, followed by
-production-safe hash/code overlap. Cache-miss optimization must be assessed
-separately.
+experiment whose complete path improves. November 14's paired browser trial
+rejected the overlap implementation; actual release-DLL PGO/SPGO remains the
+largest unselected compiler route. Cache-miss optimization must be assessed
+separately from cached browser starts.
 
 ### Discovery and validation algorithms
 
@@ -700,8 +846,8 @@ separately.
 | Reverse predecessor edges once per Program | Repeated checks reached about 1.55M/1.70M/14.93M. The 16 KiB unique-predecessor prototype was later tested and rejected: its initial Chrome gain disappeared under same-executable controls; see the November 13 continuation. |
 | Exact constant/provenance/call-summary memoization | Count repeated immutable-image/callee/PC/register/depth keys first; cache unknown/limit outcomes correctly and invalidate per Program generation. |
 | Reuse complete optional Programs | Only 4–7 builds/stage and little same-range reuse were observed; retain noReturns/unsupported-decode semantics. |
-| Cache authoritative runtime-table entry | Avoid nearby binary searches only inside proven bounds; never memoize heuristic leaf boundaries by containment. |
-| Partial occupancy clearing or generation marks | Could save a 64 KiB clear for small functions; retain instruction-byte ownership, initialization and wraparound handling. |
+| Cache authoritative runtime-table entry | November 14's prototype regressed Edge and was rejected; never memoize heuristic leaf boundaries by containment. |
+| Partial occupancy clearing or generation marks | Partial clearing selected on November 14; retain the 64 KiB bound and instruction-byte ownership. Generation marks remain unselected. |
 | One actual `.rdata` traversal for both names | Current name collection is once/name, not necessarily one physical traversal; compare with optimized memchr first. |
 | Rare-byte/packed-pair literal filters | Reduce full comparisons only if measured density warrants it; retain full name/NUL and string-boundary checks. |
 | Core/reference shared SIMD vector load | Collect bounded anchors early; retain independent candidate ordering/overflow. Later-discovered CRX caller targets cannot immediately join. |
@@ -729,7 +875,7 @@ Old RVAs can prioritize work, never replace the rest-of-image ambiguity search.
 
 | Technique | Potential and condition |
 | --- | --- |
-| Whole-hash/full-stock-code overlap | Measured native candidate with variable whole-path result; retain exact private proof, gap relocation checks, fallback and joins. |
+| Whole-hash/full-stock-code overlap | November 14's complete-browser trial regressed and was rejected; any future variant still needs private proofs, gap relocation checks, fallback and joins. |
 | Fuse equality at coarse hash subtrees | Reuse stock cache lines without duplicate comparisons or changed upstream counters/flags/tree; real relocations make this nontrivial. |
 | Rolling prefetch/live-text prefetch | Distinct from rejected whole-view hint; include hint time, hard faults and memory pressure. Prefetch does not populate all process PTEs. |
 | Buffered/overlapped double-buffer reads | Tested reader kernels did not beat warm mapping consistently; genuinely cold disk can differ. Exact short-read/error/cancellation lifetimes required. |

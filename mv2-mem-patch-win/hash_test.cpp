@@ -63,6 +63,22 @@ int main() {
   if (std::string_view(sha.data(), sha.size()) != "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad") return 1;
   sha = autoscan::Hash({});
   if (std::string_view(sha.data(), sha.size()) != "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") return 1;
+  constexpr Case cacheCases[] = {
+    {128, "471fb943aa23c511f6f72f8d1652d9c880cfa392ad80503120547703e56a2be5"},
+    {1536, "cd9d357900c9d8d8c1e812631ee1fe738a734ad07254f97cadacf7c8a602fbb4"}
+  };
+  for (size_t n = 0; n < 1536; ++n) input[n] = static_cast<uint8_t>(n % 251);
+  for (const auto& test : cacheCases) {
+    sha = autoscan::Hash(std::span(input).first(test.size));
+    if (std::string_view(sha.data(), sha.size()) != test.expected) return 1;
+  }
+  if constexpr (sizeof(size_t) > sizeof(ULONG)) {
+    const size_t oversized = static_cast<size_t>(ULONG_MAX) + 1;
+    auto inaccessible = static_cast<uint8_t*>(VirtualAlloc(nullptr, oversized, MEM_RESERVE, PAGE_NOACCESS));
+    if (!inaccessible) return 1;
+    bool declined = autoscan::Hash({inaccessible, oversized}) == autoscan::HashValue{};
+    if (!VirtualFree(inaccessible, 0, MEM_RELEASE) || !declined) return 1;
+  }
   std::vector<uint8_t> large(32 * 1024 * 1024 + 2);
   for (size_t n = 0; n < large.size(); ++n) large[n] = static_cast<uint8_t>(n % 251);
   for (size_t size : {size_t{16 * 1024 * 1024 - 1}, size_t{16 * 1024 * 1024}, size_t{16 * 1024 * 1024 + 1}, size_t{32 * 1024 * 1024 + 1}}) {
@@ -114,6 +130,6 @@ int main() {
       }
     }
   }
-  std::puts("PASS: 70 BLAKE3 vectors, concurrent boundaries, adaptive CPU budgets and SHA-256 diagnostics");
+  std::puts("PASS: 70 BLAKE3 vectors, concurrent boundaries, adaptive CPU budgets and SHA-256 cache vectors/bounds");
   return 0;
 }

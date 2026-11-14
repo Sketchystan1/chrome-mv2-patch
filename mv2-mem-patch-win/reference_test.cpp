@@ -43,6 +43,22 @@ void verify(Bytes& bytes, uint32_t literal, unsigned expected) {
   check(autoscan::references(pe, literal, found, batch) == (expected <= 64));
   check(found.size() == std::min(expected, 64u));
 }
+void literalBoundaries() {
+  for (unsigned offset : {0u,1u,4u,15u,16u,4096u-17u}) {
+    auto bytes = fixture(64); std::fill(bytes.begin() + 0x3400, bytes.end(), uint8_t{0});
+    std::memcpy(bytes.data() + 0x3400 + offset, "apps-gallery-url", 17);
+    autoscan::PeImage pe(bytes); autoscan::RefBatch found(pe); check(found.gallery == 0x5000 + offset && found.queries.size() == 1);
+    bytes[0x3400 + offset + 16] = 'x'; autoscan::RefBatch suffix(pe); check(!suffix.gallery);
+    if (offset) { bytes[0x3400 + offset + 16] = 0; bytes[0x3400 + offset - 1] = 'x'; autoscan::RefBatch prefix(pe); check(!prefix.gallery); }
+  }
+  for (unsigned size : {1u,3u,4u,15u,16u}) {
+    auto bytes = fixture(64); std::fill(bytes.begin() + 0x3400, bytes.end(), uint8_t{0});
+    std::memcpy(bytes.data() + 0x3400, "apps-gallery-url", 17);
+    size_t table = autoscan::NativeMachine() == IMAGE_FILE_MACHINE_I386 ? 0x178 : 0x188;
+    put<uint32_t>(bytes, table + 40 + 8, size);
+    autoscan::PeImage pe(bytes); check(pe.valid()); autoscan::RefBatch truncated(pe); check(!truncated.gallery);
+  }
+}
 #if !defined(AUTOSCAN_ARM64)
 void scalarReferences(const autoscan::PeImage& pe, std::span<autoscan::RefQuery> queries) {
   using namespace autoscan;
@@ -133,6 +149,7 @@ void cmpStarts() {
 #endif
 }
 int main() {
+  literalBoundaries();
 #if !defined(AUTOSCAN_ARM64)
   differentialReferences(); cmpStarts();
 #endif

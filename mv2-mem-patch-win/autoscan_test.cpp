@@ -65,6 +65,24 @@ static Bytes image(const Bytes& leaf = freeCode, const Bytes& member = memberCod
 }
 
 static const Bytes providerCode = hex("4889d6f6865402000008750c4889f1e82c00000084c0740331c0c341c70100010000b001c3");
+static void programDecodeTests() {
+  autoscan::Program program;
+  for (unsigned size : {255u, 1u, 64u, 2u, 128u, 4u, 31u, 16u}) {
+    Bytes code(size, 0x90); code.back() = 0xc3;
+    auto bytes = image({}, code); autoscan::PeImage pe(bytes);
+    check(program.decode(pe, {0x1100, 0x1100 + size}) && program.nodes.size() == size,
+          "reused occupancy storage clears every byte in short and changing ranges");
+  }
+  auto bytes = image({}, hex("7501b801000000c3")); autoscan::PeImage overlap(bytes);
+  check(!program.decode(overlap, {0x1100, 0x1108}), "a conditional branch into an immediate still declines");
+  bytes = image({}, {}); bytes.resize(0x10400);
+  put<uint32_t>(bytes, 0x190, 65536); put<uint32_t>(bytes, 0x198, 65536); put<uint32_t>(bytes, 0xd0, 0x12000);
+  auto code = hex("0f85f9ff0000c3"); std::copy(code.begin(), code.end(), bytes.begin() + 0x400); bytes.back() = 0xc3;
+  autoscan::PeImage full(bytes);
+  check(full.valid() && program.decode(full, {0x1000, 0x11000}) && program.nodes.size() == 3,
+        "the 64 KiB occupancy limit includes the last byte and preserves branch ownership");
+  check(!program.decode(full, {0x1000, 0x11001}), "ranges beyond the occupancy limit still decline");
+}
 static void argumentTests() {
   auto fromArgument = [](const Bytes& code) {
     auto bytes = image({}, code);
@@ -654,6 +672,7 @@ static void cacheTests() {
 
 int wmain() {
   try {
+    programDecodeTests();
     auto basic = autoscan::Discover(image());
     check(basic.ready() && basic.gates.size() == 2, "complete free/member plan");
     check(basic.gates[0].rva == 0x1045 && basic.gates[1].rva == 0x1104, "RVA rather than file offset");
