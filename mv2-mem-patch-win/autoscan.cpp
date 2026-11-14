@@ -133,10 +133,38 @@ void scanReferences(const PeImage& pe, std::span<RefQuery> queries) {
     }
   };
   size_t n = 2;
+#if defined(AUTOSCAN_X86)
+  if (queries.size() <= 17) {
+    FixedList<uint16_t, 17> pairs;
+    for (const auto& query : queries) {
+      uint64_t absolute = pe.imageBase + query.literal;
+      if (absolute > UINT32_MAX) continue;
+      uint16_t pair = static_cast<uint16_t>(absolute >> 16); bool present = false;
+      for (auto existing : pairs) present |= existing == pair;
+      if (!present) pairs.push_back(pair);
+    }
+    for (; n + 19 <= code.size(); n += 16) {
+      auto lo = _mm_loadu_si128(reinterpret_cast<const __m128i*>(code.data() + n + 2));
+      auto hi = _mm_loadu_si128(reinterpret_cast<const __m128i*>(code.data() + n + 3));
+      auto matches = _mm_setzero_si128();
+      for (auto pair : pairs) matches = _mm_or_si128(matches, _mm_and_si128(
+        _mm_cmpeq_epi8(lo, _mm_set1_epi8(static_cast<char>(pair & 255))),
+        _mm_cmpeq_epi8(hi, _mm_set1_epi8(static_cast<char>(pair >> 8)))));
+      unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(matches));
+      while (mask) { examine(n + std::countr_zero(mask)); mask &= mask - 1; }
+    }
+  }
+#endif
 #if defined(AUTOSCAN_X64)
   for (; n + 19 <= code.size(); n += 16) {
     auto bytes = _mm_loadu_si128(reinterpret_cast<const __m128i*>(code.data() + n - 1));
     auto matches = _mm_cmpeq_epi8(_mm_and_si128(bytes, _mm_set1_epi8(-57)), _mm_set1_epi8(5));
+    auto ops = _mm_loadu_si128(reinterpret_cast<const __m128i*>(code.data() + n - 2));
+    auto paired = _mm_and_si128(ops, _mm_set1_epi8(-2));
+    auto opMatch = _mm_or_si128(_mm_cmpeq_epi8(paired, _mm_set1_epi8(0x10)), _mm_cmpeq_epi8(paired, _mm_set1_epi8(0x28)));
+    opMatch = _mm_or_si128(opMatch, _mm_cmpeq_epi8(_mm_and_si128(ops, _mm_set1_epi8(static_cast<char>(0xef))), _mm_set1_epi8(0x6f)));
+    opMatch = _mm_or_si128(opMatch, _mm_cmpeq_epi8(ops, _mm_set1_epi8(static_cast<char>(0x8d))));
+    matches = _mm_and_si128(matches, opMatch);
     unsigned mask = static_cast<unsigned>(_mm_movemask_epi8(matches));
     while (mask) { examine(n + std::countr_zero(mask)); mask &= mask - 1; }
   }

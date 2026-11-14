@@ -10,7 +10,8 @@ namespace {
 enum class BatchMode { native, fail, invalidLast, wrongProtection };
 BatchMode batchMode = BatchMode::native;
 bool failPageQuery = false;
-unsigned checks = 0, batchCalls = 0, batchEntries = 0, fallbackCalls = 0, protectCalls = 0;
+unsigned checks = 0, batchCalls = 0, batchEntries = 0, fallbackCalls = 0, protectCalls = 0, imageQueries = 0;
+unsigned failImageQueryAt = 0;
 void check(bool ok, const char* message, std::string_view reason = {}) {
   ++checks;
   if (!ok) {
@@ -38,7 +39,7 @@ SIZE_T WINAPI testQuery(LPCVOID address, PMEMORY_BASIC_INFORMATION info, SIZE_T 
   if (batchCalls) {
     ++fallbackCalls;
     if (failPageQuery) { SetLastError(ERROR_INVALID_ADDRESS); return 0; }
-  }
+  } else if (++imageQueries == failImageQueryAt) { SetLastError(ERROR_INVALID_ADDRESS); return 0; }
   return VirtualQuery(address, info, size);
 }
 BOOL WINAPI testProtect(LPVOID address, SIZE_T size, DWORD protection, PDWORD old) {
@@ -103,7 +104,7 @@ struct Fixture {
   ~Fixture() { if (live) VirtualFree(live, 0, MEM_RELEASE); }
   autoscan::ApplyResult apply(BatchMode mode = BatchMode::native, bool queryFailure = false) {
     batchMode = mode; failPageQuery = queryFailure;
-    batchCalls = batchEntries = fallbackCalls = protectCalls = 0;
+    batchCalls = batchEntries = fallbackCalls = protectCalls = imageQueries = 0;
     reason = {};
     return autoscan::ApplyPlan({live, disk.size()}, autoscan::StockImage(disk), plan, reason,
                               {testProtect, FlushInstructionCache});
@@ -249,10 +250,62 @@ void imageCopyOnWrite() {
         VirtualQuery(cowPage, &memory, sizeof(memory)) && memory.Protect == PAGE_EXECUTE_READ,
         "real image copy-on-write preserves equivalent per-page and region RX protection");
 }
+void readabilityTraversal() {
+  for (DWORD protection : {PAGE_READONLY, PAGE_READWRITE, PAGE_EXECUTE_READ, PAGE_EXECUTE_READWRITE,
+                           PAGE_EXECUTE, PAGE_NOACCESS, PAGE_EXECUTE_READ | PAGE_GUARD}) {
+    Fixture fixture;
+    bool x86 = autoscan::NativeMachine() == IMAGE_FILE_MACHINE_I386;
+    size_t textHeader = x86 ? 0x178 : 0x188;
+    put<uint32_t>(fixture.disk, textHeader + offsetof(IMAGE_SECTION_HEADER, Misc.VirtualSize), 0x3000);
+    put<uint32_t>(fixture.disk, textHeader + offsetof(IMAGE_SECTION_HEADER, SizeOfRawData), 0x3000);
+    fixture.plan.blake3 = autoscan::Blake3(fixture.disk);
+    DWORD old = 0;
+    check(VirtualProtect(fixture.live + 0x3000, 0x1000, protection, &old) != FALSE,
+          "set nondecision text page protection");
+    unsigned regions = 0;
+    for (uintptr_t p = reinterpret_cast<uintptr_t>(fixture.live), end = p + fixture.disk.size(); p < end;) {
+      MEMORY_BASIC_INFORMATION memory{};
+      check(VirtualQuery(reinterpret_cast<void*>(p), &memory, sizeof(memory)) != 0, "inspect fixture regions");
+      p = reinterpret_cast<uintptr_t>(memory.BaseAddress) + memory.RegionSize;
+      ++regions;
+    }
+    bool readable = protection == PAGE_READONLY || protection == PAGE_READWRITE || protection == PAGE_EXECUTE_READ;
+    auto result = fixture.apply();
+    check(imageQueries == regions, "each allocation region is queried once for ownership and readability");
+    check(result == (readable ? autoscan::ApplyResult::applied : autoscan::ApplyResult::declined) &&
+          fixture.bytesMatch(readable) && fixture.protectedAgain(),
+          "merged traversal retains exact nondecision code readability rules", fixture.reason);
+    if (!readable) check(!batchCalls && !protectCalls && fixture.reason == "loaded code is not fully readable",
+                         "unreadable code declines before comparison and protection changes");
+  }
+  {
+    Fixture fixture;
+    DWORD old = 0;
+    check(VirtualProtect(fixture.live, 0x1000, PAGE_NOACCESS, &old) != FALSE &&
+          VirtualProtect(fixture.live + 0x3000, 0x1000, PAGE_NOACCESS, &old) != FALSE,
+          "protect noncode regions on both text boundaries");
+    check(fixture.apply() == autoscan::ApplyResult::applied && fixture.bytesMatch(true),
+          "noncode protection does not affect text readability");
+  }
+  {
+    Fixture fixture;
+    DWORD old = 0;
+    check(VirtualProtect(fixture.live + 0x1000, 0x1000, PAGE_NOACCESS, &old) != FALSE,
+          "prepare unreadable text before a later region query failure");
+    failImageQueryAt = 3;
+    auto result = fixture.apply();
+    failImageQueryAt = 0;
+    check(result == autoscan::ApplyResult::declined && fixture.reason == "loaded image crosses allocation boundaries" &&
+          !batchCalls && !protectCalls, "later ownership-query failure retains precedence over unreadable text");
+    check(VirtualProtect(fixture.live + 0x1000, 0x1000, PAGE_EXECUTE_READ, &old) != FALSE && fixture.bytesMatch(false),
+          "query failure leaves every decision unchanged");
+  }
+}
 }
 
 int main() {
   using Result = autoscan::ApplyResult;
+  readabilityTraversal();
   relocationTraversal();
   for (BatchMode mode : {BatchMode::native, BatchMode::fail, BatchMode::invalidLast, BatchMode::wrongProtection}) {
     Fixture fixture;

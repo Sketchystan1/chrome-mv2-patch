@@ -94,8 +94,8 @@ void scalarReferences(const autoscan::PeImage& pe, std::span<autoscan::RefQuery>
 }
 void differentialReferences() {
   uint32_t random = 0x73a19b45;
-  for (unsigned size : {6u,7u,18u,19u,20u,21u,31u,32u,33u,63u,64u,65u,128u,1024u,4096u})
-    for (unsigned dense = 0; dense < 3; ++dense) {
+  for (unsigned size : {6u,7u,8u,9u,17u,18u,19u,20u,21u,22u,31u,32u,33u,34u,35u,36u,37u,38u,63u,64u,65u,128u,1024u,4096u})
+    for (unsigned dense = 0; dense < 4; ++dense) {
       auto bytes = fixture(size);
       for (unsigned n = 0; n < size; ++n) {
         random ^= random << 13; random ^= random >> 17; random ^= random << 5;
@@ -106,9 +106,10 @@ void differentialReferences() {
         unsigned ordinal = n / (length + 2); uint32_t literal = 0x5000 + (ordinal % 3) * 0x40;
         reference(bytes, n, literal);
 #if defined(AUTOSCAN_X64)
-        if (dense == 2) {
+        bytes[0x402 + n] |= static_cast<uint8_t>((ordinal % 8) << 3);
+        if (dense >= 2) {
           constexpr uint8_t ops[] = {0x10,0x11,0x28,0x29,0x6f,0x7f};
-          bytes[0x400 + n] = 0x0f; bytes[0x401 + n] = ops[ordinal % 6];
+          bytes[0x400 + n] = dense == 2 ? 0x0f : 0xcc; bytes[0x401 + n] = ops[ordinal % 6];
         }
 #endif
       }
@@ -121,6 +122,33 @@ void differentialReferences() {
         check(std::equal(scalar[n].found.begin(), scalar[n].found.end(), fast[n].found.begin()));
       }
     }
+}
+void alignmentCollisions() {
+  for (unsigned size : {7u,19u,20u,21u,31u,32u,33u,63u,64u,65u,128u}) for (unsigned offset = 1; offset < 33; ++offset) {
+    if (offset + 5 > size) continue;
+    auto bytes = fixture(size);
+    constexpr uint8_t filler[] = {0x20,0x99,0x40,0};
+    for (unsigned n = 0; n < size; ++n) bytes[0x400 + n] = filler[n & 3];
+    reference(bytes, offset, offset & 1 ? 0x5000 : 0x15000);
+    autoscan::PeImage pe(bytes); check(pe.valid());
+    std::array<autoscan::RefQuery, 3> original{}, candidate{};
+    for (unsigned n = 0; n < 3; ++n) original[n].literal = candidate[n].literal = n == 0 ? 0x5000 : n == 1 ? 0x15000 : 0x5040;
+    scalarReferences(pe, original); autoscan::scanReferences(pe, candidate);
+    for (unsigned n = 0; n < 3; ++n) {
+      check(original[n].complete == candidate[n].complete && original[n].found.size() == candidate[n].found.size());
+      check(std::equal(original[n].found.begin(), original[n].found.end(), candidate[n].found.begin()));
+    }
+  }
+  auto bytes = fixture(128);
+  reference(bytes, 32, 0x115000);
+  autoscan::PeImage pe(bytes);
+  std::array<autoscan::RefQuery, 18> original{}, candidate{};
+  for (unsigned n = 0; n < original.size(); ++n) original[n].literal = candidate[n].literal = 0x5000 + n * 0x10000;
+  scalarReferences(pe, original); autoscan::scanReferences(pe, candidate);
+  for (unsigned n = 0; n < original.size(); ++n) {
+    check(original[n].complete == candidate[n].complete && original[n].found.size() == candidate[n].found.size());
+    check(std::equal(original[n].found.begin(), original[n].found.end(), candidate[n].found.begin()));
+  }
 }
 void cmpStarts() {
   using namespace autoscan;
@@ -151,7 +179,7 @@ void cmpStarts() {
 int main() {
   literalBoundaries();
 #if !defined(AUTOSCAN_ARM64)
-  differentialReferences(); cmpStarts();
+  differentialReferences(); alignmentCollisions(); cmpStarts();
 #endif
   constexpr unsigned length = autoscan::NativeMachine() == IMAGE_FILE_MACHINE_ARM64 ? 8 : autoscan::NativeMachine() == IMAGE_FILE_MACHINE_I386 ? 5 : 7;
   for (unsigned size : {7u, 8u, 18u, 19u, 20u, 31u, 32u, 33u, 63u, 64u, 65u, 128u})

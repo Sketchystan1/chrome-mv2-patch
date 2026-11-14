@@ -29,20 +29,6 @@ WirePlan MakePlan(const Report& report) {
   return plan;
 }
 
-static bool readable(std::span<uint8_t> image) {
-  uintptr_t end = reinterpret_cast<uintptr_t>(image.data()) + image.size();
-  for (uintptr_t p = reinterpret_cast<uintptr_t>(image.data()); p < end;) {
-    MEMORY_BASIC_INFORMATION info{};
-    if (!VirtualQuery(reinterpret_cast<void*>(p), &info, sizeof info) || info.State != MEM_COMMIT ||
-        info.Protect & (PAGE_GUARD | PAGE_NOACCESS) || !(info.Protect & (PAGE_READONLY | PAGE_READWRITE |
-        PAGE_WRITECOPY | PAGE_EXECUTE_READ))) return false;
-    uintptr_t next = reinterpret_cast<uintptr_t>(info.BaseAddress) + info.RegionSize;
-    if (next <= p) return false;
-    p = next;
-  }
-  return true;
-}
-
 ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
                       const WirePlan& plan, std::string_view& reason, MemoryOps ops) {
   auto decline = [&](const char* why) { reason = why; return ApplyResult::declined; };
@@ -55,16 +41,21 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
   if (!pe.valid() || !info.imageSize || info.imageSize != image.size()) return decline("loaded image size differs");
   uintptr_t base = reinterpret_cast<uintptr_t>(image.data());
   if (image.size() > UINTPTR_MAX - base) return decline("loaded image address overflows");
+  uintptr_t textStart = base + info.textRva, textEnd = textStart + info.textSize;
+  bool codeReadable = true;
   for (uintptr_t p = base; p < base + image.size();) {
     MEMORY_BASIC_INFORMATION region{};
     if (!VirtualQuery(reinterpret_cast<void*>(p), &region, sizeof region) || region.AllocationBase != image.data())
       return decline("loaded image crosses allocation boundaries");
     uintptr_t next = reinterpret_cast<uintptr_t>(region.BaseAddress) + region.RegionSize;
     if (next <= p) return decline("invalid loaded image region");
+    if (p < textEnd && next > textStart && (region.State != MEM_COMMIT ||
+        region.Protect & (PAGE_GUARD | PAGE_NOACCESS) || !(region.Protect & (PAGE_READONLY | PAGE_READWRITE |
+        PAGE_WRITECOPY | PAGE_EXECUTE_READ)))) codeReadable = false;
     p = next;
   }
   auto liveText = image.subspan(info.textRva, info.textSize);
-  if (!readable(liveText)) return decline("loaded code is not fully readable");
+  if (!codeReadable) return decline("loaded code is not fully readable");
 
   const auto& reloc = pe.directory(IMAGE_DIRECTORY_ENTRY_BASERELOC);
   auto table = pe.at(reloc.VirtualAddress, reloc.Size);

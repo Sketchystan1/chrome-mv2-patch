@@ -135,6 +135,13 @@ class Boundaries {
   const PeImage& pe_;
   uint32_t table_ = 0, entries_ = 0, stride_ = 0;
   bool arm_ = false;
+  std::span<const uint8_t> tableBytes_{};
+  template<class T> bool tableRead(uint32_t index, T& value) const {
+    if (tableBytes_.empty()) return pe_.rvaRead(table_ + index * stride_, value);
+    size_t at = static_cast<size_t>(index) * stride_;
+    if (index >= entries_ || at > tableBytes_.size() || sizeof(T) > tableBytes_.size() - at) return false;
+    std::memcpy(&value, tableBytes_.data() + at, sizeof(T)); return true;
+  }
   bool unwind64(uint32_t rva, Range function) const {
     std::array<uint32_t, 8> visited{};
     for (unsigned depth = 0; depth < visited.size(); ++depth) {
@@ -160,7 +167,7 @@ class Boundaries {
     uint32_t unwind = 0;
     if (arm_) {
       IMAGE_ARM64_RUNTIME_FUNCTION_ENTRY record{};
-      if (!pe_.rvaRead(table_ + index * 8, record)) return false;
+      if (!tableRead(index, record)) return false;
       range.begin = record.BeginAddress; unwind = record.UnwindData;
       uint32_t length = 0;
       if (unwind & 3) {
@@ -186,7 +193,7 @@ class Boundaries {
       range.end = range.begin + length;
     } else {
       X64RuntimeFunction record{};
-      if (!pe_.rvaRead(table_ + index * 12, record)) return false;
+      if (!tableRead(index, record)) return false;
       range = {record.BeginAddress, record.EndAddress}; unwind = record.UnwindInfoAddress;
     }
     if (!range || (!pe_.text.contains(range.begin, range.end - range.begin) &&
@@ -283,10 +290,11 @@ class Boundaries {
       if (load.GuardCFFunctionTable < pe.imageBase || load.GuardCFFunctionTable - pe.imageBase > UINT32_MAX ||
           load.GuardCFFunctionCount > UINT32_MAX / stride_) { error = "invalid CFG table"; return; }
       table_ = static_cast<uint32_t>(load.GuardCFFunctionTable - pe.imageBase); entries_ = load.GuardCFFunctionCount;
-      if (pe.at(table_, static_cast<size_t>(entries_) * stride_).empty()) { error = "truncated CFG table"; return; }
+      tableBytes_ = pe.at(table_, static_cast<size_t>(entries_) * stride_);
+      if (tableBytes_.empty()) { error = "truncated CFG table"; return; }
       uint32_t previous = 0;
       for (uint32_t n = 0; n < entries_; ++n) {
-        uint32_t rva = 0; pe.rvaRead(table_ + n * stride_, rva);
+        uint32_t rva = 0; tableRead(n, rva);
         if (!pe.text.contains(rva) || (n && rva <= previous)) { error = "invalid CFG function RVA"; return; }
         previous = rva;
       }
@@ -297,16 +305,17 @@ class Boundaries {
     uint32_t size = exceptions.VirtualAddress ? exceptions.Size : pe.pdata.size;
     stride_ = arm_ ? 8 : 12;
     if (!size && !table_) return;
-    if (!size || size % stride_ || pe.at(table_, size).empty()) { error = "invalid runtime function table"; return; }
+    tableBytes_ = pe.at(table_, size);
+    if (!size || size % stride_ || tableBytes_.empty()) { error = "invalid runtime function table"; return; }
     entries_ = size / stride_;
     Range previous{}; uint32_t previousBegin = 0;
     for (uint32_t n = 0; n < entries_; ++n) {
       Range current{};
-      uint32_t begin = 0; pe.rvaRead(table_ + n * stride_, begin);
+      uint32_t begin = 0; tableRead(n, begin);
       if (n && begin < previousBegin) { error = "unsorted runtime function table"; return; }
       previousBegin = begin;
       if (!arm_) {
-        X64RuntimeFunction record{}; pe.rvaRead(table_ + n * stride_, record);
+        X64RuntimeFunction record{}; tableRead(n, record);
         // LLVM emits some empty/reversed x64 entries; they provide no boundary evidence.
         if (record.BeginAddress >= record.EndAddress || !pe.text.contains(record.BeginAddress, record.EndAddress - record.BeginAddress)) continue;
       }
@@ -321,11 +330,11 @@ class Boundaries {
     uint32_t low = 0, high = entries_;
     while (low < high) {
       uint32_t mid = low + (high - low) / 2, begin = 0;
-      pe_.rvaRead(table_ + mid * stride_, begin);
+      tableRead(mid, begin);
       if (begin <= range.begin) low = mid + 1; else high = mid;
     }
     X64RuntimeFunction record{};
-    if (!low || !pe_.rvaRead(table_ + (low - 1) * stride_, record) || record.BeginAddress != range.begin || record.EndAddress != range.end) return false;
+    if (!low || !tableRead(low - 1, record) || record.BeginAddress != range.begin || record.EndAddress != range.end) return false;
     for (unsigned depth = 0; depth < 8; ++depth) {
       auto header = pe_.at(record.UnwindInfoAddress, 4);
       if (header.empty() || !(header[0] & 0x20)) return false;
@@ -341,7 +350,7 @@ class Boundaries {
     uint32_t low = 0, high = entries_;
     while (low < high) {
       uint32_t mid = low + (high - low) / 2, begin = 0;
-      pe_.rvaRead(table_ + mid * stride_, begin);
+      tableRead(mid, begin);
       if (begin <= position) low = mid + 1; else high = mid;
     }
     if (pe_.machine != IMAGE_FILE_MACHINE_I386) {
@@ -355,8 +364,8 @@ class Boundaries {
       return untrimmed ? Range{} : leaf(position, range.end);
     }
     Range range{0, pe_.text.rva + pe_.text.size};
-    if (low) pe_.rvaRead(table_ + (low - 1) * stride_, range.begin);
-    if (low < entries_) pe_.rvaRead(table_ + low * stride_, range.end);
+    if (low) tableRead(low - 1, range.begin);
+    if (low < entries_) tableRead(low, range.end);
     // shortcut: x86 call/prologue recovery searches 64 KiB around the candidate; larger gaps decline.
 #if defined(AUTOSCAN_X86) || defined(AUTOSCAN_X64) || defined(AUTOSCAN_ALL_ARCH_TESTS)
     uint32_t first = std::max(range.begin, position - pe_.text.rva > 65536 ? position - 65536 : pe_.text.rva);

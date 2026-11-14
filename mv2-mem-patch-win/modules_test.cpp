@@ -148,6 +148,17 @@ void boundaries() {
   put<uint32_t>(bytes, 0x604, 0x1000); put<uint32_t>(bytes, 0x608, 0x1007); put<uint32_t>(bytes, 0x60c, 0x3000);
   PeImage chain(bytes); Boundaries cyclic(chain);
   check(cyclic.error != nullptr, "cyclic chained unwind records decline");
+  bytes = fixture(IMAGE_FILE_MACHINE_AMD64);
+  put<uint32_t>(bytes, 0x120, 0x21f4); put<uint32_t>(bytes, 0x124, 12);
+  put<uint32_t>(bytes, 0x5f4, 0x1000); put<uint32_t>(bytes, 0x5f8, 0x1007); put<uint32_t>(bytes, 0x5fc, 0x3000);
+  bytes[0x600] = 1;
+  std::copy(std::begin(body), std::end(body), bytes.begin() + 0x200);
+  PeImage lastEntry(bytes); Boundaries atEnd(lastEntry);
+  check(!atEnd.error && atEnd.find(0x1003).begin == 0x1000 && atEnd.find(0x1003).end == 0x1005,
+        "runtime table's final complete entry at a section boundary is readable");
+  put<uint32_t>(bytes, 0x124, 24);
+  PeImage crossed(bytes); Boundaries gap(crossed);
+  check(gap.error != nullptr, "runtime table crossing a virtual section gap declines");
   bytes = fixture(IMAGE_FILE_MACHINE_ARM64);
   put<uint32_t>(bytes, 0x120, 0x2000); put<uint32_t>(bytes, 0x124, 8);
   put<uint32_t>(bytes, 0x400, 0x1000); put<uint32_t>(bytes, 0x404, 1 | (3 << 2));

@@ -340,11 +340,11 @@ for cache IO in the parent and helper.
 
 ## Validation and diagnostics
 
-The [single performance record](PERFORMANCE.md) contains the compiler/algorithm
-experiments, historical artifact hashes, reviewed scanner matrix, browser
-lifecycles, rejected alternatives and remaining optimization catalogue. Results
-are dated; measurements for an earlier carrier/build are not guarantees for a
-new DLL. All deployment DLLs must remain below 300,000 bytes.
+The [performance record](PERFORMANCE.md) summarizes current measurements,
+validation, rejected experiments and artifact hashes. It also links the complete
+experiment ledger in Git history and the local evidence archive. Measurements for
+an earlier carrier/build are not guarantees for a new DLL. All deployment DLLs
+must remain below 300,000 bytes.
 
 The reviewed native matrix reproduced 166 core decisions across 21 x64 and two
 x86 stock images, with 23 InstallVerifier and 20 x64 download gates. Two ARM64
