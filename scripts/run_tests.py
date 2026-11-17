@@ -89,6 +89,7 @@ def main():
         ("audit signatures.json",
          py + [str(HERE / "audit_signatures.py"), str(REPO / "signatures.json")]),
         ("Windows PE (chrome-mv2.ps1)", py + [str(HERE / "test_windows.py")]),
+        ("Native Windows batch installer", py + [str(HERE / "test_install.py")]),
     ]
 
     # Syntax check for the shell patcher. Use the resolved bash (T.BASH): a bare

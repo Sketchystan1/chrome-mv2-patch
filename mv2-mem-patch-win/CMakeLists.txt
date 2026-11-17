@@ -176,6 +176,7 @@ set_target_properties(secur32 PROPERTIES
   RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/build/${arch}$<0:>"
   ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
   PDB_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+configure_file(install.bat "${CMAKE_CURRENT_SOURCE_DIR}/build/${arch}/install.bat" COPYONLY)
 target_compile_definitions(secur32 PRIVATE MV2_VER_STR="${PROJECT_VERSION}.0"
   MV2_VERC=${PROJECT_VERSION_MAJOR},${PROJECT_VERSION_MINOR},${PROJECT_VERSION_PATCH},0 MV2_PROD="${PROJECT_VERSION}")
 target_link_libraries(secur32 PRIVATE autoscan_apply delayimp)

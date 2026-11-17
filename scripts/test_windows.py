@@ -347,7 +347,7 @@ try {
     Assert-True (-not (Test-ShouldPause -ExitCode 0 -IsElevatedChild $true -QuietMode $false -ChildAlreadyPaused $false -InputRedirected $true)) 'redirected input must never hang an unattended run'
 
     # Release extraction and install/uninstall use only the current proxy.
-    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    Add-Type -AssemblyName System.IO.Compression.FileSystem,System.IO.Compression
     $releaseZip = Join-Path $temp 'secur32 release.zip'
     $proxyBytes = [IO.File]::ReadAllBytes($pePath)
     $zip = [IO.Compression.ZipFile]::Open($releaseZip, [IO.Compression.ZipArchiveMode]::Create)
@@ -375,6 +375,7 @@ try {
     function Get-PatchStateQuick { param($Path) return 'not patched' }
     function Request-TargetUnlock { param($Target, $AssumeYes) return $true }
     function Remove-ChromePolicies { }
+    $removeUbo = ${function:Remove-UboExtension}
     function Remove-UboExtension { }
     function Save-Signatures { throw 'current proxy must not fetch legacy signatures' }
     $script:NoUblock = $true
@@ -392,6 +393,98 @@ try {
     [IO.File]::WriteAllBytes($legacy, $proxyBytes)
     Assert-True ((Invoke-Uninstall $target $true) -eq 0) 'uninstall cleans a recognized legacy proxy too'
     Assert-True (-not (Test-Path -LiteralPath $legacy)) 'uninstall removes the recognized legacy proxy'
+
+    # Discover every Chrome/Edge channel using only fabricated installations.
+    $roots = @{}
+    $installRoot = Join-Path $temp 'installed browsers'
+    foreach ($name in 'ProgramW6432', 'ProgramFiles', 'ProgramFiles(x86)', 'LOCALAPPDATA') {
+        $roots[$name] = [Environment]::GetEnvironmentVariable($name)
+        [Environment]::SetEnvironmentVariable($name, $installRoot)
+    }
+    try {
+        foreach ($subdir in 'Google\Chrome', 'Google\Chrome Beta', 'Google\Chrome Dev', 'Google\Chrome SxS',
+                            'Microsoft\Edge', 'Microsoft\Edge Beta', 'Microsoft\Edge Dev', 'Microsoft\Edge SxS') {
+            $appDir = Join-Path $installRoot "$subdir\Application"
+            $stem = if ($subdir.StartsWith('Microsoft')) { 'msedge' } else { 'chrome' }
+            New-Item -ItemType Directory -Path $appDir -Force | Out-Null
+            [IO.File]::WriteAllBytes((Join-Path $appDir "$stem.exe"), $proxyBytes)
+            foreach ($fixtureVersion in '1.0.0.1', '999.0.0.9', '999.0.0.10', 'Installer') {
+                $versionDir = Join-Path $appDir $fixtureVersion
+                New-Item -ItemType Directory -Path $versionDir | Out-Null
+                [IO.File]::WriteAllBytes((Join-Path $versionDir "$stem.dll"), $proxyBytes)
+            }
+        }
+        $installs = @(Get-BrowserInstalls)
+        Assert-True ($installs.Count -eq 8) 'find and deduplicate all eight browser channels'
+        foreach ($install in $installs) {
+            Assert-True ($install.Version -eq '999.0.0.10') 'choose newest numeric version without a milestone cutoff'
+            Assert-True ((Get-ChannelFromPath $install.Path) -eq $install.Channel) 'channel survives explicit-path relaunch'
+            Assert-True ((Resolve-Target $install.AppDir $false).Path -eq $install.Path) 'resolve Application directory'
+            Assert-True ((Resolve-Target $install.ExePath $false).Path -eq $install.Path) 'resolve browser executable'
+        }
+        $edge = $installs | Where-Object Channel -eq 'Edge Stable'
+        $chrome = $installs | Where-Object Channel -eq 'Stable'
+    } finally {
+        foreach ($name in $roots.Keys) { [Environment]::SetEnvironmentVariable($name, $roots[$name]) }
+    }
+
+    # Local installs never download; registry calls and browser closing are mocked.
+    function Get-LatestDllRelease { throw 'local installs must not download a release' }
+    function Invoke-Restore { throw 'Edge must not use Chrome backup restoration' }
+    $script:policyCalls = 0
+    function Remove-ChromePolicies { $script:policyCalls++ }
+    $script:unlockCalls = 0
+    function Request-TargetUnlock { param($Target, $AssumeYes) $script:unlockCalls++; return $true }
+    $script:regCalls = @()
+    function Invoke-Reg { param([string[]]$RegArgs) $script:regCalls += ,$RegArgs; return 0 }
+    Set-Item Function:Remove-UboExtension $removeUbo
+    $script:Ublock = $true
+    $script:DllPath = Join-Path $temp 'local secur32.dll'
+    [IO.File]::WriteAllBytes(($edge.Path + '.bak'), $proxyBytes)
+    New-Item -ItemType Directory -Path $Mv2DataDir | Out-Null
+    foreach ($machine in 0x8664, 0x014C, 0xAA64) {
+        New-TestPe $DllPath $near -Machine $machine
+        New-TestPe $edge.ExePath $near -Machine $machine
+        Assert-True ((Invoke-Install $edge $true) -eq 0) 'install matching local Edge DLL for each architecture'
+        Assert-True ((Get-FileHash (Join-Path $edge.AppDir 'secur32.dll')).Hash -eq (Get-FileHash $DllPath).Hash) 'install exact adjacent DLL bytes'
+        Assert-True ((Invoke-Check $edge) -eq 0) 'check Edge installation without writing'
+        Assert-True ((Invoke-Uninstall $edge $true) -eq 0) 'uninstall Edge for each architecture'
+        Assert-True (-not (Test-Path (Join-Path $edge.AppDir 'secur32.dll'))) 'remove Edge proxy'
+    }
+    Assert-True ($policyCalls -eq 0) 'Edge install never removes Chrome policies'
+    Assert-True (Test-Path $Mv2DataDir) 'Edge uninstall preserves legacy Chrome data'
+    Assert-True ((Get-FileHash $edge.Path).Hash -eq (Get-ByteHash $proxyBytes)) 'Edge browser DLL remains unchanged'
+    Assert-True ((Get-FileHash ($edge.Path + '.bak')).Hash -eq (Get-ByteHash $proxyBytes)) 'Edge backup remains unchanged'
+    Assert-True (@($regCalls | Where-Object { $_[1] -like '*Google*' }).Count -eq 0) 'Edge never accesses Chrome registry entries'
+    Assert-True (@($regCalls | Where-Object { $_[0] -eq 'add' -and $_[-1] -eq '/reg:32' -and $_[1] -like '*Microsoft\Edge\Extensions*' }).Count -eq 3) 'register Edge uBO in the required 32-bit view'
+
+    New-TestPe $DllPath $near -Machine 0x8664
+    $closes = $unlockCalls; $registryWrites = $regCalls.Count
+    Assert-True ((Invoke-Install $edge $true) -eq 1) 'reject local x64 DLL for ARM64 Edge'
+    $script:DllPath = Join-Path $temp 'missing secur32.dll'
+    Assert-True ((Invoke-Install $edge $true) -eq 1) 'reject missing local DLL without downloading'
+    Assert-True ($unlockCalls -eq $closes -and $regCalls.Count -eq $registryWrites) 'invalid local DLL never closes the browser or edits registry'
+    $script:DllPath = Join-Path $temp 'local secur32.dll'
+    Assert-True ((Invoke-Install $chrome $true) -eq 0) 'local DLL also installs for Chrome'
+    Assert-True ($policyCalls -eq 1) 'Chrome retains its legacy policy cleanup'
+    Assert-True (@($regCalls | Where-Object { $_[0] -eq 'add' -and $_[1] -like '*Google\Chrome\Extensions*' }).Count -eq 2) 'Chrome uBO keeps both registry views'
+
+    function Get-FileHolders { param($TargetPath) return @() }
+    function Get-Process {
+        param($Name)
+        $script:processQuery = $Name
+        return @([pscustomobject]@{ Id=1; Path=$edge.ExePath },
+                 [pscustomobject]@{ Id=2; Path=$chrome.ExePath })
+    }
+    Assert-True (@(Get-BrowserProcesses $edge.Path).Count -eq 1) 'only selected Edge processes are closed'
+    Assert-True ($processQuery -eq 'msedge') 'query Edge processes by executable name'
+    function Get-CimInstance {
+        param($ClassName, $Filter)
+        $script:commandLineQuery = $Filter
+        return [pscustomobject]@{ ExecutablePath=$edge.ExePath; CommandLine=('"' + $edge.ExePath + '" --user-data-dir="C:\Edge Profile" --restore-last-session') }
+    }
+    Assert-True ((Get-BrowserRelaunchArgs $edge.ExePath) -eq '--user-data-dir="C:\Edge Profile"') 'Edge restart preserves its profile'
+    Assert-True ($commandLineQuery -eq "Name='msedge.exe'") 'read Edge command line'
 
     Write-Host "PowerShell tests passed: $passed assertions"
 } finally {
@@ -456,6 +549,7 @@ function Start-Process {
 }
 
 $dll = 'C:\Program Files\Google\Chrome\Application\1.2.3.4\chrome.dll'
+$script:DllPath = 'C:\local build !\secur32.dll'
 $code = Invoke-SelfElevate -ResolvedTargetPath $dll
 
 $fail = @()
@@ -466,6 +560,7 @@ elseif (-not $script:StagedPath.StartsWith([IO.Path]::GetTempPath(), 'OrdinalIgn
 }
 if ($script:RelaunchArgs -notmatch '(^|\s)-Relaunched(\s|$)') { $fail += 'loop guard -Relaunched not forwarded' }
 if ($script:RelaunchArgs -notmatch [regex]::Escape('"' + $dll + '"')) { $fail += 'target not forwarded as one quoted argument' }
+if ($script:RelaunchArgs -notmatch [regex]::Escape('-DllPath "' + $DllPath + '"')) { $fail += 'local DLL path not forwarded through elevation' }
 if ($script:StagedText -cne $global:MV2SplicedSource) { $fail += 'staged copy is not the source that actually ran' }
 if (-not $script:SwapBlocked) { $fail += 'staged copy could be overwritten while the child held it' }
 if (-not $script:DeleteBlocked) { $fail += 'staged copy could be deleted while the child held it' }
@@ -566,18 +661,21 @@ def main():
                                         env=dict(os.environ, MV2_BUILD_FAILURE=failure), capture_output=True, text=True)
                 assert bool(result.returncode) == bool(failure), (arch, failure, result)
     print('Build wrapper tests passed: secur32 presets and six success/failure cases')
-    env = dict(os.environ, MV2_REPO=str(REPO))
-
-    r = _run_ps(pwsh, PS_TEST, env)
-    sys.stdout.write(r.stdout)
-    if r.returncode != 0:
-        sys.stderr.write(r.stderr)
-        sys.exit(r.returncode)
+    env = dict(os.environ, MV2_REPO=str(REPO), PSModulePath='')
+    ps51 = shutil.which("powershell")
+    hosts = [pwsh]
+    if ps51 and ps51 != pwsh:
+        hosts.append(ps51)
+    for host in hosts:
+        r = _run_ps(host, PS_TEST, env)
+        sys.stdout.write(r.stdout)
+        if r.returncode != 0:
+            sys.stderr.write(r.stderr)
+            sys.exit(r.returncode)
 
     # Windows PowerShell specifically: only powershell.exe accepts a command in
     # the implicit positional slot (pwsh treats a bare argument as -File), and
     # that slot is what the documented one-liner and the old bug both used.
-    ps51 = shutil.which("powershell")
     if not ps51:
         print("PowerShell elevation staging tests skipped: no powershell.exe on PATH")
         return 0

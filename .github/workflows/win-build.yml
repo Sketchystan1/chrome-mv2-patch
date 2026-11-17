@@ -44,14 +44,13 @@ jobs:
           New-Item -ItemType Directory -Force -Path $root | Out-Null
           $built = @()
           foreach ($a in 'x64', 'x86', 'arm64') {
-            $src = "mv2-mem-patch-win/build/$a/secur32.dll"
-            if (Test-Path $src) {
-              New-Item -ItemType Directory -Force -Path (Join-Path $root $a) | Out-Null
+            New-Item -ItemType Directory -Force -Path (Join-Path $root $a) | Out-Null
+            foreach ($file in 'secur32.dll', 'install.bat') {
+              $src = "mv2-mem-patch-win/build/$a/$file"
+              if (-not (Test-Path $src)) { throw "no $file for $a" }
               Copy-Item $src (Join-Path $root $a) -Force
-              $built += $a
-            } else {
-              throw "no secur32.dll for $a"
             }
+            $built += $a
           }
           if ($built -notcontains 'x64') { throw 'no x64 secur32.dll - refusing to release' }
           $ver = (Get-Item (Join-Path $root 'x64/secur32.dll')).VersionInfo.ProductVersion

@@ -55,10 +55,10 @@ Install Visual Studio 2022 or newer with **Desktop development with C++** and
 **C++ CMake tools for Windows** (including Ninja). ARM64 builds also need the
 ARM64 compiler tools. From the repository root:
 
-```powershell
-.\mv2-mem-patch-win\build.bat
-# Build one processor type: build.bat x64, x86, or arm64.
-# No argument, or "all", builds all three.
+```bat
+mv2-mem-patch-win\build.bat
+rem Build one processor type: build.bat x64, x86, or arm64.
+rem No argument, or "all", builds all three.
 ```
 
 The deployment files are:
@@ -69,7 +69,8 @@ build/x86/secur32.dll
 build/arm64/secur32.dll
 ```
 
-The default build produces only these DLLs. Downloaded library sources, build
+Each DLL folder also includes `install.bat`. Keep the batch file and the DLL
+together. Downloaded library sources, build
 intermediates, tests and the diagnostic scanner stay in ignored `out/<arch>/`
 directories. Every deployment DLL and the diagnostic scanner must be below
 300,000 bytes.
@@ -90,6 +91,85 @@ In Visual Studio, open this folder, select **x64 Release**, **x86 Release** or
 
 ### secur32.dll automatic patcher beside the executable
 
+Right-click `build/<arch>/install.bat` (or the batch file in an extracted release)
+and select **Run as administrator**. Choose an installation by number. The list
+groups Chrome, Chromium and Edge in that order, without full paths. Recognized
+patches show **patch installed**; other entries show only the browser name.
+The action menu offers **1 Install**, **2 Uninstall**
+and **0 Quit**.
+The batch uses built-in Windows commands and an embedded Windows PowerShell
+section to select and close browser processes. No separate helper executable is
+needed. Install
+uBlock Origin manually; the batch does not prompt for or install extensions.
+Stable, Beta, Dev and Canary are discovered for Chrome and Edge. Chromium is
+discovered in standard `Chromium\Application` folders under machine and per-user
+install roots. Detection does not depend on version numbers. The DLL must match
+the browser's processor type. Recognition
+limits still apply; installation does not guarantee every version can be patched.
+
+```bat
+install.bat cleanup -Quiet
+install.bat install "C:\Program Files (x86)\Microsoft\Edge\Application"
+install.bat check "C:\Program Files (x86)\Microsoft\Edge\Application" -Quiet
+install.bat uninstall "C:\Program Files (x86)\Microsoft\Edge\Application"
+```
+
+The batch installer uses the local DLL without downloading a release. `-Quiet`
+skips normal prompts; errors still wait for a key so their messages remain visible.
+It disables QuickEdit text selection in its console window so clicking the window
+does not suspend installation.
+Specify a path for installation or removal when multiple installations
+are found. Cleanup processes all detected installations and needs no path. A supplied
+path also includes a portable installation in cleanup. Administrator access is
+required before browser menus or actions. Without it, the batch shows manual
+restart instructions and exits; it does not elevate itself. The command-line
+`check` action remains read-only.
+
+Installation skips replacement when the installed DLL matches the local
+DLL. It first cleans up old patcher files and registry entries across all detected
+Chrome, Chromium and Edge installations, then updates only the selected installation if
+needed. Existing
+`secur32.dll` patches in other installations are preserved.
+
+Installation and removal close only your processes whose executable path matches
+the selected installation when files or old installer entries need changes.
+Repeating Uninstall after cleanup leaves the browser running.
+Other running Chrome, Chromium and Edge installations
+stay open. Automatic legacy cleanup cleans closed installations and defers other
+running installations; explicit `cleanup` closes each installation that needs
+changes. Each browser that was closed reopens its own executable with
+`--restore-last-session`, including after an operation fails. Custom startup flags,
+including profile paths, are not retained.
+
+The batch asks browser windows to close and waits up to 15 seconds for them.
+After a brief wait for session writes, it stops remaining background processes,
+including Edge startup boost workers,
+without waiting for background mode to exit on its own. Processes that restart during
+shutdown are retried for up to five seconds. A warning appears if browser windows
+remain open after the normal close timeout.
+Session restoration depends on the browser's saved session; a forced close can lose
+unsaved page data. A temporary Task Scheduler task reopens the browser with normal
+user privileges and is then removed. Task Scheduler must be running to auto-close
+and reopen; a browser that was already closed stays closed.
+
+Cleanup runs automatically before Install. The command-line
+`install.bat cleanup` also removes old patcher files across all detected
+installations without replacing any current `secur32.dll`.
+Legacy Chrome byte patches require restoring stock Chrome first; backups and
+unrelated DLLs are preserved. Cleanup removes branded old `version.dll` proxies
+and also removes leftover signature files and registry entries when that DLL is
+already gone. It removes `signatures.json` beside each browser executable and in
+`%LOCALAPPDATA%\chrome-mv2-patch`; other files in that data folder are preserved.
+Chrome cleanup clears the entire `HKLM\Software\Policies\Google\Chrome` key in
+both registry views, including policies unrelated to this patch. Uninstall removes
+legacy files and the old uBlock registration without clearing Chrome policies.
+The old uBlock Origin registration is removed from `Microsoft\Edge\Extensions`
+for Edge, `Google\Chrome\Extensions` for Chrome and `Chromium\Extensions` for
+Chromium during global cleanup.
+Uninstall limits proxy and registry removal to the selected browser.
+
+For a manual installation:
+
 1. Close all processes for the browser installation, including background apps.
 2. Copy `build/<arch>/secur32.dll` beside `chrome.exe` or `msedge.exe`, matching
    the browser's processor type. Use one patcher DLL per browser copy.
@@ -107,9 +187,6 @@ To remove it, close that browser copy and delete the added `secur32.dll`. The
 scan cache can also be deleted while the browser is closed; it is recreated when
 needed. Removal restores the browser's checks, but does not undo extensions or
 profile changes made through the browser while the patch was installed.
-
-The [repository installers](../README.md) download the published release; they
-do not automatically use your local build.
 
 ## Off-store extensions
 
