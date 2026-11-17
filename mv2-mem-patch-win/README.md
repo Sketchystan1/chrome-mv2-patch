@@ -79,8 +79,9 @@ The build verifies fixed SHA-256 archive checksums for Microsoft Detours 4.0.1
 (`e4bfd6b03e50de46b47abfbd1e46b384f0c5f833`) and BLAKE3 1.8.7
 (`f3149ec5bb5449af877ba20377a11008ff499fa2`). Runtime dependency downloads are
 not needed. The DLL requires the matching Microsoft Visual C++ runtime and
-Windows Universal C Runtime. Distribute `out/<arch>/Detours-LICENSE.md` and
-`out/<arch>/BLAKE3-LICENSE.md` with it; release packaging includes both.
+Windows Universal C Runtime. The build writes the library licenses to
+`out/<arch>/Detours-LICENSE.md` and `out/<arch>/BLAKE3-LICENSE.md`.
+Release ZIPs contain only `install.bat` and `secur32.dll`.
 
 In Visual Studio, open this folder, select **x64 Release**, **x86 Release** or
 **ARM64 Release**, and build `secur32`. Visual Studio and `build.bat` share

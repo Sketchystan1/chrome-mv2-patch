@@ -1,17 +1,17 @@
 # Manually builds the Windows secur32.dll proxy (x64/x86/arm64) and publishes
-# secur32.dll-v<ver>.zip (x64/, x86/, arm64/ folders inside) to a release
-# tagged v<ver>. <ver> is the DLL's ProductVersion, whose single source of
-# truth is CMakeLists.txt's project version. Each architecture folder includes
-# the local install.bat alongside secur32.dll.
+# mv2-patch-<ver>-win-<arch>.zip to a release tagged v<ver>. <ver> is the DLL's
+# ProductVersion, whose single source of truth is CMakeLists.txt's project
+# version. Each ZIP contains only install.bat and secur32.dll at its root.
+# Release notes come from the matching version's entry in CHANGELOG.md.
 # (GitHub also auto-attaches "Source code" links to every release - the whole
 # repo, minus gitignored build/ and out/ - which cannot be scoped or
 # disabled.)
 #
-# Manual runs only: Actions tab -> "Build Windows secur32.dll" -> Run workflow.
+# Manual runs only: Actions tab -> "Build Windows MV2 Patcher" -> Run workflow.
 # The file must exist on the default branch for the button to appear.
 #
 # Requires mv2-mem-patch-win/version.rc to be committed (build.bat compiles it).
-name: Build Windows secur32.dll
+name: Build Windows MV2 Patcher
 
 on:
   workflow_dispatch:
@@ -27,49 +27,57 @@ jobs:
 
       # windows-latest ships VS 2022 with the C++ workload; build.bat finds it
       # via vswhere and calls vcvarsall itself. All requested target tools are required.
-      - name: Build secur32.dll (x64/x86/arm64)
+      - name: Build Windows MV2 patcher (x64/x86/arm64)
         shell: cmd
         run: |
           call mv2-mem-patch-win\build.bat all
           if errorlevel 1 exit /b 1
 
-      # Zip the arch dirs with bsdtar (Compress-Archive writes backslash entry
+      # Zip each architecture with bsdtar (Compress-Archive writes backslash entry
       # separators, which non-Windows unzip tools mishandle).
-      - name: Package secur32.dll-v<ver>.zip
+      - name: Package Windows ZIPs (arm64/x64/x86)
         id: package
         shell: pwsh
         run: |
-          $root = Join-Path $env:GITHUB_WORKSPACE 'zip-root'
-          New-Item -ItemType Directory -Force -Path $root | Out-Null
-          $built = @()
-          foreach ($a in 'x64', 'x86', 'arm64') {
-            New-Item -ItemType Directory -Force -Path (Join-Path $root $a) | Out-Null
-            foreach ($file in 'secur32.dll', 'install.bat') {
-              $src = "mv2-mem-patch-win/build/$a/$file"
-              if (-not (Test-Path $src)) { throw "no $file for $a" }
-              Copy-Item $src (Join-Path $root $a) -Force
-            }
-            $built += $a
-          }
-          if ($built -notcontains 'x64') { throw 'no x64 secur32.dll - refusing to release' }
-          $ver = (Get-Item (Join-Path $root 'x64/secur32.dll')).VersionInfo.ProductVersion
+          $buildRoot = Join-Path $env:GITHUB_WORKSPACE 'mv2-mem-patch-win/build'
+          $ver = (Get-Item -LiteralPath (Join-Path $buildRoot 'x64/secur32.dll')).VersionInfo.ProductVersion
           if (-not $ver) { throw "couldn't read ProductVersion from the x64 secur32.dll" }
-          $zip = "secur32.dll-v$ver.zip"
-          Write-Host "packaging $zip ($($built -join ', '))"
           $outDir = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          Copy-Item 'mv2-mem-patch-win/out/x64/Detours-LICENSE.md' $root
-          Copy-Item 'mv2-mem-patch-win/out/x64/BLAKE3-LICENSE.md' $root
-          tar -a -cf (Join-Path $outDir $zip) -C $root @built Detours-LICENSE.md BLAKE3-LICENSE.md
-          if ($LASTEXITCODE) { throw 'release packaging failed' }
+          foreach ($arch in 'arm64', 'x64', 'x86') {
+            $archDir = Join-Path $buildRoot $arch
+            foreach ($file in 'install.bat', 'secur32.dll') {
+              if (-not (Test-Path -LiteralPath (Join-Path $archDir $file) -PathType Leaf)) {
+                throw "no $file for $arch"
+              }
+            }
+            $archVer = (Get-Item -LiteralPath (Join-Path $archDir 'secur32.dll')).VersionInfo.ProductVersion
+            if ($archVer -ne $ver) { throw "version mismatch for $arch ($archVer; expected $ver)" }
+            $zip = "mv2-patch-$ver-win-$arch.zip"
+            Write-Host "packaging $zip"
+            tar -a -cf (Join-Path $outDir $zip) -C $archDir install.bat secur32.dll
+            if ($LASTEXITCODE) { throw "release packaging failed for $arch" }
+          }
           "version=v$ver" >> $env:GITHUB_OUTPUT
 
-      # No release name or body: the release is just the version-stamped zips
-      # on a v<ver> tag. (GitHub auto-attaches "Source code" links to every
-      # release; those cannot be disabled.)
+      - name: Read release notes from CHANGELOG.md
+        shell: pwsh
+        env:
+          RELEASE_TAG: ${{ steps.package.outputs.version }}
+        run: |
+          $ver = $env:RELEASE_TAG -replace '^v', ''
+          $changelog = Get-Content -LiteralPath 'CHANGELOG.md' -Raw
+          $pattern = '(?ms)^## \[' + [regex]::Escape($ver) + '\][^\r\n]*\r?\n(?<notes>.*?)(?=^## |\z)'
+          $entry = [regex]::Match($changelog, $pattern)
+          if (-not $entry.Success) { throw "no changelog entry for $ver" }
+          $notes = $entry.Groups['notes'].Value.Trim()
+          if (-not $notes) { throw "empty changelog entry for $ver" }
+          Set-Content -LiteralPath 'release-notes.md' -Value $notes -Encoding utf8
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.package.outputs.version }}
-          files: release-assets/*
+          body_path: release-notes.md
+          files: release-assets/*.zip
           fail_on_unmatched_files: true
