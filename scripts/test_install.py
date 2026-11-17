@@ -118,6 +118,116 @@ def fixture(path, arch="x64", branded=False, pe_offset=0x80):
     path.write_bytes(data)
 
 
+def test_console_child():
+    """Run the real batch in an isolated console, including an existing selection."""
+    import ctypes
+    from ctypes import wintypes as W
+
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    user = ctypes.WinDLL("user32", use_last_error=True)
+
+    class Selection(ctypes.Structure):
+        _fields_ = [("flags", W.DWORD), ("coordinates", ctypes.c_short * 6)]
+
+    class KeyEvent(ctypes.Structure):
+        _fields_ = [("down", W.BOOL), ("repeat", W.WORD), ("key", W.WORD),
+                    ("scan", W.WORD), ("character", W.WCHAR), ("control", W.DWORD)]
+
+    class InputRecord(ctypes.Structure):
+        _fields_ = [("kind", W.WORD), ("key", KeyEvent)]
+
+    kernel.CreateFileW.argtypes = [W.LPCWSTR, W.DWORD, W.DWORD, ctypes.c_void_p,
+                                  W.DWORD, W.DWORD, ctypes.c_void_p]
+    kernel.CreateFileW.restype = W.HANDLE
+    kernel.GetConsoleMode.argtypes = [W.HANDLE, ctypes.POINTER(W.DWORD)]
+    kernel.SetConsoleMode.argtypes = [W.HANDLE, W.DWORD]
+    kernel.GetConsoleSelectionInfo.argtypes = [ctypes.POINTER(Selection)]
+    kernel.FlushConsoleInputBuffer.argtypes = [W.HANDLE]
+    kernel.WriteConsoleInputW.argtypes = [W.HANDLE, ctypes.POINTER(InputRecord),
+                                        W.DWORD, ctypes.POINTER(W.DWORD)]
+    kernel.ReadConsoleInputW.argtypes = kernel.WriteConsoleInputW.argtypes
+    kernel.GetNumberOfConsoleInputEvents.argtypes = [W.HANDLE, ctypes.POINTER(W.DWORD)]
+    kernel.CloseHandle.argtypes = [W.HANDLE]
+    kernel.GetConsoleWindow.restype = W.HWND
+    user.PostMessageW.argtypes = [W.HWND, W.UINT, W.WPARAM, W.LPARAM]
+    handle = kernel.CreateFileW("CONIN$", 0xC0000000, 3, None, 3, 0, None)
+    assert handle != ctypes.c_void_p(-1).value, ctypes.get_last_error()
+    window = kernel.GetConsoleWindow()
+    assert window
+    mode = W.DWORD()
+    selection = Selection()
+    assert kernel.GetConsoleMode(handle, ctypes.byref(mode))
+    initial = mode.value
+
+    def selection_flags():
+        assert kernel.GetConsoleSelectionInfo(ctypes.byref(selection))
+        return selection.flags
+
+    def cancel_selection():
+        if selection_flags() & 1:
+            assert user.PostMessageW(window, 0x0100, 0x1B, 0x00010001)
+            assert user.PostMessageW(window, 0x0101, 0x1B, 0xC0010001)
+
+    batch = REPO / "mv2-mem-patch-win/install.bat"
+    try:
+        with open("CONOUT$", "w") as output:
+            for selected in (False, True):
+                assert kernel.SetConsoleMode(handle, initial | 0xC0)
+                assert kernel.FlushConsoleInputBuffer(handle)
+                if selected:
+                    # Enter conhost's selection mode before the PowerShell helper starts.
+                    assert user.PostMessageW(window, 0x0112, 0xFFF2, 0)
+                    deadline = time.monotonic() + 2
+                    while not selection_flags() & 1 and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    assert selection_flags() & 1, "Could not create a console selection"
+                keys = "keep!"
+                records = (InputRecord * len(keys))(
+                    *(InputRecord(1, KeyEvent(True, 1, 0, 0, character, 0)) for character in keys))
+                count = W.DWORD()
+                assert kernel.WriteConsoleInputW(handle, records, len(records), ctypes.byref(count))
+                assert count.value == len(keys)
+                with subprocess.Popen([os.environ["COMSPEC"], "/d", "/c", str(batch), "/?"],
+                                      stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.PIPE) as child:
+                    try:
+                        _, error = child.communicate(timeout=10)
+                    except subprocess.TimeoutExpired:
+                        cancel_selection()
+                        child.communicate(timeout=5)
+                        raise AssertionError("Console selection froze installer output") from None
+                assert child.returncode == 0, error
+                assert kernel.GetConsoleMode(handle, ctypes.byref(mode))
+                assert mode.value == (initial | 0x80) & ~0x40, hex(mode.value)
+                assert not selection_flags() & 1, "Startup selection was not cleared"
+                assert kernel.GetNumberOfConsoleInputEvents(handle, ctypes.byref(count))
+                pending = (InputRecord * count.value)()
+                assert kernel.ReadConsoleInputW(handle, pending, len(pending), ctypes.byref(count))
+                assert "".join(record.key.character for record in pending[:count.value]
+                               if record.kind == 1 and record.key.down) == keys
+    finally:
+        cancel_selection()
+        kernel.SetConsoleMode(handle, initial)
+        kernel.CloseHandle(handle)
+    print("Console input checks passed: QuickEdit disabled, startup selection cleared and keyboard input preserved")
+
+
+def test_console_control():
+    startup = subprocess.STARTUPINFO()
+    startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startup.wShowWindow = subprocess.SW_HIDE
+    result = subprocess.run([sys.executable, str(Path(__file__).resolve()), "--console-child"],
+                            startupinfo=startup, creationflags=subprocess.CREATE_NEW_CONSOLE,
+                            capture_output=True, text=True, timeout=40)
+    assert result.returncode == 0, result.stdout + result.stderr
+    print(result.stdout.strip())
+    # Background automation has no attached console, even with redirected input/output.
+    result = subprocess.run([os.environ["COMSPEC"], "/d", "/c",
+                             str(REPO / "mv2-mem-patch-win/install.bat"), "/?"],
+                            creationflags=subprocess.CREATE_NO_WINDOW,
+                            input="", capture_output=True, text=True, timeout=10)
+    assert result.returncode == 0 and "Usage: install.bat" in result.stdout, result
+
+
 def test_process_control():
     """Exercise the embedded code against real, isolated browser-named processes."""
     host = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -241,6 +351,7 @@ def main():
     if sys.platform != "win32":
         print("Native installer runtime tests skipped: Windows required")
         return
+    test_console_control()
     test_process_control()
     with tempfile.TemporaryDirectory(prefix="mv2 batch ! & ' ") as directory:
         work = Path(directory).resolve()
@@ -714,4 +825,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if sys.argv[1:] == ["--console-child"]:
+        test_console_child()
+    else:
+        main()

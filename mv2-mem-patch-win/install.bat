@@ -455,7 +455,7 @@ call :browser_process running
 exit /b %errorlevel%
 
 :configure_console
-rem Change this console's input mode only; leave redirected input and keyboard prompts alone.
+rem Prevent selection stalls without consuming keyboard or redirected input.
 if not exist "%MV2_POWERSHELL%" exit /b 0
 set "MV2_PROCESS_MODE=console"
 call :powershell_script
@@ -725,12 +725,23 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using Microsoft.Win32.SafeHandles;
 public static class Mv2ConsoleInput {
+    [StructLayout(LayoutKind.Sequential)]
+    struct ConsoleSelectionInfo {
+        public uint Flags;
+        public short AnchorX, AnchorY, Left, Top, Right, Bottom;
+    }
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool GetConsoleMode(SafeFileHandle input, out uint mode);
     [DllImport("kernel32.dll", SetLastError = true)]
     static extern bool SetConsoleMode(SafeFileHandle input, uint mode);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool GetConsoleSelectionInfo(out ConsoleSelectionInfo selection);
+    [DllImport("kernel32.dll")]
+    static extern IntPtr GetConsoleWindow();
+    [DllImport("user32.dll", SetLastError = true)]
+    static extern bool PostMessageW(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
     public static void DisableQuickEdit() {
         // CONIN$ still addresses the attached console when stdin is a file or pipe.
         using (var input = CreateFileW("CONIN$", 0xc0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
@@ -739,6 +750,16 @@ public static class Mv2ConsoleInput {
             if (!GetConsoleMode(input, out mode)) throw new Win32Exception();
             // ENABLE_EXTENDED_FLAGS is required when clearing ENABLE_QUICK_EDIT_MODE.
             if (!SetConsoleMode(input, (mode | 0x0080u) & ~0x0040u)) throw new Win32Exception();
+            // Clearing QuickEdit does not release a selection started during helper startup.
+            // Cancel only an active selection in our own window; never read or flush input.
+            ConsoleSelectionInfo selection;
+            if (GetConsoleSelectionInfo(out selection) && (selection.Flags & 0x0001u) != 0) {
+                var window = GetConsoleWindow();
+                if (window != IntPtr.Zero) {
+                    if (!PostMessageW(window, 0x0100, new IntPtr(0x1b), new IntPtr(0x00010001))) throw new Win32Exception();
+                    if (!PostMessageW(window, 0x0101, new IntPtr(0x1b), new IntPtr(unchecked((int)0xc0010001)))) throw new Win32Exception();
+                }
+            }
         }
     }
 }

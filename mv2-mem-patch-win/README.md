@@ -117,7 +117,7 @@ install.bat uninstall "C:\Program Files (x86)\Microsoft\Edge\Application"
 The batch installer uses the local DLL without downloading a release. `-Quiet`
 skips normal prompts; errors still wait for a key so their messages remain visible.
 It disables QuickEdit text selection in its console window so clicking the window
-does not suspend installation.
+does not suspend installation, and clears any selection started during startup.
 Specify a path for installation or removal when multiple installations
 are found. Cleanup processes all detected installations and needs no path. A supplied
 path also includes a portable installation in cleanup. Administrator access is
