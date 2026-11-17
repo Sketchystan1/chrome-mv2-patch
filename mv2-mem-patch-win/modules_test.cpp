@@ -72,6 +72,19 @@ void lengths() {
     i = LiftX86(code, 0x1000, false);
     check(i.op == Op::Other && i.other() == Other::Unknown, "high-byte registers never alias stack registers");
   }
+  for (bool x64 : {false, true}) {
+    constexpr std::array<uint8_t, 3> highSet{0x0f,0x95,0xc7};
+    i = LiftX86(highSet, 0x1000, x64);
+    check(i.other() == Other::Overwrite && i.dst == 3 && i.width() == 1 && Writes(i, 3) && !Writes(i, 4) && !Writes(i, 5) && !i.setsFlags(),
+          "SETNE BH invalidates EBX without clobbering a frame or inventing a low-byte value");
+    constexpr std::array<uint8_t, 2> highTest{0x84,0xfb};
+    i = LiftX86(highTest, 0x1000, x64);
+    check(i.other() == Other::TestReg && i.dst == NoReg && i.src == NoReg && i.width() == 1 && i.setsFlags() && !Writes(i, 3) && !Writes(i, 5),
+          "TEST BL,BH changes only flags and never becomes a TEST BL,BL proof");
+  }
+  constexpr std::array<uint8_t, 4> rexSet{0x40,0x0f,0x95,0xc7};
+  i = LiftX86(rexSet, 0x1000, true);
+  check(i.other() == Other::Setcc && i.dst == 7, "REX retains the low-byte DIL destination");
   constexpr std::array<uint8_t, 6> extrq{0x66,0x0f,0x78,0xc0,1,2};
   check(!LiftX86(extrq, 0x1000, true).length(), "unlisted two-immediate SSE form declines");
   constexpr std::array<uint8_t, 7> ripLea{0x48,0x8d,0x0d,0,0,0,0};

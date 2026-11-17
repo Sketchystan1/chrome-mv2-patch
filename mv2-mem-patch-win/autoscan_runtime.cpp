@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cwchar>
 #include <intrin.h>
+#include <process.h>
 
 namespace {
 struct PendingView { const uint8_t* view = nullptr; HMODULE module = nullptr; };
@@ -139,6 +140,18 @@ bool number(const wchar_t*& command, uint64_t& value) {
   if (*command++ != L' ') return false;
   return value != 0;
 }
+struct ScanTask {
+  std::span<const uint8_t> bytes;
+  const autoscan::HashValue& hash;
+  autoscan::WirePlan& plan;
+};
+unsigned __stdcall scanWorker(void* input) {
+  auto& task = *static_cast<ScanTask*>(input);
+  auto report = autoscan::Analyze(task.bytes);
+  report.blake3 = task.hash;
+  task.plan = autoscan::MakePlan(report);
+  return 0;
+}
 } // namespace
 
 extern "C" void CALLBACK VersionMV2ScanW(HWND, HINSTANCE, LPWSTR input, int) {
@@ -163,8 +176,15 @@ extern "C" void CALLBACK VersionMV2ScanW(HWND, HINSTANCE, LPWSTR input, int) {
   autoscan::WirePlan plan;
   // Reuse a valid local cache or inspect the read-only bytes and save a successful plan.
   if (!autoscan::ReadCache(cache.data(), scannerView, imageView, plan)) {
-    auto report = autoscan::Analyze({view.data, static_cast<size_t>(size)});
-    report.blake3 = imageHash; plan = autoscan::MakePlan(report);
+    // x86 rundll32 supplies only a 256 KiB stack. Give bounded analysis the same
+    // 1 MiB reserve as mv2-scan.exe, and join before releasing its input or reply.
+    ScanTask task{{view.data, static_cast<size_t>(size)}, imageHash, plan};
+    Handle worker(reinterpret_cast<HANDLE>(_beginthreadex(nullptr, 1u << 20, scanWorker, &task,
+                                                        STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr)));
+    if (!worker.value) return;
+    // The browser enforces the helper's 30-second deadline. A failed join must
+    // stop this helper before its worker can access a returned stack frame.
+    if (WaitForSingleObject(worker.value, INFINITE) != WAIT_OBJECT_0) __fastfail(FAST_FAIL_FATAL_APP_EXIT);
     if (!plan.status) autoscan::WriteCache(cache.data(), scannerView, plan);
   }
   size_t offset = 0;

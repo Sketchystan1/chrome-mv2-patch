@@ -19,18 +19,24 @@ static std::wstring quote(const wchar_t* text) {
   return result;
 }
 int wmain(int argc, wchar_t** argv) {
-  if (argc < 3) { std::cerr << "usage: test-launch <registry-test.dll> <chrome.exe> [arguments]\n"; return 2; }
+  if (argc < 3) { std::cerr << "usage: test-launch <registry-test.dll> [--desktop=<name>] <chrome.exe> [arguments]\n"; return 2; }
+  int executable = 2;
+  wchar_t* desktop = nullptr;
+  if (wcsncmp(argv[2], L"--desktop=", 10) == 0) {
+    desktop = argv[2] + 10; executable = 3;
+    if (!*desktop || argc <= executable) return 2;
+  }
   int length = WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, argv[1], -1, nullptr, 0, nullptr, nullptr);
   std::string shim(length, '\0'); BOOL substituted = FALSE;
   if (!length || !WideCharToMultiByte(CP_ACP, WC_NO_BEST_FIT_CHARS, argv[1], -1, shim.data(), length, nullptr, &substituted) || substituted) return 2;
   std::wstring command;
-  for (int n = 2; n < argc; ++n) { if (n != 2) command += L' '; command += quote(argv[n]); }
+  for (int n = executable; n < argc; ++n) { if (n != executable) command += L' '; command += quote(argv[n]); }
   HANDLE job = CreateJobObjectW(nullptr, nullptr);
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{}; limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
   if (!job || !SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof limits)) return 2;
-  STARTUPINFOW start{}; start.cb = sizeof(start);
+  STARTUPINFOW start{}; start.cb = sizeof(start); start.lpDesktop = desktop;
   PROCESS_INFORMATION process{};
-  if (!DetourCreateProcessWithDllExW(argv[2], command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW,
+  if (!DetourCreateProcessWithDllExW(argv[executable], command.data(), nullptr, nullptr, FALSE, CREATE_SUSPENDED | CREATE_NO_WINDOW,
                                     nullptr, nullptr, &start, &process, shim.c_str(), nullptr)) {
     std::cerr << "Cannot create test process: " << GetLastError() << '\n'; CloseHandle(job); return 2;
   }

@@ -24,7 +24,6 @@ import uuid
 import winreg
 
 REPO = Path(__file__).resolve().parent.parent
-BUILD = REPO / 'mv2-mem-patch-win/out/x64'
 K = C.WinDLL('kernel32', use_last_error=True)
 K.OpenProcess.argtypes = [W.DWORD, W.BOOL, W.DWORD]
 K.OpenProcess.restype = W.HANDLE
@@ -142,7 +141,7 @@ def run_build(entry, args, extensions, state, port, crx, extension_id):
     exe, binary = app / source_exe.name, app / source_binary.relative_to(source_exe.parent)
     proxy = app / args.dll.name
     assert not proxy.exists(), 'source browser already contains a proxy'
-    scan = subprocess.run([str(BUILD / 'mv2-scan.exe'), str(binary)], capture_output=True, text=True, timeout=60)
+    scan = subprocess.run([str(args.build / 'mv2-scan.exe'), str(binary)], capture_output=True, text=True, timeout=60)
     report = json.loads(scan.stdout)
     (workspace / 'scan.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     assert scan.returncode == 0 and report['ready'], 'scanner declined: ' + scan.stdout
@@ -207,7 +206,7 @@ def run_build(entry, args, extensions, state, port, crx, extension_id):
                      '--user-data-dir=' + str(profile), '--enable-unsafe-extension-debugging', '--enable-logging',
                      '--log-file=' + str(workspace / (phase + '.log')), 'about:blank']
             with (workspace / (phase + '.stderr')).open('wb') as log:
-                process = subprocess.Popen([str(BUILD / 'test-launch.exe'), str(BUILD / 'registry-test.dll')] + flags,
+                process = subprocess.Popen([str(args.build / 'test-launch.exe'), str(args.build / 'registry-test.dll')] + flags,
                     stdout=subprocess.PIPE, stderr=log, env=dict(os.environ, LOCALAPPDATA=str(local), MV2_TEST_REGISTRY=registry),
                     creationflags=subprocess.CREATE_NO_WINDOW)
                 phase_result = {'phase': phase, 'offstore_enabled': allow_offstore, 'offstore_launch_flags': []}
@@ -275,10 +274,13 @@ def main():
                            '/mv2-started': 1}, '/probe/current') == {'/blocked': 2, '/mv2-started': 1}
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('matrix', type=Path)
-    parser.add_argument('--dll', type=Path, default=REPO / 'mv2-mem-patch-win/build/x64/secur32.dll')
+    parser.add_argument('--arch', choices=('x64', 'x86'), default='x64')
+    parser.add_argument('--dll', type=Path)
     parser.add_argument('--work', type=Path, required=True)
     args = parser.parse_args()
-    args.work = args.work.resolve(); args.dll = args.dll.resolve()
+    args.build = REPO / 'mv2-mem-patch-win/out' / args.arch
+    args.work = args.work.resolve()
+    args.dll = (args.dll or REPO / 'mv2-mem-patch-win/build' / args.arch / 'secur32.dll').resolve()
     if args.dll.name.lower() != 'secur32.dll':
         parser.error('--dll must be named secur32.dll')
     args.dll_sha256 = digest(args.dll)

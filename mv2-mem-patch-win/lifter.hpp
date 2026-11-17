@@ -303,7 +303,11 @@ inline LiftedInsn LiftX86(std::span<const uint8_t> bytes, uint32_t pc, bool x64)
     return out;
   }
   if (escaped && second >= 0x90 && second <= 0x9f && mod == 3) {
-    if (!rex && rm >= 4) return out;
+    if (!rex && rm >= 4) {
+      // AH/CH/DH/BH write bits 8..15, not the low byte or a stack register.
+      // Forget the containing register; unsupported partial values stay unknown.
+      byteWidth(); other(Other::Overwrite); out.dst = rm - 4; return out;
+    }
     byteWidth(); other(Other::Setcc); out.dst = rm; out.src = second & 15; return out;
   }
   if (escaped && second >= 0x90 && second <= 0x9f && mod != 3) {
@@ -311,6 +315,11 @@ inline LiftedInsn LiftX86(std::span<const uint8_t> bytes, uint32_t pc, bool x64)
   }
   if (escaped && second == 0xa3 && mod == 3) {
     other(Other::BitTest); out.dst = rm; out.src = reg; return out;
+  }
+  if (!escaped && op == 0x84 && mod == 3 && !rex && (reg >= 4 || rm >= 4)) {
+    // A high-byte TEST preserves integer registers but produces unknown flags.
+    // Unknown operands prevent proving a branch from an incorrect low-byte test.
+    byteWidth(); other(Other::TestReg); out.encoding |= 0x40; return out;
   }
   if (!escaped && (op == 0x84 || op == 0x85 || op == 0x38 || op == 0x39 || op == 0x3a || op == 0x3b ||
       op == 0x20 || op == 0x21 || op == 0x22 || op == 0x23 || op == 0x08 || op == 0x09 || op == 0x0a || op == 0x0b ||

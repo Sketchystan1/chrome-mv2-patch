@@ -27,8 +27,12 @@ static LSTATUS WINAPI createKey(HKEY root, LPCWSTR key, DWORD reserved, LPWSTR t
   auto path = redirect(root, key);
   return realCreate(root, path.empty() ? key : path.c_str(), reserved, type, options, access, security, out, disposition);
 }
-extern "C" __declspec(dllexport) void TestRegistryMarker() {}
+extern "C" void TestRegistryMarker() {}
+#if defined(_M_IX86)
+#pragma comment(linker, "/export:TestRegistryMarker=_TestRegistryMarker,@1")
+#else
 #pragma comment(linker, "/export:TestRegistryMarker,@1")
+#endif
 BOOL WINAPI DllMain(HINSTANCE, DWORD reason, LPVOID) {
   if (reason != DLL_PROCESS_ATTACH || DetourIsHelperProcess()) return TRUE;
   DetourRestoreAfterWith();

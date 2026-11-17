@@ -21,7 +21,8 @@ MV2 entirely.
 3. Opens the browser DLL read-only and calculates a file fingerprint. It reuses a
    checked scan plan from the user's cache, or starts Windows' `rundll32.exe` to
    analyze the same read-only file with a helper in this DLL. The browser waits
-   for the helper, with a 30-second deadline.
+   for the helper, with a 30-second deadline. Analysis runs on a joined worker
+   with a 1 MiB stack reserve, including in the small-stack x86 `rundll32` host.
 4. Checks the returned plan and compares the browser DLL's main code section
    (`.text`) in memory with the original file,
    accounting for addresses adjusted by Windows. Only recognized decision
@@ -201,8 +202,8 @@ been added without your knowledge.” No extra launch flag is needed; the old
 After installing and restarting, enable the extension at `chrome://extensions`
 or `edge://extensions` if it is still disabled. Management policy and corruption
 checks still apply. An unrecognized optional Chrome gate is skipped and reported
-in the debug log. x86 and ARM64 include optional recognition, but browser
-lifecycle validation is limited to x64.
+in the debug log. x86 and ARM64 include optional recognition. Native browser
+lifecycle checks include recorded x64 builds and Chrome Canary 160.0.8167.0 x86.
 
 ## Installing downloaded CRX files
 
@@ -310,12 +311,14 @@ The [performance and validation record](PERFORMANCE.md) describes earlier
 measurements and artifact fingerprints. Its browser results apply to those
 recorded builds, not automatically to a newly versioned DLL.
 
-| Recorded x64 browser | Verified behavior |
+| Recorded browser | Verified behavior |
 | --- | --- |
-| Chrome 157.0.8103.79 | Packed external MV2 enablement and request blocking; nine memory decisions; cached and empty-cache restarts; removal restores deprecation. |
-| Edge 157.0.4341.46 | Developer-signed CRX3 installation, enablement and MV2 background execution; both installer decisions; tampered packages and missing developer proofs rejected. |
+| Chrome 157.0.8103.79 x64 | Packed external MV2 enablement and request blocking; nine memory decisions; cached and empty-cache restarts; removal restores deprecation. |
+| Chrome Canary 160.0.8167.0 x86 | Packed external MV2 enablement and request blocking; eight memory decisions including the off-store verifier; cached and empty-cache restarts; removal restores deprecation. The optional CRX download check was unrecognized. |
+| Chrome Canary 160.0.8166.2 x86 | Signed off-store CRX3 installation through Downloads and native confirmation; MV2 enablement and request blocking; nine memory decisions; cached and empty-cache restarts; tampered packages and missing developer proofs rejected; removal restores both restrictions. |
+| Edge 157.0.4341.46 x64 | Developer-signed CRX3 installation, enablement and MV2 background execution; both installer decisions; tampered packages and missing developer proofs rejected. |
 
 Earlier scanner validation covered 21 x64 and two x86 stock images plus two
-ARM64 analysis images. Native x86 and ARM64 browser launches, browser updates,
+ARM64 analysis images. Native ARM64 browser launches, browser updates,
 interactive browsing and DRM remain unvalidated. A future browser may refuse a
 plan or have checks this scanner does not recognize.

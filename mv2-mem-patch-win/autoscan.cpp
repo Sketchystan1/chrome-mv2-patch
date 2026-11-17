@@ -230,6 +230,72 @@ bool trueReturn(const PeImage& pe, const Boundaries& boundaries, uint32_t pc, ui
 }
 #endif
 
+#if defined(AUTOSCAN_X86)
+bool providerStackArgument(const PeImage& pe, const Program& program, uint32_t pc, unsigned reg) {
+  // DCHECK providers reload their Extension* parameter after calls. Require a
+  // fixed EBP frame, an exact input-slot load, and untouched/unexposed inputs on
+  // every incoming path; arbitrary writes and hidden frame aliases still decline.
+  const auto* load = program.predecessor(pc);
+  const auto* push = program.at(program.range.begin);
+  const auto* frame = push ? program.at(push->pc + push->insn.length()) : nullptr;
+  int64_t address = 0;
+  if (!load || load->insn.op != Op::LoadField || load->insn.width() != 4 || load->insn.dst != reg || load->insn.src != 5 ||
+      !push || push->insn.op != Op::Other || push->insn.other() != Other::Push || push->insn.dst != 5 ||
+      !frame || frame->insn.op != Op::MovReg || frame->insn.dst != 5 || frame->insn.src != StackReg || frame->insn.width() != 4 ||
+      !program.stackAddress(load->pc, 5, address, true) || address + load->insn.disp != 4) return false;
+  uint32_t cookie = 0;
+  const auto& config = pe.directory(IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG);
+  constexpr uint32_t cookieOffset = offsetof(IMAGE_LOAD_CONFIG_DIRECTORY32, SecurityCookie);
+  if (config.Size >= cookieOffset + 4) pe.rvaRead(config.VirtualAddress + cookieOffset, cookie);
+  FixedList<uint32_t, 512> todo, seen; todo.push_back(load->pc); bool entry = false;
+  while (!todo.empty()) {
+    auto at = todo.back(); --todo.count;
+    if (at == program.range.begin) { entry = true; continue; }
+    bool repeat = false; for (auto old : seen) repeat |= old == at;
+    if (repeat) continue;
+    if (!seen.push_back(at)) return false;
+    bool previous = false;
+    for (const auto& node : program.nodes) if (program.follows(node, at)) {
+      previous = true; const auto& i = node.insn;
+      if (i.op == Op::Other && (i.other() == Other::Unknown || (i.other() == Other::Overwrite && i.memory()))) return false;
+      if ((i.op == Op::MovReg || i.op == Op::AddImm) && i.dst != StackReg &&
+          program.stackAddress(node.pc, i.src, address, true)) {
+        address += i.op == Op::AddImm ? i.imm : 0;
+        if (node.pc != frame->pc && (i.width() != 4 || address >= -4)) return false;
+      }
+      if (i.op == Op::Other && i.other() == Other::Push && !i.memory() &&
+          program.stackAddress(node.pc, i.dst, address, true) && address >= -4) return false;
+      bool store = i.op == Op::Other && (i.other() == Other::Store || (i.memory() &&
+        (i.other() == Other::AtomicAdd || i.other() == Other::AndReg || i.other() == Other::OrReg ||
+         i.other() == Other::XorReg || i.other() == Other::AndImm || i.other() == Other::OrImm)));
+      if (store) {
+        unsigned base = i.other() == Other::AtomicAdd ? i.src : i.dst;
+        if (base == NoReg) {
+          if (static_cast<uint32_t>(i.disp) < pe.imageBase || pe.at(static_cast<uint32_t>(i.disp - pe.imageBase), StoreWidth(i)).empty()) return false;
+        } else if (!program.stackAddress(node.pc, base, address, true) || address + i.disp + StoreWidth(i) > -4) return false;
+        if (i.src < 32 && program.stackAddress(node.pc, i.src, address, true) && address >= -4) return false;
+      }
+      if (i.op == Op::Other && !i.memory() &&
+          (i.other() == Other::AndReg || i.other() == Other::OrReg || i.other() == Other::XorReg ||
+           i.other() == Other::AndImm || i.other() == Other::OrImm || i.other() == Other::Cmov) &&
+          (program.stackAddress(node.pc, i.dst, address, true) || program.stackAddress(node.pc, i.src, address, true))) {
+        // A compiler security-cookie XOR is scalar data, not an escaped frame.
+        const auto* before = program.predecessor(node.pc);
+        const auto* after = program.at(node.pc + i.length());
+        if (i.other() != Other::XorReg || i.src != 5 || !cookie || !before || before->insn.op != Op::LoadField ||
+            before->insn.src != NoReg || before->insn.dst != i.dst || before->insn.width() != 4 ||
+            static_cast<uint32_t>(before->insn.disp) != cookie || !after || after->insn.op != Op::Other ||
+            after->insn.other() != Other::Store || after->insn.dst != 5 || after->insn.src != i.dst ||
+            after->insn.width() != 4 || after->insn.disp >= 0) return false;
+      }
+      if (!todo.push_back(node.pc)) return false;
+    }
+    if (!previous) return false;
+  }
+  return entry;
+}
+#endif
+
 void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& program, const std::array<int64_t, 5>& layout, Report& report, RefBatch& batch) {
   // Find the optional decision that keeps off-store extensions disabled; ambiguous matches are left out of the plan.
   auto data = pe.at(pe.rdata.rva, pe.rdata.size), code = pe.at(pe.text.rva, pe.text.size);
@@ -313,7 +379,7 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
       if (test.op != Op::Other || test.other() != Other::TestImm || !test.memory() ||
           (test.width() != 1 && test.width() != 4) || test.imm != 8) continue;
 #if defined(AUTOSCAN_X86)
-      if (!program.fromArgument(n.pc, test.dst, NoReg, 4)) continue;
+      if (!program.fromArgument(n.pc, test.dst, NoReg, 4) && !providerStackArgument(pe, program, n.pc, test.dst)) continue;
 #else
       if (!program.fromArgument(n.pc, test.dst, 2)) continue;
 #endif
@@ -354,7 +420,7 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
     }
   }
 #if defined(AUTOSCAN_X64)
-  // Analyze called helpers after their callers so the helper process stays within its 512 KiB stack limit.
+  // Reuse the caller's Program for helpers to keep analysis within its bounded stack reserve.
   for (const auto& helper : helpers) {
     auto body = boundaries.find(helper.target);
     if (!body || body.begin != helper.target || body.end - body.begin > 256 || !program.build(pe, body)) continue;
@@ -389,6 +455,11 @@ bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Progra
       if (repeat) continue;
       if (!seen.push_back(pc)) return false;
       if (!range.contains(pc)) {
+        // Function trimming can stop just before the security-cookie failure
+        // path's terminal INT3. It cannot return or change a returning path's
+        // cleanup; other out-of-range destinations still need bounded entries.
+        auto terminal = Lift(pe.code(pc), pc);
+        if (pc == range.end && terminal.op == Op::Other && terminal.other() == Other::Trap) continue;
         int32_t nested = 0;
         if (!self(self, pc, depth + 1, nested) || !accept(nested)) return false;
         continue;
@@ -489,6 +560,34 @@ bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Progra
 }
 #endif
 
+bool externalVerifierZero(const PeImage& pe, const Boundaries& boundaries, uint32_t start) {
+  // The external verifier's format is zero. Recognize its complete leaf return;
+  // x86 DCHECK builds retain a fixed frame even for this constant helper.
+  uint32_t pc = start;
+  bool framed = false;
+#if defined(AUTOSCAN_X86)
+  auto push = Lift(pe.code(pc), pc);
+  if (push.op == Op::Other && push.other() == Other::Push && push.dst == 5 && !push.memory() && push.width() == 4) {
+    auto frame = Lift(pe.code(pc + push.length()), pc + push.length());
+    auto range = boundaries.find(start);
+    if (!range || range.begin != start || frame.op != Op::MovReg || frame.dst != 5 || frame.src != StackReg || frame.width() != 4) return false;
+    pc += push.length() + frame.length(); framed = true;
+  }
+#endif
+  auto zero = Lift(pe.code(pc), pc);
+  if (zero.width() != 4 || zero.dst != 0 ||
+      !((zero.op == Op::Other && zero.other() == Other::XorReg && zero.src == 0) ||
+        (zero.op == Op::MovReg && zero.src == NoReg && !zero.imm && !zero.detail))) return false;
+  pc += zero.length();
+  if (framed) {
+    auto pop = Lift(pe.code(pc), pc);
+    if (pop.op != Op::Other || pop.other() != Other::Pop || pop.dst != 5 || pop.width() != 4) return false;
+    pc += pop.length();
+  }
+  auto ret = Lift(pe.code(pc), pc);
+  return ret.op == Op::Ret && (!framed || !ret.imm);
+}
+
 void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& program, Report& report, RefBatch& batch) {
   // Recognize the optional CRX extension-package download decision without changing package verification or confirmation.
   auto data = pe.at(pe.rdata.rva, pe.rdata.size), code = pe.at(pe.text.rva, pe.text.size);
@@ -527,11 +626,7 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
       if (end != pc) continue;
       const auto* join = program.at(external->pc + external->insn.length());
       if (!join || join->insn.op != Op::Jmp || join->insn.target() <= pc || !range.contains(join->insn.target())) continue;
-      auto zero = Lift(pe.code(external->insn.target()), external->insn.target());
-      bool returnsZero = zero.width() == 4 && zero.dst == 0 &&
-        ((zero.op == Op::Other && zero.other() == Other::XorReg && zero.src == 0) ||
-         (zero.op == Op::MovReg && zero.src == NoReg && !zero.imm && !zero.detail));
-      if (!returnsZero || Lift(pe.code(external->insn.target() + zero.length()), external->insn.target() + zero.length()).op != Op::Ret) continue;
+      if (!externalVerifierZero(pe, boundaries, external->insn.target())) continue;
       bool format = false;
       for (uint32_t at = join->insn.target(), steps = 0; steps < 24; ++steps) {
         const auto* next = program.at(at); if (!next) break;

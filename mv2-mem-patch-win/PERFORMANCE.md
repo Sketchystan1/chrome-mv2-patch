@@ -1,9 +1,10 @@
 # Windows automatic patcher performance
 
-`secur32.dll` is the deployment DLL for x64, x86 and ARM64. This record summarizes
-the implementation measured in the November 14, 2026 experiments, before the
-2.0.0 version and documentation cleanup. Browser results and artifact hashes
-below refer to those measured builds; they do not certify a rebuilt 2.0.0 DLL.
+`secur32.dll` is the deployment DLL for x64, x86 and ARM64. The performance
+experiments and historical identities below describe the November 14, 2026
+implementation, before the 2.0.0 version and documentation cleanup. The final
+section separately identifies the rebuilt 2.0.0 DLL tested against Chrome Canary
+160 x86 on November 17. Results apply to their recorded artifacts.
 
 ## Current path
 
@@ -64,7 +65,7 @@ SPGO sampling were unavailable and skipped at the user's request.
 
 ## Validation and historical identities
 
-The current DLL passed stock, patched, cached restart, cache-deleted restart and
+The November 14 DLL passed stock, patched, cached restart, cache-deleted restart and
 restore with packed MV2 request blocking and MV3 controls: 45 instruction checks
 and 39 renderer checks. Stock browser files stayed unchanged; isolated proxy and
 private registry state were restored. Native CTest passed **20/20 x64 and 17/17
@@ -83,10 +84,11 @@ observer timeout and failed PGO training whose cause cleanup masked. Initial
 broker/helper and fused-comparison failures were repaired and preserved. Later
 successful populations do not erase those failures or identify their causes.
 
-`complete_enforcement_coverage_proven` remains **false**. Native x86/ARM64 browser
-behavior, browser updates and DRM remain unvalidated. Timings use one host, warm
-files and headless/GPU-disabled browsers; controlled cold-disk and desktop-window
-performance were not measured. A new scanner identity refills its cache on first use.
+`complete_enforcement_coverage_proven` remains **false**. Those experiments did
+not validate native x86/ARM64 browser behavior, browser updates or DRM. Timings
+use one host, warm files and headless/GPU-disabled browsers; controlled cold-disk
+and desktop-window performance were not measured. A new scanner identity refills
+its cache on first use.
 
 | Deployment artifact from the recorded experiments | Bytes | SHA-256 |
 | --- | ---: | --- |
@@ -111,3 +113,127 @@ and omitted temporary content. Key records are the campaign's `outcomes.json`,
 `discovery/confirm65/results.json` and `final-checks/`, plus the final lifecycle
 `_scratch/all-experiments-life/results.json`. Copied browsers, test profiles,
 duplicate dependencies and regenerable build intermediates were removed.
+
+## Chrome Canary 160 x86 regression validation
+
+On November 17, 2026, the rebuilt 2.0.0 x86 DLL passed a full isolated lifecycle
+test with branded Chrome Canary **160.0.8167.0**. The old x86 helper ran analysis
+on `rundll32`'s 256 KiB stack and could overflow before returning a plan, leaving
+Chrome running without MV2 patches. Analysis now runs on a joined worker with a
+1 MiB stack reserve. Canary's diagnostic calls and high-byte register operations
+also required recognizing a verified reload of the provider's extension argument
+before its off-store flag check. The fix preserves those calls and diagnostic
+branches; it patches only the existing verified-extension decision.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Stock Canary x86 `chrome.dll` | 272,000,664 | `496b63e201072bd4dccfe185dfd0ff50fbf0eb1f8c7c95b05109aa0c05472201` |
+| Tested x86 `secur32.dll` | 247,296 | `8236f3f34596d012215242b51a30b1df2d43c3f888c5d36f9a598bd24421562d` |
+
+The packed external MV2 control enabled, ran its background page and cancelled
+requests. Disable/re-enable, protected-cache reuse and a restart after deleting
+the private scan cache passed. The MV3 control ran in every phase; removing the
+proxy restored MV2 deprecation and prevented enablement. All **40 instruction
+checks** and **39 renderer sandbox checks** passed. Stock browser DLL hashes
+remained unchanged, and the private external-extension registry subtree was
+removed. The scanner recognized seven core decisions and the off-store verifier;
+the optional CRX download decision was unrecognized.
+
+Independent stock disassembly confirms the off-store branch at RVA `0x2f0953e`
+selects its existing target `0x2f0958c`. Its other path can store the
+`DISABLE_NOT_VERIFIED` reason `0x100` at `0x2f09581`. The extension pointer is
+reloaded from `[ebp+8]` immediately before the creation-flag test; the preceding
+`SETNE BH` and `TEST BL,BH` retain their diagnostic behavior.
+
+Native CTest passed **18/18 x86** and **20/20 x64**, including the new cold/cached
+helper regression through the real x86 `rundll32` host and rejection tests for
+unsafe provider argument reloads. ARM64 cross-built successfully. The full
+portable fixture and Windows installer suite also passed with Capstone and Z3
+available. This test does not establish Chrome x86 CRX download installation,
+native ARM64 behavior, browser updates, interactive browsing or DRM.
+
+The retained local evidence is `_scratch/x86-160-recheck/results.json`, its
+per-phase reports and `_scratch/x86-160-recheck.log`. Reproduce the browser check
+after building the x86 test targets:
+
+```text
+python scripts/test_autoscan_runtime.py _scratch/canary160-x86-runtime-matrix.json --arch x86 --work _scratch/x86-160-new
+```
+
+The matrix names the stock, complete x86 browser copy; the new output directory
+must not already exist. Earlier failed attempts remain in `_scratch/x86-old/`,
+`_scratch/x86-thread/` and `_scratch/x86-160-final/`.
+
+The first fixture-suite attempt failed an installer process-identity check; the
+repeated full run passed. Both results are retained in
+`_scratch/canary160-fixture-tests.log` and
+`_scratch/canary160-fixture-recheck.log`. ARM64 build output is retained in
+`_scratch/canary160-arm64-build.log`.
+
+## Chrome Canary 160.0.8166.2 x86 CRX installation
+
+On November 17, 2026, the corrected 2.0.0 x86 DLL passed signed off-store CRX3
+installation on the user's exact branded **160.0.8166.2 (32-bit)** build. The
+stock browser reproduced `CRX_REQUIRED_PROOF_MISSING` for the same signed
+package. The scanner previously declined the framed constant-zero external
+verifier and a security-cookie helper's terminal trap at its trimmed boundary.
+Recognition now checks those bounded forms without changing verifier calls,
+return cleanup, developer signatures, package integrity or user confirmation.
+
+| Artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| Stock Canary x86 `chrome.dll` | 272,436,376 | `87ef34817cfcb2c6fb3443aa94621b0f980102ae81a256c6666db297d4e148ba` |
+| Tested x86 `secur32.dll` | 247,808 | `641c0089f9c6ac67c190ceea6380c06f609389355d864bb4d74a7ec5de709cb4` |
+| Local `mv2-patch-2.0.0-canary160-crx-fix-win-x86.zip` | 114,932 | `486274bf032c031d7007661507084e97c88e3b4bd1a49d51d8bd68ab41cd4e29` |
+
+The final seven-phase matrix used an isolated browser copy, private profiles,
+download directories, registry subtree and Windows desktop. Chrome's real
+Downloads Keep action opened the signed CRX; its native Add extension dialog
+confirmed installation. The packed MV2 extension enabled, ran its background
+page and blocked requests. Disable/re-enable, cache reuse, a restart after
+deleting the private cache, and an MV3 background control passed. Removing the
+proxy restored both the downloaded-CRX proof requirement and MV2 deprecation.
+The scanner recognized seven core decisions, InstallVerifier and the CRX
+download decision; all **63 instruction checks** and **59 renderer sandbox
+checks** passed. The stock `chrome.exe` and `chrome.dll` hashes stayed unchanged,
+and registry cleanup completed.
+
+Tampering with the signed package produced `CRX_SIGNATURE_VERIFICATION_FAILED`;
+removing its developer proofs produced `CRX_REQUIRED_PROOF_MISSING`. Neither
+control installed. The ZIP contains only `install.bat` and the tested DLL; its
+archived DLL hash matches the final runtime result. The prior ZIP named
+`mv2-patch-2.0.0-canary160-fix-win-x86.zip` contains the earlier DLL and does not
+include this CRX discovery fix.
+
+Independent source/disassembly review identifies the CRX branch at RVA
+`0x2c84d2a` (`74 0E` to `90 90`), the framed external verifier at `0x51f4f10`,
+and the security-cookie terminal trap at `0x79737a5`. The installer's source
+reason is `AllowedBecausePref` (2) at field offset `+0x12c`. These are evidence
+for this stock hash, rather than scanner input or version-table entries.
+
+Native tests passed **18/18 x86** and **20/20 x64**, including positive and
+negative fixtures for the framed verifier, terminal trap and conflicting return
+cleanup. ARM64 cross-built; native ARM64 execution remains unverified. Browser
+updates, DRM and broader interactive browsing remain outside this test.
+The complete portable fixture and Windows installer suite passed with Capstone
+and Z3 available, including both CDP helpers' syntax checks. Its log is
+`_scratch/canary160-crx-final-fixtures.log`.
+
+Retained evidence is `_scratch/crx160final/results.json`, its per-phase logs,
+`_scratch/crx160final.log`, `_scratch/canary160-crx-package.json` and
+`_scratch/canary160-crx-final-native-x86.log`. The earlier complete run in
+`_scratch/crx160q/` also passed. An earlier attempt in `_scratch/crx160full/`
+failed its empty-cache memory check with stock bytes still present. It captured
+no patcher trace, so the cause of that intermittent startup failure is not
+established; both subsequent full runs passed with diagnostics. The separate
+external-extension lifecycle passed in `_scratch/mv28166/results.json`.
+Five additional consecutive empty-cache restarts passed with all nine decisions
+applied, MV2 execution/request blocking, the MV3 control, unchanged browser
+hashes and registry cleanup. Their evidence is
+`_scratch/crx160cold/results.json` and `_scratch/crx160cold.log`.
+
+Reproduce after building matching x86 test targets, using a new short work path:
+
+```text
+python scripts/test_autoscan_crx.py _scratch/canary160-8166-runtime-matrix.json --arch x86 --work _scratch/crx160-new
+```

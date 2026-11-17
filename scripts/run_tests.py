@@ -62,7 +62,8 @@ def main():
         print("SKIP: Windows installer integration " + ("(--fast)" if args.fast else "(Windows required)"))
     node = shutil.which("node")
     if node:
-        steps.append(("CDP helper syntax", [node, "--check", str(HERE / "autoscan_cdp.mjs")]))
+        for helper in ("autoscan_cdp.mjs", "autoscan_crx_cdp.mjs"):
+            steps.append((f"CDP helper syntax ({helper})", [node, "--check", str(HERE / helper)]))
     else:
         print("SKIP: CDP helper syntax (Node required)")
     failed = run_wave(steps)

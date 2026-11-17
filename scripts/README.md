@@ -5,10 +5,12 @@ These scripts fetch research artifacts, inspect binaries and test that implement
 Linux and macOS will use the same native discovery and in-memory patching workflow;
 their artifact and container tools remain here for the future ports.
 
-The maintained signature table, milestone authoring pipeline and tests for the
-removed Python/PowerShell/Bash patchers have been retired. Historical source and
-experiments remain in Git history. [mv2-reversing.md](../mv2-reversing.md) retains the
-shared predicate, failed approaches and platform lessons.
+The milestone authoring pipeline and tests for the removed Python/PowerShell/Bash
+patchers have been retired. The last legacy [`signatures.json`](../signatures.json)
+is retained for older releases, including v1.16.0; the native patcher does not read
+it. Historical source and experiments remain in Git history.
+[mv2-reversing.md](../mv2-reversing.md) retains the shared predicate, failed
+approaches and platform lessons.
 
 ## Tools
 
@@ -21,7 +23,8 @@ shared predicate, failed approaches and platform lessons.
 | `binary_image.py` | Read code-section metadata from PE x64/x86/ARM64, ELF x64/ARM64 and thin/fat Mach-O ARM64; usable as a module or JSON inspection CLI. | Python standard library |
 | `scan_windows.py` | Read-only x64 research prototype: recover field relationships and check local predicate routing. | Capstone + z3-solver |
 | `check_autoscan_matrix.py` | Evaluate the native scanner against independent, hash-bound reviewed address baselines. | Built `mv2-scan.exe` |
-| `test_autoscan_runtime.py`, `autoscan_cdp.mjs` | Exercise the same deployed DLL on isolated x64 browser copies, including MV2/MV3 controls and cache/removal checks. | Windows, native test targets, Node 22+, OpenSSL |
+| `test_autoscan_runtime.py`, `autoscan_cdp.mjs` | Exercise the same deployed DLL on isolated x64/x86 browser copies, including MV2/MV3 controls and cache/removal checks. | Windows, native test targets, Node 22+, OpenSSL |
+| `test_autoscan_crx.py`, `autoscan_crx_cdp.mjs` | Install signed CRX3 controls through the browser's Downloads page and native confirmation; reject tampered packages and missing developer proofs. | Windows, matching x64/x86 native test targets, Node 22+, OpenSSL |
 | `macho_insert_dylib.py` | Scratch-copy research for inserting/removing a dylib load command; retained for a future macOS loader. | Python standard library |
 
 `_testutil.py` contains only synthetic PE/ELF/Mach-O fixture builders. The Mach-O
@@ -129,11 +132,26 @@ decisions may be absent. The matrix writes individual reports and `results.json`
 
 The runtime matrix instead needs `version`, `executable` and `binary` paths to
 complete stock browser copies. It uses `out/x64/` test helpers and the DLL in
-`build/x64/secur32.dll` by default; `--dll` can select another local build.
+`build/x64/secur32.dll` by default; `--arch x86` selects matching x86 helpers and
+the x86 DLL. `--dll` can select another local build.
 `--work` must be a new directory beneath `_scratch/`. The test redirects external
 extension registry reads to a private HKCU subtree, checks stock/patched/removal
 behavior, and restarts with an empty cache. These browser experiments are
 separate from the local fixture suite.
+
+The CRX installation harness uses a single-entry runtime matrix and a new, short
+directory below `_scratch/`. It launches a browser copy on a private Windows
+desktop and keeps downloads, profiles, cache and registry changes private. The
+test-only `browser-ui.exe` invokes the owned browser's ordinary Add extension
+confirmation without switching desktops or sending global input. It verifies
+stock rejection, signed installation, tampered-signature and missing-proof
+rejection, MV2 enablement/request blocking, an MV3 background control, cached and
+empty-cache restarts, and removal. Browser executable and DLL hashes must remain
+unchanged.
+
+```text
+python scripts/test_autoscan_crx.py _scratch/runtime-matrix.json --arch x86 --work _scratch/crx-check
+```
 
 ## Future ports
 

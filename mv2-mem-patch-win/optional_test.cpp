@@ -146,6 +146,86 @@ static void application(const Bytes& bytes) {
   check(info.Protect == PAGE_EXECUTE_READ, "application restores execute/read protection");
   VirtualFree(memory, 0, MEM_RELEASE);
 }
+#if defined(AUTOSCAN_X86)
+static void framedExternalVerifier() {
+  auto bytes = fixture();
+  auto body = hex("5589e531c05dc3");
+  std::fill(bytes.begin() + 0xa00, bytes.begin() + 0xa40, 0xcc);
+  std::copy(body.begin(), body.end(), bytes.begin() + 0xa00);
+  auto report = Discover(bytes);
+  check(report.ready() && report.gates.size() == 4 && has(report, InstallVerifier) && has(report, CrxDownload),
+        "framed constant external verifier retains both optional decisions");
+  for (auto text : {"5389e531c05dc3", "5589c531c05dc3", "5589e531c95dc3", "5589e531c05bc3",
+                    "5589e531c0505dc3", "5589e531c083c0015dc3", "5589e5b0015dc3",
+                    "5589e531c05dc20400"}) {
+    auto changed = bytes, invalid = hex(text);
+    std::fill(changed.begin() + 0xa00, changed.begin() + 0xa40, 0xcc);
+    std::copy(invalid.begin(), invalid.end(), changed.begin() + 0xa00);
+    auto found = Discover(changed);
+    check(found.ready() && found.gates.size() == 3 && has(found, InstallVerifier) && !has(found, CrxDownload),
+          "wrong frame, result or cleanup does not identify an external verifier");
+  }
+  // A terminal failure path can sit exactly at a trimmed callee's end. It
+  // contributes no returning cleanup; conflicting returns and changed argument
+  // cleanup must still decline the download decision.
+  auto terminal = bytes, cleanup = hex("5589e585c075045dc20400cc");
+  std::fill(terminal.begin() + 0xa80, terminal.begin() + 0xac0, 0xcc);
+  std::copy(cleanup.begin(), cleanup.end(), terminal.begin() + 0xa80);
+  auto found = Discover(terminal);
+  check(found.ready() && found.gates.size() == 4 && has(found, InstallVerifier) && has(found, CrxDownload),
+        "terminal trap at a callee boundary preserves the agreed stack cleanup");
+  for (auto mutation : {std::pair{"0400cc", "0400c3"}, {"0400cc", "0800cc"}}) {
+    auto changed = terminal, modified = cleanup;
+    replace(modified, mutation.first, mutation.second);
+    std::copy(modified.begin(), modified.end(), changed.begin() + 0xa80);
+    auto refused = Discover(changed);
+    check(refused.ready() && refused.gates.size() == 3 && has(refused, InstallVerifier) && !has(refused, CrxDownload),
+          "conflicting or changed return cleanup cannot prove the download slot");
+  }
+  application(terminal);
+  application(bytes);
+}
+static void providerReload() {
+  auto bytes = fixture();
+  // Model Canary's fixed frame, security cookie, private local addresses and
+  // high-byte diagnostic flags before reloading Extension* after a call.
+  auto code = hex("5589e583ec208b15c041400031ea8955fc8d55e08955e4894ddce8c1030000"
+                  "85c00f95c30f95c784fb751a8b4508f6807c010000087520894de889c1e87f030000"
+                  "84c075128b550cc70200010000b00183c4205dc2080031c083c4205dc20800");
+  std::fill(bytes.begin() + 0x680, bytes.begin() + 0x800, 0xcc);
+  std::copy(code.begin(), code.end(), bytes.begin() + 0x680);
+  put<uint32_t>(bytes, 0x1a00 + offsetof(IMAGE_LOAD_CONFIG_DIRECTORY32, SecurityCookie), 0x4041c0);
+  put<uint32_t>(bytes, 0x19c0, 0x12345678);
+  auto report = Discover(bytes);
+  check(report.ready() && report.gates.size() == 4 && has(report, InstallVerifier) && has(report, CrxDownload),
+        "Canary provider reload survives diagnostic calls and high-byte flags");
+  check(MakePlan(report).offstoreRva == 0x12b5,
+        "provider patch selects the existing verified branch and retains diagnostic checks");
+  for (auto mutation : {
+      std::pair{"8b4508f680", "8b450cf680"}, // A different incoming argument.
+      {"894ddc", "894d08"},                 // Overwrite the incoming argument.
+      {"894ddc", "894a28"},                 // Overwrite it through a local-address alias.
+      {"894ddc", "894dfe"},                 // A store overlaps the saved frame pointer.
+      {"8d55e0", "8d5508"},                 // Expose an incoming slot's address.
+      {"894ddc", "890890"},                 // A store through an unbounded pointer.
+      {"8b15c0414000", "8b15c4414000"},     // An XOR unrelated to the configured cookie.
+      {"31ea", "31e2"},                     // Arithmetic with the stack pointer.
+      {"5589e5", "5589e4"}}) {             // No fixed EBP frame.
+    auto changed = bytes, modified = code;
+    replace(modified, mutation.first, mutation.second);
+    std::copy(modified.begin(), modified.end(), changed.begin() + 0x680);
+    auto found = Discover(changed);
+    if (!found.ready() || found.gates.size() != 3 || has(found, InstallVerifier) || !has(found, CrxDownload))
+      std::fprintf(stderr, "provider mutation %s -> %s: ready=%u gates=%zu provider=%.*s download=%.*s\n",
+                   mutation.first, mutation.second, found.ready(), found.gates.size(),
+                   static_cast<int>(found.installVerifier.size()), found.installVerifier.data(),
+                   static_cast<int>(found.crxDownload.size()), found.crxDownload.data());
+    check(found.ready() && found.gates.size() == 3 && !has(found, InstallVerifier) && has(found, CrxDownload),
+          "unsafe or unrelated provider reload declines without losing independent decisions");
+  }
+  application(bytes);
+}
+#endif
 int main() {
   auto bytes = fixture(); auto report = Discover(bytes);
   if (!report.ready() || !has(report, InstallVerifier) || !has(report, CrxDownload))
@@ -185,5 +265,9 @@ int main() {
   }
 #endif
   application(bytes);
+#if defined(AUTOSCAN_X86)
+  framedExternalVerifier();
+  providerReload();
+#endif
   std::printf("PASS: %u native optional checks\n", checks);
 }

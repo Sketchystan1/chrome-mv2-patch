@@ -17,8 +17,9 @@ the deployed implementation.
 - Linux and macOS native auto patchers are planned. Their binary readers,
   downloaders, symbol tools and Mach-O loader research are retained for those ports.
 
-The Go/Python patchers, PowerShell/Bash byte patchers, maintained signature tables
-and table derivation tools are retired. The native scanner discovers the checks
+The Go/Python patchers, PowerShell/Bash byte patchers, signature maintenance
+and table derivation tools are retired. The last legacy `signatures.json` remains
+available for older releases. The native scanner discovers the checks
 from each browser image without tables, debug symbols, Capstone or Z3. Support
 depends on recognized code, rather than a fixed milestone list.
 

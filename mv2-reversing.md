@@ -15,8 +15,9 @@ records measured artifacts and results.
 
 Linux and macOS native auto patchers are planned using the same architecture:
 automatic discovery, a checked cache, loaded-code validation and transactional
-in-memory edits. The former disk patchers, signature tables and milestone
-authoring pipeline are retired. The cross-platform findings below remain useful
+in-memory edits. The former disk patchers and milestone authoring pipeline are
+retired; the last legacy `signatures.json` is retained for older releases.
+The cross-platform findings below remain useful
 for those ports, but do not represent a shipping Unix implementation or a fixed
 list of supported future browser versions.
 
@@ -86,6 +87,11 @@ handle the read-only image, isolated helper and cache;
 `autoscan_apply.cpp` independently checks and applies the result. Shared
 instruction and proof helpers live in `lifter.hpp` and `solver.hpp`.
 The native path uses no maintained byte table, PDB, Capstone or Z3.
+
+The x86 `rundll32` host reserves only 256 KiB for its main stack. Running bounded
+analysis directly on that stack overflowed before returning a plan, leaving
+Chrome unpatched. The helper now joins a worker with a 1 MiB stack reserve;
+the browser still enforces the helper deadline and validates its reply.
 
 The browser's complete BLAKE3 identity, scanner SHA-256 identity and protocol
 version bind the cache. Windows protects entries for the current user; temporary
@@ -172,6 +178,18 @@ and download decisions and requires both for its recognized installer path.
 Chrome's unknown optional checks are skipped. See the Windows README for
 architecture and runtime-validation limits.
 
+Chrome Canary 160.0.8166.2 x86 uses a framed constant-zero external verifier
+(`push ebp; mov ebp,esp; xor eax,eax; pop ebp; ret`). Its download path calls a
+security-cookie helper whose terminal trap is exactly at the trimmed function
+boundary. Recognition checks the complete framed helper and accepts that exact
+terminal destination while still rejecting conflicting return cleanup or other
+out-of-range destinations. Independent source/disassembly review identifies the
+`off_store_install_allow_reason_` field at `+0x12c`; reason 2 is
+`AllowedBecausePref`. The reviewed branch at RVA `0x2c84d2a` changes `74 0E` to
+`90 90`, selecting the existing external-verifier path while preserving calls,
+developer proofs, package integrity and installation confirmation. These
+addresses document this image; the scanner does not consume a version table.
+
 MV2 request blocking follows MV2's normal permissions. The historical optional
 MV3 `webRequestBlocking` data patches were removed; they are not part of the
 native predicate patch.
@@ -227,7 +245,14 @@ experiments covered Chrome 152–159 and included ELF/Mach-O scratch patch/resto
 and Windows/Wine/WSL launches. Those results apply to their recorded artifacts;
 they do not certify the current DLL or future Unix ports.
 
-Native x86/ARM64 browser lifecycle, native macOS loading/signing, Linux ARM64,
-browser updates and DRM need their own validation. Preserve sandbox and signature
+The rebuilt 2.0.0 x86 DLL passed Chrome Canary 160.0.8167.0 packed MV2 enablement,
+request blocking, cached and empty-cache restarts, and removal; the exact browser
+and patcher hashes are recorded in [PERFORMANCE.md](mv2-mem-patch-win/PERFORMANCE.md).
+The later corrected DLL also passed signed CRX3 installation on Canary
+160.0.8166.2 x86 through the real Downloads flow and native confirmation, with
+tampered-signature and missing-developer-proof rejection, both restart types,
+and removal. The same validation record binds these results to their artifacts.
+Native ARM64 browser lifecycle, native macOS loading/signing, Linux ARM64,
+browser updates and DRM still need validation. Preserve sandbox and signature
 behavior when porting; fixture tests and bounded proofs are only part of that
 evidence.
