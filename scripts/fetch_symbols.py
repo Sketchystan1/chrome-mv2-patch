@@ -1,10 +1,10 @@
-"""Fetch the debug symbols matching a Chrome binary, for MV2 gate derivation.
+"""Fetch the debug symbols matching a Chrome binary, for native scanner research.
 
 Dispatches on the target's own file magic:
 
   PE  (chrome.dll) -> derive the RSDS CodeView key and download the matching PDB
                       from the Chromium symbol server. Handles PE32 (x86) and
-                      PE32+ (x64).
+                      PE32+ (x64/ARM64).
   ELF (chrome)     -> read build-id + .gnu_debuglink, stream debug-info/
                       chrome.debug out of the per-version debug-info zip via HTTP
                       range requests, and verify build-id + CRC both ways.
@@ -27,7 +27,7 @@ Then feed the result to the rest of the pipeline:
     Windows: python scripts/symbols_from_pdb.py <chrome.dll> --symdir _scratch --json _scratch/syms.json
     Linux:   python scripts/symbols_from_elf.py _scratch/chrome.debug _scratch/syms.txt
     macOS:   fetch_symbols writes _scratch/mac-<arch>-syms.txt directly
-    all   -> python scripts/derive_milestone.py <binary> --symbols … --name <ver> --json
+Use the matching symbols for independent source/disassembly review.
 """
 
 import argparse
@@ -665,12 +665,12 @@ def fetch_debug(data, out_dir, forced_version):
 
 # ===========================================================================
 def main():
-    ap = argparse.ArgumentParser(description="Fetch Chrome debug symbols (PDB / chrome.debug) for MV2 derivation.")
-    ap.add_argument("binary", help="chrome.dll (PE) or chrome (ELF) to fetch symbols for")
+    ap = argparse.ArgumentParser(description="Fetch matching PDB, ELF debug-info or macOS dSYM symbols for research.")
+    ap.add_argument("binary", help="stock Chrome DLL, Linux ELF or macOS framework")
     ap.add_argument("--out", metavar="DIR", default=str(DEFAULT_OUT),
                     help="output directory (default: _scratch/)")
     ap.add_argument("--chrome-version", metavar="V", default="",
-                    help="ELF only: override the version to fetch (e.g. 151.0.7922.108)")
+                    help="ELF version override, or required consumer Chrome version for Mach-O dSYMs")
     args = ap.parse_args()
 
     try:

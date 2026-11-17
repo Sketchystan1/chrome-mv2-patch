@@ -1,52 +1,29 @@
-"""Fetch the stock, gate-bearing Chrome binary for MV2 signature derivation.
+"""Fetch stock Chrome binaries for native auto-patcher research.
 
-The rest of the toolkit (`fetch_symbols.py` -> `symbols_from_pdb.py` / `nm` ->
-`derive_milestone.py`) all start from ONE artifact: the browser binary that
-carries the inlined `IsExtensionAffected` gates --
+Targets: Windows x64/x86/ARM64 chrome.dll, Linux x64/ARM64 chrome ELF and the
+macOS ARM64 Google Chrome Framework. Downloads and extraction stay in ignored
+_scratch/; architecture is checked and the binary's reported version is used
+where available.
 
-    Windows x64    chrome.dll   (PE32+, container "pe")
-    Windows x86    chrome.dll   (PE32,  container "pe32")
-    Windows arm64  chrome.dll   (PE32+, container "pe-arm64")
-    Linux  x86-64  chrome       (ELF,   container "elf")
-    macOS  arm64   Google Chrome Framework  (Mach-O, container "macho-arm64")
+Current channel installers contain consumer builds. --version can fall back
+to Chrome for Testing where that architecture is published; those unbranded
+builds can differ from consumer Chrome and need separate recognition/runtime
+validation. Windows ARM64 has no CfT fallback; use --channel or --url.
 
-macOS has no consumer offline installer we can unwrap off-Mac (it ships a `.dmg`),
-so the mac platforms always fetch the per-arch Chrome for Testing zip -- a plain
-zip 7-Zip opens trivially. CfT is UNBRANDED, so a mac table derived from it must
-be re-verified against a real `Google Chrome.app` install (the macOS CI does this).
+macOS defaults to a CfT zip. --branded unwraps a consumer DMG for optional
+install-check research and UUID-matched consumer dSYM fetching.
 
-Windows on ARM (win-arm64) has no Chrome for Testing build, so it cannot pin an
-old version via CfT. Its current stable/beta build is fetched from the arm64
-enterprise MSI (`googlechromestandaloneenterprise_arm64.msi`, a stable
-non-versioned URL); to pin an older build pass `--url` (the per-build
-dl.google.com/release2 installer), or hand-copy an arm64 chrome.dll. The unwrap
-chain is otherwise identical to win64's MSI path.
-
-Google publishes offline installers only for each channel's CURRENT build, so
-that is what this fetches by default -- the same consumer binary the patcher
-runs against. `--version` falls back to the Chrome for Testing archive for an
-older build; CfT is a portable, UNBRANDED build whose codegen can differ from
-consumer stable, so a signature table derived from it must be re-verified
-against the real install before shipping.
-
-The binary is unwrapped out of the installer and dropped in `_scratch/`
-(gitignored) under a clean, arch-tagged name, ready to hand to the next step:
-
-    python scripts/fetch_chrome_binary.py                      # current stable, host arch
+    python scripts/fetch_chrome_binary.py --platform win64
+    python scripts/fetch_chrome_binary.py --platform win
+    python scripts/fetch_chrome_binary.py --platform win-arm64
     python scripts/fetch_chrome_binary.py --platform linux
-    python scripts/fetch_chrome_binary.py --platform win       # 32-bit chrome.dll
-    python scripts/fetch_chrome_binary.py --platform mac-arm64 # Apple Silicon framework
-    python scripts/fetch_chrome_binary.py --platform win-arm64          # arm64 enterprise MSI
-    python scripts/fetch_chrome_binary.py --channel beta
-    python scripts/fetch_chrome_binary.py --version 152.0.7977.30
-    python scripts/fetch_chrome_binary.py --list               # just print current versions
+    python scripts/fetch_chrome_binary.py --platform linux-arm64
+    python scripts/fetch_chrome_binary.py --platform mac-arm64 --branded
+    python scripts/fetch_chrome_binary.py --version 157.0.8103.79
+    python scripts/fetch_chrome_binary.py --list
 
-Pure stdlib, but extraction shells out to 7-Zip: the installer nests
-(.exe -> updater.7z -> <ver>_chrome_installer.exe -> chrome.7z -> Chrome-bin/,
-the beta .msi wraps the same offline .exe, and the .deb holds
-data.tar.xz -> ./opt/google/chrome/chrome), so several layers open before the
-binary appears.
-"""
+Uses the standard library and 7-Zip to unwrap nested EXE/MSI/deb/zip/DMG
+containers. It does not install or patch a browser."""
 
 import argparse
 import json
@@ -65,7 +42,7 @@ DEFAULT_OUT = REPO / "_scratch"
 CHANNELS = ("stable", "beta")
 
 # The patcher targets, keyed by the --platform value. Each carries the
-# VersionHistory API platform id, the container tag derive_milestone.py stamps,
+# VersionHistory API platform id, the binary container tag,
 # the gate binary's filename, and how to recognise the right one on disk:
 #   PE optional-header magic 0x20B (PE32+) / 0x10B (PE32) tells x64/arm64 from
 #   x86, and the "machine" field (0x8664 x64 vs 0xAA64 arm64) then splits the two
@@ -568,7 +545,7 @@ def fetch(platform, channel, version, out_dir, keep, url_override=None):
         fetch_version, url, note = resolved
         source = f"Chrome for Testing ({note})"
         print(f"macOS via CfT: {want} -> {fetch_version}")
-        print("  note: CfT is UNBRANDED; re-verify the derived table against a real Google Chrome.app.")
+        print("  note: CfT is UNBRANDED; verify recognition and runtime behavior against consumer Chrome.")
     elif version and version != latest:
         if not spec.get("cft"):
             # win-arm64 has no Chrome for Testing build to pin against.
@@ -584,7 +561,7 @@ def fetch(platform, channel, version, out_dir, keep, url_override=None):
         fetch_version, url, note = resolved
         source = f"Chrome for Testing ({note})"
         print(f"Pinned {version} -> CfT {fetch_version}")
-        print("  note: CfT is an UNBRANDED build; re-verify any derived table against the real install.")
+        print("  note: CfT is an UNBRANDED build; verify recognition and runtime behavior against the real install.")
     else:
         url = INSTALLERS[channel][platform]
         fetch_version = latest or (version or "current")
@@ -616,7 +593,7 @@ def fetch(platform, channel, version, out_dir, keep, url_override=None):
     # feed advertised. They disagree in practice: the stable win-arm64 enterprise
     # MSI has shipped a chrome.dll whose VS_VERSION_INFO reads 152.0.7977.76 while
     # the feed called the download 153.0.8010.12. A file named for the feed sends
-    # the whole derivation - and the milestone name - to the wrong version.
+    # the reference analysis to the wrong version.
     real_version = binary_version(binary) or fetch_version
     if real_version != fetch_version:
         print(f"\nnote: the feed advertised {fetch_version}, but this binary reports "
@@ -630,21 +607,17 @@ def fetch(platform, channel, version, out_dir, keep, url_override=None):
     print(f"\nSaved {spec['container']} binary ({human_size(size)}):")
     print(f"  {os.path.relpath(dest)}")
     print("\nNext:")
+    print(f'  python scripts/binary_image.py "{os.path.relpath(dest)}"')
     if spec["container"].startswith("macho"):
-        print(f"  python scripts/derive_milestone.py {os.path.relpath(dest)} --name <ver> --json")
-        print("  # mac symbols are not published for CfT: the x64 slice cross-checks against")
-        print("  # the Linux x64 table; arm64 is located structurally (eyeball the gate).")
+        print("  # CfT has no consumer dSYM; use --branded for matched-symbol research.")
     elif spec["container"] == "elf-arm64":
-        print(f"  python scripts/derive_milestone.py {os.path.relpath(dest)} --name <ver> --json")
-        print("  # no arm64 Linux debug-info zip is published: the arm64 gates are located")
-        print("  # structurally and cross-checked against the macos-arm64 / win-arm64 tables.")
+        print("  # ARM64 Linux debug-info may be unavailable; review source and disassembly.")
     else:
-        print(f"  python scripts/fetch_symbols.py {os.path.relpath(dest)}")
+        print(f'  python scripts/fetch_symbols.py "{os.path.relpath(dest)}"')
         if spec["container"] == "elf":
             print("  python scripts/symbols_from_elf.py _scratch/chrome.debug _scratch/syms.txt")
         else:
-            print(f"  python scripts/symbols_from_pdb.py {os.path.relpath(dest)} --symdir _scratch --json _scratch/syms.json")
-        print(f"  python scripts/derive_milestone.py {os.path.relpath(dest)} --symbols _scratch/syms.* --name <ver> --json")
+            print(f'  python scripts/symbols_from_pdb.py "{os.path.relpath(dest)}" --symdir _scratch --json _scratch/syms.json')
     return 0
 
 
@@ -748,7 +721,7 @@ def fetch_branded_mac(platform, channel, out_dir, keep):
     print(f"  {os.path.relpath(dest_file)}")
     print("\nNext (consumer dSYM is UUID-matched to this DMG):")
     print(f"  python scripts/fetch_symbols.py {os.path.relpath(dest_file)} --chrome-version {real_version}")
-    print(f"  python scripts/derive_milestone.py {os.path.relpath(dest_file)} --symbols _scratch/mac-arm64-syms.txt --name <ver> --json")
+    print(f'  python scripts/binary_image.py "{os.path.relpath(dest_file)}"')
     return 0
 
 
@@ -762,7 +735,7 @@ def default_platform():
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Fetch the stock gate-bearing Chrome binary (chrome.dll / chrome ELF) for MV2 derivation.",
+        description="Fetch stock Windows, Linux or macOS Chrome binaries for native scanner research.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(

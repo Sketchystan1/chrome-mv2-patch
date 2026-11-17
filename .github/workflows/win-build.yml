@@ -1,9 +1,8 @@
 # Manually builds the Windows secur32.dll proxy (x64/x86/arm64) and publishes
 # secur32.dll-v<ver>.zip (x64/, x86/, arm64/ folders inside) to a release
 # tagged v<ver>. <ver> is the DLL's ProductVersion, whose single source of
-# truth is CMakeLists.txt's project version. chrome-mv2.ps1 finds the asset by following the
-# releases/latest redirect to the tag (api.github.com is avoided - it
-# rate-limits by IP).
+# truth is CMakeLists.txt's project version. Each architecture folder includes
+# the local install.bat alongside secur32.dll.
 # (GitHub also auto-attaches "Source code" links to every release - the whole
 # repo, minus gitignored build/ and out/ - which cannot be scoped or
 # disabled.)

@@ -1,414 +1,233 @@
-# Chrome Manifest V2 Re-Enable — Reverse-Engineering Notes
+# Chrome MV2 reverse-engineering notes
 
-## Purpose & status
+## Current implementation and future ports
 
-Google Chrome blocks Manifest V2 (MV2) extensions by default and has removed the
-flags and enterprise policy that used to re-enable them. The `chrome-mv2` patcher
-re-enables MV2 by flipping a single branch at each inlined copy of one predicate
-in the browser binary. This document is the *why* behind those byte edits. The
-per-build byte tables themselves are **not** here — `signatures.json` is canonical
-and `scripts/audit_signatures.py --binary <file>` reports coverage.
+Chrome blocks Manifest V2 extensions after removing the flags and enterprise
+policy that previously re-enabled them. This project selects the existing
+not-affected outcome of recognized enforcement checks.
 
-The gate is the same C++ across platforms; only the container, the toolchain's
-codegen, and the OS plumbing differ. Table engines relocate signatures across
-point releases; the native Windows DLL discovers the predicate. Both **decline
-without writing** on layouts they do not recognize.
+The deployed implementation is the native Windows `secur32.dll` auto patcher
+for x64, x86 and ARM64. It discovers decisions from the installed browser DLL,
+validates the loaded code and edits memory during startup. Browser binaries on
+disk stay unchanged. [The Windows README](mv2-mem-patch-win/README.md) records its
+runtime contract and recognition limits; [PERFORMANCE.md](mv2-mem-patch-win/PERFORMANCE.md)
+records measured artifacts and results.
 
-**Supported (v1.16.0):** Chrome **152–159**.
-- **Windows** (`chrome-mv2.ps1`): x64 `pe`, x86 `pe32`, arm64 `pe-arm64` (PE32+, COFF
-  machine `0xAA64`). The current installer uses `secur32.dll` to patch memory;
-  `chrome.dll` on disk keeps its signature. Legacy buffer edits strip the signature.
-- **Linux** (`chrome-mv2.sh`): x86-64 `elf`, aarch64 `elf-arm64`. One stripped PIE;
-  `.deb` and `.rpm` ship the identical ELF.
-- **macOS** (`chrome-mv2.sh`): Apple-Silicon `macho-arm64` slice of the universal
-  `Google Chrome Framework`, ad-hoc re-signed so it launches. Intel x86_64 was
-  dropped in v1.10.0.
+Linux and macOS native auto patchers are planned using the same architecture:
+automatic discovery, a checked cache, loaded-code validation and transactional
+in-memory edits. The former disk patchers, signature tables and milestone
+authoring pipeline are retired. The cross-platform findings below remain useful
+for those ports, but do not represent a shipping Unix implementation or a fixed
+list of supported future browser versions.
 
-The platform buffer matchers read `signatures.json` (no embedded tables — see §4).
-The native `secur32.dll` uses automatic discovery; see its
-[implementation](mv2-mem-patch-win/README.md#implementation-and-limits).
-The former universal Python patcher and table-based Windows memory engine have
-been removed. The version-specific evidence below remains useful for the shared
-predicate and Unix/legacy-restoration tables.
+## 1. The source predicate
 
----
+Chrome 138 introduced the `ManifestV2Handler` service. Release builds fold the
+test-only bypass into the blocking path; `g_allow_mv2_for_testing` is not a usable
+stable-build switch. The relevant predicate has moved and been inlined over time.
 
-## 1. Why MV2 is blocked (Chrome 138+)
+The reviewed source contract used by the native scanner is:
 
-Chrome 138 introduced the `ManifestV2Handler` KeyedService. Every MV2 block reduces
-to two predicates:
-
-```cpp
-bool ShouldDisableLegacyExtensions();          // folds to `return true` in release
-bool IsExtensionAffected(int mv, Manifest::Type t, mojom::ManifestLocation loc) {
-  if (mv >= 3) return false;                    // <-- the branch we flip
-  if (t != kExtension && t != kLoginScreenExtension && t != kUserScript) return false;
-  if (Manifest::IsComponentLocation(loc)) return false;
-  return true;
-}
+```text
+manifest_version < 3
+&& (converted_user_script || type in {1, 3, 8})
+&& location != 5 && location != 10
 ```
 
-`g_allow_mv2_for_testing` (the switch the WinDbg/Canary guides toggle) is written
-only by an `IN-TEST` function stripped from release, so LTO constant-folds
-`ShouldDisableLegacyExtensions()` to `true` and deletes the global. The only
-reachable gate is `IsExtensionAffected`'s `mv >= 3` early-out.
+The types are extension, login-screen extension and user script; locations 5 and
+10 are component locations. Review Chromium's
+[manifest_v2_util.cc](https://chromium.googlesource.com/chromium/src/+/refs/tags/157.0.8103.39/extensions/browser/manifest_v2_util.cc)
+and [Extension::GetType()](https://chromium.googlesource.com/chromium/src/+/refs/tags/157.0.8103.39/extensions/common/extension.cc)
+when the source or compiler layout changes.
 
----
+A manifest-version comparison alone does not identify enforcement. Confirm the
+type/location relationships, Boolean result and both branch outcomes. Calls can
+have required side effects, and callers can contain additional checks. A local
+predicate proof does not prove complete enforcement coverage.
 
-## 2. The patch — flip the branch at each inlined site
+## 2. Select the existing not-affected outcome
 
-The release build inlines `IsExtensionAffected` into its enforcement sites; each
-opens with the manifest-version check. The patch selects the predicate's existing
-not-affected outcome. No call is removed and no manifest value is changed (§6).
+Never remove a call, change the manifest-version operand or invent a destination.
+A reviewed conditional may select its existing target, fall-through or zero
+operand:
 
-| Arch | Stock | Flip | `kind` |
-| :--- | :--- | :--- | :--- |
-| x86/x64 short | `7F disp8` (`jg`; any Jcc via `stockOpcode`) | `EB` (`jmp short`), disp kept | `short` |
-| x86/x64 near | `0F 8F disp32` (`jg`) | `90 E9` (`nop;jmp near`), disp kept | `near` |
-| arm64 | `cmp w,#2 ; b.gt` (`54… cond=0xC`) | cond → AL `0xE`, `imm19` kept | `bcond` |
-| x86/x64 short, inverted | `7E disp8` (`jle`) | `90 90`, existing fall-through | `short-nop` |
-| x86/x64 near, inverted | `0F 8E disp32` (`jle`) | six `90` bytes, existing fall-through | `near-nop` |
-| arm64, inverted | `b.le` (`54… cond=0xD`) | `1F2003D5` (`nop`), existing fall-through | `bcond-nop` |
-| arm64, branchless | `csel Wd,WZR,Wm,GT` | GT → AL, selecting the existing zero operand | `csel` |
+| Observed instruction | Reviewed replacement | Preserved meaning |
+| --- | --- | --- |
+| x86/x64 short `JG` (`7F disp8`) | `JMP` (`EB disp8`) | Existing not-affected target; displacement unchanged. |
+| x86/x64 near `JG` (`0F 8F disp32`) | `90 E9 disp32` | Existing not-affected target; instruction width unchanged. |
+| x86/x64 inverted `JLE` (`7E` or `0F 8E`) | Complete two- or six-byte NOP sequence | Existing not-affected fall-through. |
+| ARM64 `B.GT` | Condition GT → AL | Existing target; opcode and `imm19` unchanged. |
+| ARM64 inverted `B.LE` | `NOP` (`0xD503201F`) | Existing not-affected fall-through. |
+| ARM64 `CBZ` or `TBZ/TBNZ` | Unconditional `B` to the same resolved target | Recompute `imm26` from the sign-extended `imm19`/`imm14`. |
+| ARM64 `CSEL Wd,WZR,Wm,GT` | GT → AL | Existing zero operand. |
 
-Two more kinds rewrite an AArch64 conditional to an unconditional `B` to its
-existing target: **`cbz`** (a 32- or 64-bit `cbz`, imm19, register and width pinned)
-and **`tbz`** (a test-bit
-`tbz`/`tbnz`, `0x36`/`0x37` family, imm14 — the arm64 InstallVerifier gate, §8). For
-both, the `B`'s imm26 is recomputed from the stock branch's sign-extended offset
-(imm19 or imm14). The `short` kind's stock opcode defaults to `7F` (`jg`); a site may
-pin any conditional with a `stockOpcode` field — the InstallVerifier gate flips a
-`75` (`jne`).
+Equivalent comparisons against 3, other signed conditions and optional
+installation decisions require their own reviewed polarity. The native Windows
+scanner/application validate their supported forms directly. CBZ/CSEL examples
+include historical Linux/macOS research and do not imply Windows recognition of
+every form in this table.
 
-### How each site is located (relocation-tolerant, never guessed)
+Chrome 159 introduced inverted predicates and branchless CSEL code. Its DCHECK
+builds also retained diagnostic copies alongside fast copies. The Linux ARM64
+management checks contained extra inlined predicates; one used a preceding
+`CBZ X0` to skip only the predicate while keeping the preceding call. A window
+around its `B.LE` also matched unrelated code. These are reasons to analyze
+source meaning and every resolved copy, rather than assume one branch shape.
 
-Each site is pinned by a `.text`-unique signature around the branch:
+## 3. Native discovery, cache and application
 
-1. **Fast path** — check the recorded RVA for the reference build.
-2. **Relocation scan** — else scan `.text` for the signature's longest fixed run and
-   accept **only if it matches at exactly `expectedMatches` offsets** (1, or 2 for a
-   folded/shared body). Any other count → declined.
+Windows discovery parses PE code and function bounds, decodes supported
+instructions and follows bounded control flow. It infers field roles from data
+flow and verifies the predicate. Unknown instructions, ambiguous roles,
+unresolved candidates and exceeded limits decline the plan.
 
-The matcher is exact on every byte **except** masked fields: the branch opcode +
-displacement (`short`/`near`), the `b.cond`/`cbz`/`tbz` word's variable field
-(`b.cond` condition + `imm19`; `cbz` `imm19`, register/width pinned; `tbz` `imm14`, with the `0x36`/`0x37`
-family, op, bit-position and Rt pinned), and — for `cbz` — any **embedded `BL`/`B`
-word**, whose PC-relative `imm26` is build-specific (opcode class is still verified).
-Masking only the volatile fields lets a point-release relocate cleanly while a real
-layout change still misses.
+`autoscan.cpp` proposes edits; `autoscan_runtime.cpp` and `autoscan_cache.cpp`
+handle the read-only image, isolated helper and cache;
+`autoscan_apply.cpp` independently checks and applies the result. Shared
+instruction and proof helpers live in `lifter.hpp` and `solver.hpp`.
+The native path uses no maintained byte table, PDB, Capstone or Z3.
 
-A write happens only if the instruction is currently stock (idempotent on
-re-run). If nothing matches, the engine prints structural candidates and refuses to
-write.
+The browser's complete BLAKE3 identity, scanner SHA-256 identity and protocol
+version bind the cache. Windows protects entries for the current user; temporary
+writes replace entries only after completion. Cache reuse still requires
+loaded-code checks, including relocations and allowed decision changes.
 
-For the inverted kinds, only the complete stock instruction or complete NOP
-replacement matches. CSEL pins every operand and accepts only GT or AL; its
-condition byte is excluded from the relocation anchor. Partial writes and changed
-operands are rejected.
+Application occurs in the main process at a validated startup point outside the
+Windows loader lock. Browser child processes only forward the real system DLL's
+functions. The application validates addresses, branch targets, instruction bytes
+and the loaded code against the stock file. Pages transition execute/read →
+read/write → verified edit → instruction-cache flush → original protection.
+A failed edit rolls back all changes; failed rollback/protection restoration
+terminates the browser.
 
----
+Complete enforcement coverage remains unproven. New compiler layouts, missing
+function bounds and unsupported instructions can escape recognition. Successful
+discovery must be followed by runtime validation on the exact artifact.
 
-## 3. The containers
+## 4. Platform findings retained for Linux and macOS
 
-**Windows `chrome.dll` (`pe`/`pe32`/`pe-arm64`).** PE32+ (x64/arm64) or PE32 (x86),
-split by COFF machine field (`0x8664`/`0xAA64`/`0x14C`). After the flips: zero
-`IMAGE_DIRECTORY_ENTRY_SECURITY` (loader accepts the unsigned DLL; doubles as the
-stock/patched discriminator) and recompute `OptionalHeader.CheckSum`. No registry
-change needed on a default consumer install. The flip primitive is identical across
-the three; only the byte windows (register allocation, struct offsets) differ, and
-the container tag keeps them from cross-probing.
+| Platform | Gate-bearing image | Address and loader concerns |
+| --- | --- | --- |
+| Windows | `chrome.dll` or `msedge.dll`, PE x64/x86/ARM64 | PE RVAs, loader relocations and architecture-specific function bounds; `secur32.dll` provides the current startup hook. |
+| Linux | Stripped PIE `chrome`, ELF x64/ARM64 | Section virtual addresses differ from file offsets; loaded addresses need the load bias. Function bounds, preload/startup behavior and cache ownership need native implementations. |
+| macOS | Versioned `Google Chrome Framework`, thin or universal Mach-O | `slice_base + section_64.offset` locates file bytes; loaded addresses need the dyld slide. Slice identity, function bounds, loading and code signing need native implementations. |
 
-**Linux `chrome` (`elf`/`elf-arm64`).** One stripped PIE; no security dir, no
-checksum — the flipped bytes are the whole job. **`.text` vaddr ≠ file offset**
-(compute the delta from section headers). `.deb`/`.rpm` ship the byte-identical ELF,
-so one table covers both. `e_machine` (`0x3E`/`0xB7`) splits the two containers.
-Atomic sibling-write + `rename()` avoids `ETXTBSY` and preserves the AppArmor/SELinux
-path. Snap/Flatpak are read-only → declined.
+The retained `binary_image.py` reader supports PE x64/x86/ARM64, ELF x64/ARM64
+and the ARM64 slice of thin/fat Mach-O. Intel macOS was removed from the historical
+patcher; it has no current runtime support. Research helper slice editing alone
+does not establish support for an architecture.
 
-**macOS universal framework (`macho-arm64`).** The gate binary is
-`…/Google Chrome Framework.framework/Versions/<v>/Google Chrome Framework`, a fat
-Mach-O; only the arm64 slice is supported. `section_64.offset` is already the
-slice-relative file offset (no vmaddr delta for byte location). **Code signing is
-load-bearing:** any edit invalidates the page hashes and Apple Silicon refuses to
-launch. There is no strip-and-run path — the bundle must be **re-signed inside-out**
-(every nested Mach-O/bundle individually, deepest first, `.app` last, with
-`--preserve-metadata=entitlements,flags` so the renderer keeps `allow-jit`;
-`requirements` dropped so an ad-hoc DR is regenerated). **The backup must live
-outside the `.app`** (a stray file breaks the seal; Keystone swaps the whole app):
-`«/Library or ~/Library»/Application Support/chrome-mv2-patch/«framework-UUID»/…bak`.
-Quit all Chrome processes first (a changed cdhash `SIGBUS`es the live process).
+Member offsets are build evidence, not stable API. During Chrome 154, nested
+fields shifted by `+0x20`, and register allocation/shared bodies changed between
+builds. Chrome 152 had already moved enforcement into a shared free predicate,
+with some callers tail-calling or sharing bodies. Future native ports must infer
+relationships from each image and account for all copies.
 
----
+**Linux lessons.** The historical disk patcher needed atomic sibling replacement
+to avoid `ETXTBSY`, and package/path restrictions affected installation.
+The native port should leave the ELF's code on disk unchanged and validate the
+actual mapped executable and its load bias. A WSL x64 launch is useful evidence
+for that tested artifact, but cannot validate native Linux ARM64 or the future
+loader/cache design.
 
-## 4. Site tables & the field shift
+**macOS lessons.** Apple Silicon refuses modified signed code unless the affected
+bundle is correctly re-signed. Historical disk experiments re-signed nested
+Mach-O files and bundles inside-out, with the `.app` last, preserving entitlements
+and flags (including renderer JIT entitlements). Backups belonged outside the
+signed `.app`, and all browser processes had to stop before signed files changed.
 
-`signatures.json` is canonical and is fetched at runtime from the GitHub raw URL
-(`https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json`).
-Each script's precedence is: an explicit `--signatures`/`-Signatures` path →
-`signatures.json` beside the script → the URL fetch. There are **no embedded tables**
-(the old `$EmbeddedSignatures`/`EMBEDDED_SIGNATURES` blobs and
-`scripts/sync_embedded.py` were removed), so the default path now requires network,
-and `chrome-mv2.sh` now requires `python3` on the default path (it previously used a
-pre-tokenized embed to avoid it). Publish `signatures.json` so the raw URL serves
-the change. Chrome 159 also requires the
-updated engine: its entries live in `milestones_v2`, which new readers concatenate
-with `milestones`. Legacy DLLs ignore that array rather than misinterpreting the
-new kinds as short branches. Historical table-based Windows DLLs required
-version **1.16.0 or later**; refreshing signatures alone did not upgrade that DLL.
-The current native `secur32.dll` does not read these tables. Each milestone is
-`container`-tagged so a target only probes its own container, and the runtime applies
-the **best full match** (`satisfied == total`); equal-rank ties and partial matches
-are declined by default.
+The retained `macho_insert_dylib.py` explores adding a load command to a scratch
+main executable so a future dylib can patch the framework in memory. If padding
+is insufficient, it can reclaim selected metadata commands; removal of the new
+command does not restore that metadata. A future installer needs a verified
+stock backup, bundle signing and native launch/removal tests. The helper supplies
+none of those, and this repository currently ships no macOS patcher.
 
-Architectural notes that matter more than the raw bytes:
+## 5. Off-store extensions and downloaded CRX files
 
-- **159 inverted predicates.** Reference artifacts are `159.0.8148.0` on Windows
-  x64/x86/ARM64, Linux x64/ARM64, and macOS ARM64; Windows Canary's
-  `159.0.8148.1` DCHECK build needs a separate `159-dcheck` table. Its startup,
-  management-policy reevaluation, and install checks retain both fast and
-  diagnostic copies. Both paths must be covered. The macOS table matches branded
-  and Chrome for Testing builds; the free predicate uses CSEL with an existing
-  zero operand. Linux ARM64 additionally inlines the predicate in
-  `ManagementSetEnabledFunction::CheckManifestV2Deprecation` and
-  `ExtensionService::CheckManagementPolicy`. The former uses its preceding
-  `CBZ X0` guard to the same false path: a signature around the B.LE alone also
-  matched unrelated code. The call before that guard still executes. Source was
-  checked in `extensions/browser/manifest_v2_{handler,util}.cc` and the corresponding
-  management-policy/service callers. Message selectors and CSP checks remain excluded.
-- **152 rearchitecture.** `IsExtensionAffected` became a shared free predicate;
-  `ShouldBlockExtensionInstallation` is a thunk that tail-calls it. Some gates fold
-  to byte-identical bodies (`expectedMatches=2`) or ICF to one address
-  (`expectedMatches=1`). Always sweep **both** `jg` encodings — `MustRemainDisabled`
-  went `near`.
-- **The +0x20 field shift within 154 (between 154.0.8011 and ~154.0.8030).** The
-  inlined manifest-version member moved (arm64 `[Xn,#0x30]→#0x50`; x64 inner
-  `MOV EAX,[RCX+0x30]→+0x50`; outer `+0x228` unchanged). So per platform: **152/153 +
-  early-154** = un-shifted, **late-154/155** = shifted. Empirically (win64):
-  `154.0.8011.0` is un-shifted, `154.0.8030.0`/`.8035.0` are shifted — the boundary is
-  well before 8037 (8037 is merely the branded-beta build used to derive the shifted
-  tables). Late-154 and 155 share the `155`-family table; **early-154 needs its own
-  table** where it diverges from 152. `154-x86`/`154-linux` cover early-154 there.
-  **The win64 `154` table (removed in v1.10.1) was re-added**: early-154 win64 is
-  un-shifted but its `ShouldBlockExtensionEnable` body splits into two diverged-register
-  copies (`rdx 837A50…` + `rcx 837950…`, each `expectedMatches=1`) that the 152 table's
-  folded `expectedMatches=2` site cannot match — so early-154 win64 scored only 5/6 on
-  `152` and **declined**. The re-added `154` table (7 core sites, verified full-match on
-  `154.0.8011.0`, 5/7 partial on 153 and 1/7 on late-154 so no tie) fixes it; it carries
-  core gates only (no branded InstallVerifier — no branded un-shifted-154 build exists —
-  and no 155-era webRequestBlocking). `154-win-arm64` stays because there is no
-  `155-win-arm64`.
-- **macOS no longer needs a per-milestone table.** When Gate B existed, its `cbz`
-  tail (`ldrsb w8,[sp,#imm]`) frame slot moved between 152 (`#0x6f`) and 153/155
-  (`#0x8f`), forcing a separate `153-macos-arm64` (152 bcond + the 153 cbz). With Gate
-  B removed (§8) the 4 MV2 bcond gates are layout-stable across 152/153, so
-  `152-macos-arm64` covers both and `153-macos-arm64` was dropped as a redundant tie.
+MV2 enforcement and extension-source checks are separate. Non-policy external
+extension registration avoids creating the managed-browser banner: on Windows,
+Chrome reads `Software\Google\Chrome\Extensions\<id>` with the 32-bit registry
+view; platform external-extension JSON serves the analogous Linux/macOS provider.
+Policy-based `ExtensionSettings`/`ExtensionInstallForcelist` registration marks
+Chrome managed, so the historical policy-filter bypass ("Gate B") was removed.
 
-**159 validation (2026-11-07).** The table audit, full fixture suite, and production
-C++ checks against all four Windows reference binaries pass. All three Windows
-DLL architectures build. Real ELF x64/ARM64 and Mach-O scratch copies pass patch,
-repeat, and byte-for-byte restore checks. Sandboxed Windows x64 launches pass on
-both CfT and Canary DCHECK: stock rejects MV2, patched launches run MV2
-`webRequestBlocking`, and the signed disk DLL stays unchanged. Sandboxed Linux x64
-under WSL also passes with an off-store CRX installed through the non-policy
-external provider, including enable/disable, restart, and restoration of the MV2
-disabled state in the extensions UI. Windows x86/ARM64, Linux ARM64, and macOS
-native launches (including macOS re-signing) remain untested.
+Official Chrome's `InstallVerifier::MustRemainDisabled` can make off-store
+extensions sticky-disabled through `DISABLE_NOT_VERIFIED`. A recognized
+`from_webstore()` flag test can take its existing verified path, allowing the
+extension to reach the recoverable external-extension state and be enabled.
+Historical x64/x86 code used `TEST ... ,8; JNE`; ARM64 used `LDRB; TBNZ ...,3`.
+Observed creation-flag offsets included Windows x64/ARM64 `+0x254`, x86
+`+0x17c` and macOS ARM64 `+0x24c`. These are reference-build observations.
 
-The Windows smoke test exposed a loader dependency: `wsprintfW` imported USER32,
-which Win32k-locked-down renderers cannot load. The proxy now formats the timeout
-with standard C++ and links without USER32; the renderer sandbox stays enabled.
+That branded verifier enforcement was compiled for Windows/macOS; Linux had
+`ENFORCE=NONE`. Unbranded or optimized builds can omit optional checks. Derive
+their meaning from each actual image instead of importing a branded build's
+addresses or assuming all Chrome for Testing builds behave alike.
 
----
+The current Windows patcher also recognizes downloaded-CRX installation checks.
+Its reviewed paths retain developer-signature and package-integrity checks while
+allowing a CRX without Chrome Web Store publisher proof. Edge has separate source
+and download decisions and requires both for its recognized installer path.
+Chrome's unknown optional checks are skipped. See the Windows README for
+architecture and runtime-validation limits.
 
-## 5. Porting to a new Chrome version
+MV2 request blocking follows MV2's normal permissions. The historical optional
+MV3 `webRequestBlocking` data patches were removed; they are not part of the
+native predicate patch.
 
-Bounded and cross-platform; re-check code generation and polarity. Toolkit in
-`scripts/` (core tools use the standard library; see `scripts/README.md`).
+## 6. Failed approaches and lasting lessons
 
-For Windows x64 research without a maintained table or symbols,
-`scripts/scan_windows.py` uses Capstone and Z3 to recognize the local predicate
-and infer field relationships. It can generate a current-binary runtime plan,
-but does not prove complete enforcement coverage or caller purpose. It remains
-separate from the shipping installer; see the measured results and limitations
-in `scripts/README.md` under "Signature-free Windows research".
+| Approach | Observed failure | Required lesson |
+| --- | --- | --- |
+| Unanchored wildcard search | Hundreds of unrelated edits and startup breakpoints. | Require semantic evidence and reject ambiguous candidates. |
+| Fixed register/member-offset patterns | Skipped checks after compiler/layout changes. | Recover field relationships from the current image. |
+| Change compared manifest value from 2 to 3 | Extensions disappeared. | The value identifies MV2; select the existing outcome instead. |
+| Toggle the test-only global | No usable symbol in stable/LTO builds. | Review reachable release code. |
+| Blank a side-effecting call | Corrupted service state and startup crashes. | Keep calls and their effects. |
+| Reuse beta byte windows on stable | All windows matched while MV2 stayed blocked. | Matching bytes do not establish purpose or complete coverage. |
+| Trust a faulty PDB RVA parser | Verified addresses were about `0x1000` wrong. | Match image identity and use dbghelp; distinguish addresses from file offsets. |
+| Scan short branches only | Missed near-branch enforcement silently. | Review every supported instruction shape and resolved copy. |
+| Flip a manifest-version reason-string selector | Browser crash-looped only after an actual MV2 extension was installed. | Review both outcomes; string-literal loads and message-building calls are not a Boolean enforcement gate. |
+| Include PC-relative calls/addresses in a fixed byte window | Matched one build and failed after relocation. | Native analysis must decode targets/relocations rather than inherit build-specific byte distances. |
 
-1. **Fetch** the stock binary (`fetch_chrome_binary.py --platform … [--channel|--version]`)
-   and, where published, symbols (`fetch_symbols.py`): PDB (PE, incl. arm64),
-   `chrome.debug` (Linux x64), or the dSYM symtab (mac). No symbols for CfT, arm64
-   Linux, or LTO-inlined policy code → locate structurally.
-2. **Derive**: `port_milestone.py <bin> --name <ver> --prev <prev> [--moved old:new] --merge`
-   learns field offsets, folds shared bodies, and picks the shortest signature with
-   **no build-specific PC-relative immediate** (`audit_signatures.py`'s
-   `pc_relative_spans` now flags arm64 `BL`/`B` and x86 `jmp rel32`, not just
-   `adrp`/`lea`/`call`).
-3. **Verify**: `derive_milestone.py <bin> --verify` → `ALL SITES VERIFIED: True`;
-   `audit_signatures.py --binary <bin>` → the intended milestone is selected, no tie,
-   no uncovered gate; `run_tests.py`; then patch a **scratch copy** and GUI-test.
+The reason-string trap was removed from historical tables on September 9, 2026.
+It matched once and passed byte verification and fresh-profile startup. The
+downstream message-builder `CHECK` ran only with a real MV2 extension. Every
+runtime test therefore needs an installed extension, beyond an empty-profile
+launch.
 
-**Two traps a clean `--verify` + fresh-profile launch both miss:**
-- **A `cmp,2 ; jg` may select a _reason string_, not a bool.** Disassemble **both**
-  branches: a real gate reads the manifest-version field and returns a bool; a
-  string-selector loads string-literal addresses (`lea rip→.rdata` / `adrp+add` /
-  `mov imm32`) and converges into a message builder guarded by a downstream `CHECK`.
-  Flipping it crash-loops the browser, and it matches exactly once so `matches>2`
-  never flags it.
-- **The runtime GUI test MUST have a real MV2 extension installed** (off-store via
-  the non-policy external-extensions provider — §8), not just a fresh profile — the
-  reason-string path only runs then.
+## 7. Research and validation workflow
 
-If the `cmp,2 ; jg` skeleton is gone entirely, re-analyze the gate from source
-before touching bytes. The current automatic finder still discovers JG/B.GT only;
-it cannot author all 159 sites. Use source/symbol-guided disassembly, verify every
-resolved copy, and keep new instruction forms in `milestones_v2`.
+1. Fetch a stock image and matching symbols where published. Record the complete
+   file hash, architecture, source version and provenance in `_scratch/`.
+2. Review source and both outcomes of candidate checks. Establish independent
+   required/optional address baselines; never use the scanner's output as its own
+   correctness oracle.
+3. Run read-only native discovery and compare against those hash-bound baselines
+   with `scripts/check_autoscan_matrix.py`. Report missing, unexpected and
+   unresolved decisions.
+4. Run `python scripts/run_tests.py` and the relevant CMake tests. Extend native
+   decoder/proof tests for a meaningful new layout instead of weakening declines.
+5. Test isolated browser copies with a real off-store MV2 extension and an MV3
+   control: install/enable, request blocking, disable/re-enable, cached and empty
+   cache restarts, and removal. Verify on-disk browser hashes and normal sandbox
+   behavior. Each future platform also needs update/cache invalidation and its
+   native loading, protection and restoration checks.
 
----
+The Python Capstone/Z3 scanner is retained as an x64 analysis prototype; it
+emits reports and has different compiler coverage from the native implementation.
+[The scripts README](scripts/README.md) documents its commands and both matrices.
 
-## 6. Superseded approaches & lessons
+Recorded native x64 behavior includes Chrome 157.0.8103.79 MV2 enablement/request
+blocking and Edge 157.0.4341.46 developer-signed CRX installation, including
+tampered-package and missing-developer-proof rejection. Earlier native scanner
+analysis covered x64, x86 and ARM64 reference images. Historical disk/table
+experiments covered Chrome 152–159 and included ELF/Mach-O scratch patch/restore
+and Windows/Wine/WSL launches. Those results apply to their recorded artifacts;
+they do not certify the current DLL or future Unix ports.
 
-**CARDINAL RULE: select an existing not-affected target, fall-through, or CSEL zero
-operand. Never delete or blank a call, change manifest values, or invent control flow.** Blanking a
-side-effecting `call` (to fake a return value) produced structurally valid bytes but
-corrupted `KeyedService` state and crashed on startup — byte verification cannot
-catch a semantic break.
-
-| Approach | Symptom | Root cause |
-| :--- | :--- | :--- |
-| Unanchored wildcard byte search | `STATUS_BREAKPOINT` on startup | A short pattern hit 200+ unrelated `.text` sites and corrupted them. |
-| Fixed register in the pattern | Patch skipped; MV2 still blocked | Register allocation varies between releases. Anchor on the longest fixed run, mask the volatile fields. |
-| `cmp [reg+off],2` → `3` (edit the data) | All extensions vanished | That operand *identifies* MV2 during parsing. Flip the branch, not the data. |
-| Toggle `g_allow_mv2_for_testing` | No such symbol in stable | Test-only writer stripped; LTO folds the gate. Works only on Canary/debug. |
-| Blank a side-effecting `call` | Crash on startup | See CARDINAL RULE. |
-| Third-party **beta** signatures on stable | All patterns *found*, MV2 still blocked | Every pattern matched an unrelated function on stable and corrupted it. Container- + milestone-tag and require an exact match count. |
-| Trusting a hand-rolled PDB parser's RVAs | "Verified" the wrong bytes | Parser landed ~`0x1000` low. Resolve symbols with `dbghelp`. Same "off by a section delta" family as assuming ELF `.text` vaddr == file offset. |
-| Short-`jg`-only scan | Missed `MustRemainDisabled` silently | It compiled to a `near jg`. Always sweep both encodings. |
-| Flipping a `cmp,2 ; jg` that selects a **reason string** ("type!=PLATFORM_APP variant", added in the 154 pass) | **Crash-loops on launch** — but only once a real MV2 extension is installed, so scratch-copy startup misses it | It matched a message-string selector (`adrp→.rdata` string loads + a downstream `CHECK`), not an enforcement gate. Removed from all tables 2026-09-09; `154-cft` deleted. Detection rule as in §5. |
-| macOS Gate-B `cbz` sig with the call's `BL`/`B` in the anchor | Matched only the one build it was cut from → mac policy force-install silently failed on other 152 builds | The `cbz` sits between a relative `BL` (before) and `B` (after); a fixed-byte anchor pinned their build-specific `imm26`. **Fix (v1.10.1): the `cbz` matcher masks embedded `BL`/`B` (opcode class still checked) and the sig extends past the `B` to an invariant tail** (`mov x20,x0 ; ldrsb w8,[sp,#imm]`) for a unique anchor. `pc_relative_spans` now flags `BL`/`B` so this can't recur. |
-
-**Standing rules:** never guess bytes (anchor on the longest fixed run, require an
-exact match count, or decline); a partial match is not success (report it partial —
-a false "success" on a half-patched build is worse than declining).
-
----
-
-## 7. Tooling notes
-
-- `fetch_chrome_binary.py` (stdlib + 7-Zip): downloads a channel's offline installer
-  and unwraps the container chain to the bare gate binary in `_scratch/`. `--version`
-  falls back to Chrome for Testing (unbranded — re-verify); `win-arm64`/arm64-linux
-  have no CfT (`--channel`, or `--url` to pin).
-- `fetch_symbols.py` (stdlib): PDB via RSDS key, `chrome.debug` via range requests,
-  or the dSYM `LC_SYMTAB` streamed from `dl.google.com`; verifies build identity.
-- `symbols_from_pdb.py` (dbghelp/ctypes) and `symbols_from_elf.py` (streams `.symtab`,
-  faster than `nm -SC` on the multi-GB debug file) name gate functions.
-- `derive_milestone.py` (stdlib, no capstone/pefile): the finder + `--verify`, parses
-  PE/ELF/Mach-O and mirrors the runtime match-count/masking rules, including the
-  inverted branches and CSEL introduced in 159.
-- `port_milestone.py` wraps it to author a milestone; `audit_signatures.py` catches
-  ties, build-pinned sigs, weak anchors, and (with `--binary`) uncovered gates.
-  `run_tests.py` drives the PE/ELF/Mach-O suites. (`sync_embedded.py` was removed with
-  the embedded tables — §4.)
-
----
-
-## 8. Beyond MV2 — off-store install with no "managed by your organization" banner
-
-MV2 re-enable is one gate; a second capability (**Route A**) lets an off-store,
-**self-hosted** extension install and auto-update from its own `update.xml` without
-any enterprise policy — so Chrome never shows the "managed by your organization"
-banner.
-
-**Why the banner appears, and how Route A avoids it.** The banner is driven by *any*
-platform policy (`ShouldDisplayManagedUi` → `HasMachineLevelPolicies`), so the old
-`ExtensionSettings`/`ExtensionInstallForcelist` force-install route (formerly "Gate
-B", now **removed**) always flips Chrome to managed. Instead, install via the
-**non-policy external-extensions provider** — the Windows registry key
-`Software\Google\Chrome\Extensions\<id>` with an `update_url` value (write the
-**32-bit view**: `reg add … /reg:32`, since Chrome reads `Extensions` with
-`KEY_WOW64_32KEY` — or HKCU, which needs no admin), or `external_extensions.json` on
-Linux/macOS. That yields ManifestLocation `kExternalPrefDownload`, which is **not** a
-policy location, so the profile stays unmanaged and Chrome still auto-updates the
-extension from its self-hosted `update.xml`.
-
-**The gate: `InstallVerifier::MustRemainDisabled` → force `IsFromStore`.** On official
-Chrome (`#if GOOGLE_CHROME_BRANDING && (IS_WIN || IS_MAC)`,
-`GetExperimentStatus()==ENFORCE`) the `InstallVerifier` disables any non-Web-Store
-extension with a **sticky** `DISABLE_NOT_VERIFIED` (the Enable toggle greys out).
-`MustRemainDisabled` inlines `IsFromStore()`, whose first test is the
-`from_webstore()` creation-flag bit; flipping that test to always take the "from
-store" path makes `MustRemainDisabled` return false, so the extension installs and
-lands in the recoverable `DISABLE_EXTERNAL_EXTENSION` state (one Enable click).
-On builds with `ENFORCE=NONE`, the flip is a no-op.
-
-Enforcement is compiled **only on Windows and macOS** (like the old Gate B); on Linux
-(`elf`/`elf-arm64`) it is `NONE`, so there is **no gate** and off-store installs
-already work. All sites are **`optional`** (additive to MV2 re-enable — a build where
-the site does not match must never fail the core patch).
-
-This branch's compact Windows x64 DLL automatically applies every verified optional
-gate, without an extra launch flag; see [launch instructions](mv2-mem-patch-win/README.md#off-store-extensions).
-The table-based release behavior is unchanged.
-
-| container | kind | flip |
-| :--- | :--- | :--- |
-| pe (x64) | `short` (`stockOpcode 0x75`) | `test byte[ext+0x254],8 ; jne <verified>` → `jne`→`jmp` |
-| pe32 (x86) | `short` (`stockOpcode 0x75`) | same, `creation_flags` at `ext+0x17c` |
-| pe-arm64 | `tbz` | `ldrb w,[ext,#0x254] ; tbnz w,#3,<verified>` → `tbnz`→`B` (same target) |
-| macho-arm64 | `tbz` | `ldrb w,[ext,#0x24c] ; tbnz w,#3,<verified>` → `tbnz`→`B` (same target); mac `creation_flags` is at `ext+0x24c`, **not** `+0x254` like Windows |
-| elf / elf-arm64 | — | compiled out (`ENFORCE=NONE`) |
-
-Unbranded builds can omit the gate when `ShouldEnforce()` folds to false. Prefer a
-branded reference for derivation and verify each target; the 159 CfT reference
-binaries used here retain matching optional sites. Each
-`jgRVA` is a per-build fast-path hint; the **signature scan is authoritative** and finds
-the gate on any build where the sig is present. The sigs are **not shift-stable** — a
-sig word that encodes a manifest member offset changes across the +0x20 shift — so the
-shifted-layout tables must be derived from a shifted-layout branded build, not copied
-from the 152 family.
-
-Verified/derived against branded builds: 152 pe / pe-arm64 / macho-arm64 on branded 153
-(win64, win-arm64, mac-arm64); `154-x86` on branded 153 win32 (`jgRVA 0x0319D797`);
-`155-x86` on branded beta `154.0.8037.17` win32 (`jgRVA 0x032F4E47`); `154-win-arm64` on
-branded beta `154.0.8037.17` win-arm64; `155` pe on branded beta `154.0.8037.17` win64
-(`jgRVA 0x032F4553`); `155-macos-arm64` on branded **Canary 155.0.8052.0** mac framework
-(`jgRVA 0x029206F8`). **Corrections (this pass):** `154-x86` and `155-x86` had `jgRVA`
-mistakenly copied from `152-x86` (`0x032EFE77`, which matched no real build — scan-fallback
-had been masking it); `155-macos-arm64` had `jgRVA` copied from `152-macos-arm64`
-(`0x0294FDDC`) though its **sig was correct** (matches uniquely, just relocated to
-`0x029206F8`); `154-win-arm64`'s whole **sig** was copied from `152-win-arm64` and matched
-**nothing** on real late-154 arm64 (the `ldr x0,[x19,#0x3c8]` after the `tbnz` shifted to
-`[x19,#8]`) — re-derived to `0851493988011837600640F9E80F40F9` @ `0x02CCF568`. Only
-**`152-x86`** keeps its unverified hint (`0x032EFE77`) — no branded 152.x win-x86 is
-fetchable (the stable installer auto-serves 153; CfT is unbranded), and the value is a
-distinct one that the others copied *from*, so it is plausibly the correct 152.x original;
-it resolves via scan regardless. **Branded-mac sourcing:** the beta universal DMG 404s, but
-the **Canary** DMG works (`dl.google.com/chrome/mac/universal/canary/GoogleChromeCanary.dmg`)
-and is a shifted (155-family) branded build. The
-**`mv2-mem-patch-win`** DLL applies these in-process — its short-flip path was fixed
-to honor `stockOpcode` (use the sig's own byte at `jgOff`, not a hardcoded `0x7F`) so
-the `jne` gate applies, and it gained the `tbz` kind for arm64.
-
-**Windows ARM64 anchor correction (2026-11-10).** The `154-win-arm64` and
-`159-win-arm64` InstallVerifier signatures now end at the `tbnz`, anchored by
-`ldr x8,[sp,#0x10]; ldrb w8,[x8,#0x254]`. The following pointer load's register and
-member offset vary between builds, causing the old signatures to miss 157, 158,
-and later 159. The new 12-byte window has eight fixed prefix bytes and matches
-exactly once in branded 153, 154, 157, 158 and both tested 159 builds. Both branch
-outcomes retain the same source meaning: the taken path short-circuits
-`IsFromStore()` to its existing verified path. The DLL's `tbz` rewrite is unchanged.
-
-Under WSLC with `linaro/wine-arm64:10.2`, the legacy table-based ARM64 DLL applies all
-required and optional sites on 157.0.8103.51, 158.0.8127.18 and 159.0.8153.0.
-On 159, a real MV2 CRX installed through the non-policy external registry provider
-can be enabled, runs its background script, and blocks a selected request after
-restart. Removing the DLL disables it again and stops the blocking. Disk DLL
-hashes stay unchanged. These Wine/QEMU checks run without the browser sandbox;
-native Windows ARM64 sandbox and DRM behavior still need hardware testing.
-
-> **Removed: Gate B.** "Gate B" (skip `FilterSensitivePolicies` to
-> honor off-store `ExtensionSettings` on unmanaged Chrome) was removed from every
-> table — it required the policy route that triggers the managed banner, which Route
-> A avoids. It remains supported by the engines for custom tables but ships in no
-> milestone. (The historical Gate-B `cbz` masking lesson in §6 still applies to the
-> `cbz` kind generally.) The optional `featurebyte` patches granting
-> `webRequestBlocking` to MV3 were removed from all shipping tables on
-> 2026-11-08. MV2's normal permission support is independent of those patches.
+Native x86/ARM64 browser lifecycle, native macOS loading/signing, Linux ARM64,
+browser updates and DRM need their own validation. Preserve sandbox and signature
+behavior when porting; fixture tests and bounded proofs are only part of that
+evidence.

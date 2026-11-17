@@ -2,7 +2,7 @@
 
 Capstone recovers candidate control flow; Z3 checks its predicate routing.
 This proves the decoded local model, not complete enforcement coverage or the
-purpose of every caller. Review the report before using an emitted runtime plan.
+purpose of every caller. Output is an analysis report, not a runtime plan.
 
     uv run --with capstone --with z3-solver scripts/scan_windows.py chrome.exe
 """
@@ -24,7 +24,7 @@ except ImportError as exc:
     raise SystemExit("This analysis tool needs capstone and z3-solver; run it with "
                      "uv run --with capstone --with z3-solver.") from exc
 
-from derive_milestone import open_images
+from binary_image import open_images
 
 
 def reg_name(md, reg):
@@ -551,44 +551,10 @@ def resolve_binary(path):
     return path
 
 
-def runtime_plan(img, report):
-    from derive_milestone import masked_match_count
-    from port_milestone import harden
-    if not report['gates'] or report['unresolved']:
-        raise ValueError("cannot emit a plan with no gates or unresolved candidates")
-    decisions = {int(g['rva'], 16) for g in report['gates']}
-    sites, covered = [], set()
-    for gate in report['gates']:
-        cp, jp, kind = img.off(int(gate['compare_rva'], 16)), img.off(int(gate['rva'], 16)), gate['kind']
-        jump = bytes(img.text[jp:jp + (2 if kind.startswith('short') else 6)])
-        if kind.endswith('-nop') and jump[:1] != b'\x7e' and jump[:2] != b'\x0f\x8e':
-            raise ValueError("this inverted branch needs runtime support before plan export")
-        if img.rva(jp) in covered:
-            continue
-        start, off, sig, count, anchor = harden(img, cp, jp, kind)
-        matches = {img.rva(p) + off for p in masked_match_count(img.text, sig, off, kind)}
-        if not matches or not matches <= decisions or matches & covered:
-            raise ValueError("generated runtime window includes an unverified or duplicate decision")
-        covered.update(matches)
-        site = {"name": "MV2 predicate at " + gate['rva'], "kind": kind,
-                "jgRVA": gate['rva'], "jgOff": off, "sig": sig.hex().upper(), "expectedMatches": len(matches)}
-        if kind == 'short' and jump[0] != 0x7F:
-            site['stockOpcode'] = '0x%02X' % jump[0]
-        if kind == 'near' and jump[:2] != b'\x0f\x8f':
-            site['stockOpcode'] = '0x' + jump[:2].hex().upper()
-        sites.append(site)
-    if covered != decisions:
-        raise ValueError("runtime plan does not cover the discovered decisions")
-    return {"_comment": "Locally discovered research plan; enforce this exact binary hash before use.",
-            "binary_sha256": report['sha256'], "milestones": [],
-            "milestones_v2": [{"name": "scan-" + report['sha256'][:12], "container": "pe", "sites": sites}]}
-
-
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument('binary', help='chrome.exe or chrome.dll')
     parser.add_argument('--json', type=Path, help='write the analysis report')
-    parser.add_argument('--plan', type=Path, help='emit a local runtime plan for a reviewed experiment')
     args = parser.parse_args()
     try:
         binary = resolve_binary(args.binary)
@@ -599,8 +565,6 @@ def main():
         print(output)
         if args.json:
             args.json.write_text(output + '\n', encoding='utf-8')
-        if args.plan:
-            args.plan.write_text(json.dumps(runtime_plan(img, report), indent=2) + '\n', encoding='utf-8')
         return 0 if report['gates'] and not report['unresolved'] else 1
     except (OSError, ValueError, struct.error) as exc:
         print('scan failed: ' + str(exc), file=sys.stderr)

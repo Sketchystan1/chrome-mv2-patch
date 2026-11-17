@@ -10,7 +10,7 @@ Linux, macOS: maybe in the future...
 
 ## Windows
 
-Download [latest release](https://github.com/Sketchystan1/chrome-mv2-patch/releases/latest), right-click `install.bat` and select **Run as administrator**.  
+Download [latest release](https://github.com/Sketchystan1/chrome-mv2-patch/releases/latest) and run `install.bat`.  
 
 Manual: copy `.dll` next to browser `.exe`.  
 If older patcher installed, delete `version.dll`.

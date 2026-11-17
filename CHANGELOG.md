@@ -6,6 +6,7 @@
 - Auto MV2 signatures search for any versions starting from 151.
 - Starts in under a second and much faster on later launches.
 - Allow .CRX extensions from outside the Web Store.
+- Support for Linux and macOS is being temporarily removed.
 
 ## [1.16.0] - 2026-11-07
 

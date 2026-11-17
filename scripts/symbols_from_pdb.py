@@ -1,20 +1,13 @@
-"""Resolve MV2 gate function symbols in a Chrome PDB via dbghelp (Windows only).
+"""Resolve MV2-related function names in a matching Chrome PDB via dbghelp.
 
-Optional naming aid for a Windows derivation: derive_milestone.py finds the gate
-*sites* by byte pattern without any symbols; this attaches human names/RVAs to
-them so you know which candidate is UserMayInstall vs MustRemainDisabled, etc.
+Optional, Windows-only research aid for source/disassembly review. The native
+auto patcher does not use symbols. Inlined checks are named by their enclosing
+functions; names alone do not identify a patchable decision.
 
-Generalised from an earlier single-build script: the DLL and its symbol
-directory are arguments (not hardcoded), and the image base is read from the PE,
-so it works for any Chrome version. On Linux the equivalent is `nm chrome.debug |
-grep -Ei 'IsExtensionAffected|ShouldBlockExtension|MaybeReEnable|UserMayInstall|MustRemainDisabled'`.
+    python scripts/symbols_from_pdb.py path/to/chrome.dll --symdir _scratch --json _scratch/syms.json
 
-Usage (Windows, with chrome.dll.pdb next to the DLL or in --symdir):
-    python scripts/symbols_from_pdb.py path\\to\\chrome.dll [--symdir DIR] [--json out.json]
-
-The 5+ GB PDB parses once (~2 min on first SymLoadModuleExW). Requires dbghelp
-(ships with Windows). Fetch the matching PDB with `chrome-mv2 fetch-symbols`.
-"""
+Fetch matching symbols with scripts/fetch_symbols.py. Large PDBs can take
+minutes to load; dbghelp ships with Windows."""
 
 import argparse
 import ctypes as C
@@ -26,7 +19,7 @@ from pathlib import Path
 
 # Gate function name masks — version-independent (the C++ source names). The
 # inlined copies (UserMayInstall / MustRemainDisabled) are named by their
-# enclosing function; derive_milestone.py locates the actual inlined check.
+# enclosing function; review its instructions to locate the decision.
 GATE_MASKS = [
     "*IsExtensionAffected*",
     "*ShouldBlockExtensionInstallation*",

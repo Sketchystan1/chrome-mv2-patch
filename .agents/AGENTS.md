@@ -1,149 +1,102 @@
-# Agent Workspace Guidelines — Chrome Manifest V2 Patcher
+# Agent Workspace Guidelines — Chrome MV2 Patcher
 
-Full rationale, gate layouts, and failed approaches live in
-[`mv2-reversing.md`](../mv2-reversing.md); the derivation workflow lives in
-[`scripts/README.md`](../scripts/README.md). Read `mv2-reversing.md` before
-changing any patching logic. This file is the short operating contract.
+Read [mv2-reversing.md](../mv2-reversing.md) before changing discovery or patch
+semantics. [scripts/README.md](../scripts/README.md) describes the research and
+verification tools; [the Windows README](../mv2-mem-patch-win/README.md) describes
+the deployed implementation.
 
-## Repository shape
+## Current repository
 
-The platform buffer matchers share one signature model. The Windows DLL uses
-independent automatic discovery. Do not
-reintroduce the removed Go or Python patchers:
+- `mv2-mem-patch-win/` builds the native Windows `secur32.dll` auto patcher for
+  x64, x86 and ARM64. `install.bat` installs a local DLL beside `chrome.exe` or
+  `msedge.exe`; `build.bat` and Visual Studio share CMake presets.
+- Deployment DLLs and installers go in ignored `build/<arch>/`. Dependencies,
+  diagnostic tools, fixtures and build intermediates go in ignored `out/<arch>/`.
+- `scripts/` contains research tools and tests. Binary downloads and browser
+  experiments belong in ignored `_scratch/`.
+- Linux and macOS native auto patchers are planned. Their binary readers,
+  downloaders, symbol tools and Mach-O loader research are retained for those ports.
 
-- `chrome-mv2.ps1` — installs the Windows `secur32.dll` automatic patcher; retains the PE buffer engine
-  and legacy restore: `pe` (x64), `pe32` (x86), `pe-arm64` (Win-on-ARM).
-- `chrome-mv2.sh` — Unix, dispatched by file magic: Linux `elf`/`elf-arm64` and the
-  macOS `macho-arm64` framework slice (then ad-hoc re-signs the app). Must stay
-  bash-3.2 clean; it fetches `signatures.json` from the URL and tokenizes it with
-  `python3`, so `python3` is now required on the default path too. Intel macOS was
-  dropped in v1.10.0.
-- `scripts/*.py` — derivation/verification only; they never patch an install.
-- `mv2-mem-patch-win` — Windows in-process patcher, built with its own `build.bat`.
+The Go/Python patchers, PowerShell/Bash byte patchers, maintained signature tables
+and table derivation tools are retired. The native scanner discovers the checks
+from each browser image without tables, debug symbols, Capstone or Z3. Support
+depends on recognized code, rather than a fixed milestone list.
 
-This branch's only deployment DLL is `secur32.dll` (`build.bat` or Visual Studio).
-It uses compact native discovery on x86, x64 and ARM64 without signature tables,
-and is placed beside `chrome.exe` or `msedge.exe`. DLLs go in `build/`;
-generated files, dependencies and test tools go in ignored `out/`. See
-[Windows implementation and limits](../mv2-mem-patch-win/README.md#implementation-and-limits)
-for its bounded proof and runtime contract. Existing installers download the
-published release.
+## Patch semantics
 
-The patch re-enables MV2 by selecting the existing not-affected outcome at each
-recognized `IsExtensionAffected` site. Table-based platform matchers use
-per-milestone, container-tagged tables and apply only a complete unambiguous match.
-The native Windows DLL discovers the same predicate. Supported: Chrome **152–159**.
+Select a recognized check's existing not-affected outcome after reviewing both
+paths. Preserve calls and their side effects, manifest values, branch targets and
+instruction widths. Never turn a reason-string selector or CSP check into an
+enforcement patch.
 
-## Cardinal rule
+For x86/x64, a recognized taken outcome becomes a short `JMP` or `NOP; JMP`;
+an inverted check becomes a complete NOP sequence. ARM64 conditional branches
+select their existing target or fall-through; optional test-bit branches recompute
+the unconditional branch displacement to the same target. Historical Linux/macOS
+CBZ and CSEL forms are research evidence, not automatic Windows coverage.
 
-Force the predicate's existing not-affected outcome, after reviewing both paths:
+Unknown instructions, conflicting field roles, ambiguous candidates, incomplete
+plans and capacity/bounds failures must decline. Do not weaken a rejection or
+identity check to accept a new browser. A bounded local predicate proof does not
+prove complete enforcement coverage.
 
-- short `jg`: `7F`→`EB` (disp8 kept); a site may pin any Jcc via `stockOpcode` (the
-  InstallVerifier gate flips a `75` `jne`). near `jg`: `0F 8F`→`90 E9` (disp32 kept).
-- arm64 `bcond`: rewrite only the condition nibble GT(0xC)→AL(0xE); opcode `0x54`,
-  bit4, and `imm19` preserved.
-- arm64 `cbz`/`tbz`: a `cbz` (imm19) or test-bit `tbz`/`tbnz` (`0x36`/`0x37`
-  family, imm14) → unconditional `B` to the **same resolved target** (imm26 recomputed
-  from the sign-extended imm19/imm14). `tbz` is the arm64 InstallVerifier flip; `cbz`
-  can also use a 64-bit X register, with register and width pinned.
+## Runtime contract
 
-- Chrome 159 inverted checks: `short-nop` (`7E disp8`) and `near-nop`
-  (`0F 8E disp32`) become complete NOP sequences; `bcond-nop` (`B.LE`) becomes
-  `1F2003D5`. Each selects the existing not-affected fall-through.
-- `csel` accepts only `CSEL Wd,WZR,Wm,GT`; GT→AL selects its existing zero operand.
-- Linux ARM64 159 uses a CBZ guard whose existing target skips only the MV2 predicate.
+Keep discovery separate from application:
 
-Never delete/blank a `call`, edit the compared manifest-version value, or invent
-control flow — structurally valid but semantically wrong edits have crashed Chrome
-or hidden extensions. See `mv2-reversing.md` §6 before changing the byte strategy.
+- Read the stock browser image without modifying it; infer field relationships
+  and verify the source predicate with bounded instruction/control-flow analysis.
+- Bind cache entries to the complete browser identity, scanner identity and
+  protocol version. Authenticate and validate cached plans before reuse.
+- Validate instruction bytes, addresses, branch targets and loaded executable
+  code, accounting for the platform's loader relocations.
+- Patch in the main browser process at a validated startup point outside the
+  loader lock. Child processes must retain normal forwarding/loading behavior.
+- Apply edits transactionally: execute/read → read/write → edit and verify →
+  flush instruction cache → restore protections. Roll back every failed edit.
+  Failed rollback or protection restoration must stop the browser.
+- Chrome's unrecognized optional install checks are skipped; recognized Edge
+  installer support requires both of its installer decisions.
 
-## Runtime ownership & safety contract
+The deployed Windows code has no runtime table download or analysis dependency.
+Keep the browser's on-disk binaries unchanged. See the Windows README for cache,
+startup, installation and removal details.
 
-Keep platform behavior in its owning script (`ps1` = PE strip-Authenticode +
-checksum; `sh` = ELF atomic-replace / Mach-O fat parse + inside-out ad-hoc
-`codesign`). All table-based engines implement the same contract:
+## Future Linux and macOS ports
 
-- Validate signature data and image bounds; probe the recorded RVA, then relocate
-  with a masked `.text` scan.
-- Mask only volatile fields: the jump opcode + displacement; the `bcond`/`cbz`/`tbz`
-  word's variable field (`bcond` condition + `imm19`; `cbz` `imm19`, register/width pinned; `tbz`
-  `imm14`, family/op/bit-position/Rt pinned); and, for `cbz`, any embedded `BL`/`B`
-  (opcode class still checked — its `imm26` is build-specific).
-- Require each site's exact `expectedMatches`; select the **best full match** (most
-  sites) and **decline** equal-rank ties or partial/unknown layouts.
-- Treat stock and already-patched opcodes as valid (idempotent reruns); preserve a
-  validated, build-specific backup outside any signed bundle; report candidates
-  without modifying an unknown layout.
+Follow the Windows architecture: native automatic discovery from the installed
+image, a validated cache, loaded-code verification and transactional in-memory
+patching. Share source semantics and reusable decoding/proof logic where practical.
+Keep container parsing, function bounds, loader startup, relocations, memory
+protection, cache protection and installation in their platform owners.
 
-Never weaken a decline, backup, identity, bounds, or post-write check to make a new
-build pass — a declined unknown layout is the safe, expected result.
+Do not bring back per-version signature maintenance or ship the Python research
+scanner as the runtime. ELF virtual addresses differ from file offsets; loaded
+addresses need the image's load bias. Mach-O addresses are slice-specific and need
+the dyld slide. macOS installation must account for code signing and entitlements;
+the retained load-command editor is a scratch-copy experiment, not an installer.
 
-## Signature sources
-
-`signatures.json` is canonical and the **only** copy. The engines fetch it from
-the GitHub raw URL
-(`https://github.com/Sketchystan1/chrome-mv2-patch/raw/master/signatures.json`) at
-runtime; precedence is an explicit `--signatures`/`-Signatures` path →
-`signatures.json` beside the script → the URL. There are **no embedded tables** (the
-`$EmbeddedSignatures`/`EMBEDDED_SIGNATURES` blobs and `scripts/sync_embedded.py` were
-removed). Publish the table with the matching engine changes so the raw URL and
-release DLL stay compatible. Consequences: the default path now needs network, and
-`chrome-mv2.sh` now needs `python3` on the default path (to tokenize the fetched
-JSON). Keep older milestones so the scripts keep covering supported versions.
-
-## Deriving / porting a milestone
-
-Use the scripts, not hand analysis (`scripts/README.md` has the full workflow):
-`fetch_chrome_binary.py` → `fetch_symbols.py` → **`port_milestone.py`** (the driver:
-learns field offsets, folds shared bodies, picks the shortest signature free of
-build-specific PC-relative immediates, carries site names from `--prev`) →
-`audit_signatures.py --binary` → `run_tests.py` → patch a **scratch copy** and
-GUI/runtime-test (with a real MV2 extension installed off-store via the non-policy
-external-extensions provider — the reason-string trap in §5/§6 is invisible on a
-fresh profile).
-
-Two table-level failures are invisible from a single binary — never skip the audit:
-
-- **Equal-rank tie.** Two milestones in one container with identical signature sets
-  rank equally and the runtime declines. When a new version's gates are unchanged,
-  reuse/extend the existing table instead of adding a duplicate (e.g. Chrome 154 mac
-  and linux are covered by the 152/155 tables; adding a `154-*` clone would tie).
-  Removing Gate B made `152-` and `153-macos-arm64` identical, so `153-macos-arm64`
-  was dropped.
-- **Build-specific signatures.** A window holding an `adrp`/`adr`, `lea rip+disp`,
-  arm64 `BL`/`B`, or `call/jmp rel32` encodes a distance within one image and matches
-  only that build. `audit_signatures.py`'s `pc_relative_spans` flags all of these;
-  keep it at 0 hits. (`cbz`/`tbz` sites embed a branch word — the matcher masks the
-  volatile field instead; trim the sig to exclude any other PC-relative immediate.)
-
-Chrome 159 tables belong in `milestones_v2`. New readers concatenate both arrays;
-older Windows DLLs otherwise mistake unknown instruction kinds for short branches.
-Historical table-based DLLs required version 1.16.0 or later with these tables.
-Ship table updates with the updated Unix script; native `secur32.dll` uses no table.
-The old `jg`/`b.gt` finder cannot author inverted/CSEL sites automatically: review
-the source and both outcomes, then verify the complete resolved address set.
-
-If the `cmp <mv>,2 ; jg` skeleton disappears, stop and re-analyze the gate from
-source before changing bytes.
+Each port needs native validation with a real MV2 extension, MV3 control,
+enable/disable, restart, browser update, cache invalidation and removal. Fixture
+parsing, WSL/Wine launches and successful byte matching do not establish native
+macOS, Linux ARM64 or Windows ARM64 runtime behavior.
 
 ## Verification
 
-```bash
-python scripts/run_tests.py                 # audits + PE/ELF/Mach-O suites
-bash -n chrome-mv2.sh                        # sh syntax
-python scripts/derive_milestone.py <stock binary> --verify   # each site still matches
-python scripts/audit_signatures.py --binary <stock binary>   # selection + ties + uncovered gates
+```text
+python scripts/run_tests.py
+uv run --with capstone --with z3-solver scripts/run_tests.py
 ```
 
-The audit is the stronger check: `--verify` only asks whether recorded sites match,
-while `audit --binary` reports which milestone the runtime selects, whether anything
-ties, and whether a gate in the binary is covered by nothing. Real-macOS runtime
-proof (re-sign → launch → MV2 A/B → restore, Apple Silicon) and native Windows ARM64
-browser behavior still need target hardware. Native scanner/proxy/application
-tests use `ctest --preset <arch>` in `mv2-mem-patch-win` after its CMake build.
-ARM64 runtime checks require ARM64 Windows. The release workflow only builds the
-three architecture variants of `secur32.dll`.
+The first command runs the portable fixtures and the Windows installer suite on
+Windows; Python scanner checks skip if their optional dependencies are absent.
+The second includes those research checks. `--fast` skips the Windows installer
+integration suite. Native scanner, proxy, application and cache tests remain in
+CMake; after building the test targets, run `ctest --preset <arch>` in
+`mv2-mem-patch-win/`. Native ARM64 execution needs ARM64 Windows.
 
-Read-only diagnostics: `./chrome-mv2.sh check <path> --quiet` /
-`.\chrome-mv2.ps1 check <path> -Quiet`. Do not hand-patch a live install while
-deriving signatures.
+Use `mv2-scan.exe` and `scripts/check_autoscan_matrix.py` for read-only discovery
+checks against independently reviewed, hash-bound address baselines. Use
+`scripts/test_autoscan_runtime.py` only with isolated browser copies and its
+private registry subtree. Never derive a baseline from the scanner under test or
+modify a live browser installation during research.

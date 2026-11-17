@@ -1,5 +1,4 @@
 """Checks for signature-free x64 discovery and its decoded predicate model."""
-import hashlib
 import importlib.util
 from pathlib import Path
 import tempfile
@@ -10,8 +9,8 @@ if not all(importlib.util.find_spec(name) for name in ('capstone', 'z3')):
     raise SystemExit(0)
 
 import _testutil as T
-from derive_milestone import open_images
-from scan_windows import Scanner, resolve_binary, runtime_plan
+from binary_image import open_images
+from scan_windows import Scanner, resolve_binary
 
 
 # Complete functions: branch targets include the type checks after the first RET.
@@ -97,21 +96,6 @@ class ScanTests(unittest.TestCase):
     def test_csp_selector_is_not_a_predicate(self):
         selector = bytes.fromhex('837a50027f0a488b8a2802000083798806c3')
         self.assertFalse(self.scan(selector)['gates'])
-
-    def test_plan_is_generated_from_the_current_image(self):
-        image = self.image(FREE)
-        report = Scanner(image).scan()
-        report['sha256'] = hashlib.sha256(image.data).hexdigest()
-        plan = runtime_plan(image, report)
-        self.assertEqual(plan['binary_sha256'], report['sha256'])
-        self.assertEqual(plan['milestones'], [])
-        sites = plan['milestones_v2'][0]['sites']
-        self.assertEqual(len(sites), 1)
-        self.assertEqual(sites[0]['kind'], 'short')
-        self.assertEqual(sites[0]['expectedMatches'], 1)
-        report['unresolved'].append({'reason': 'unknown code'})
-        with self.assertRaises(ValueError):
-            runtime_plan(image, report)
 
     def test_truncated_text_is_rejected(self):
         image = self.image(FREE)

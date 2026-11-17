@@ -1,35 +1,22 @@
 #!/usr/bin/env python3
-"""macho_insert_dylib.py - add or remove an LC_LOAD_DYLIB in a Mach-O binary.
+"""Scratch-copy Mach-O loader research for a future macOS native auto patcher.
 
-Used by mv2-mem-patch-mac/install.sh to make Chrome's main executable load the
-in-process MV2 patch dylib. It edits EVERY 64-bit slice of a thin or fat (universal)
-Mach-O IN PLACE, writing the new load command into the zero padding that sits
-between the end of the existing load commands and the first section's file data,
-then bumping the header's ncmds / sizeofcmds. Because the edit stays inside a
-slice's existing bytes, slice lengths never change and the fat table needs no
-rewrite.
+insert/remove edit every 64-bit slice of the supplied thin/fat binary in place.
+A load command is placed in existing header padding, so slice sizes do not
+change. When padding is insufficient, selected metadata load commands can be
+dropped to reclaim space. remove does not restore that metadata.
 
-Chrome's main executable is a tiny stub with very little header padding (as little
-as 24 bytes) - not enough for a full LC_LOAD_DYLIB (the 24-byte struct plus the
-~53-char @executable_path path pads to ~80 bytes). When the padding is too small,
-insert() RECLAIMS space by dropping load commands the stub does not need to run
-(LC_SOURCE_VERSION, LC_UUID, LC_FUNCTION_STARTS, LC_DATA_IN_CODE - in that order,
-least-useful first), compacting the load-command region after each drop. The stub
-only maps the framework and jumps in; these commands carry symbolication/debug
-metadata, not execution semantics, and the binary is re-signed ad-hoc afterwards
-anyway. remove() does NOT restore them - install.sh keeps a stock backup for undo.
+This helper provides no installer, stock backup or code-signing workflow.
+Changing load commands invalidates the signature. A future macOS installer
+must provide verified restoration and signing with preserved entitlements;
+the framework's runtime patching and native browser validation are separate.
 
-Only the target binary is ever modified; nothing else in the bundle is touched
-(the installer keeps the Chrome Framework byte-for-byte stock for DRM). The edit
-invalidates the code signature on purpose - install.sh re-signs afterwards.
-
-    macho_insert_dylib.py insert  <dylib-load-path> <binary>
-    macho_insert_dylib.py remove  <dylib-load-path> <binary>
-    macho_insert_dylib.py present <dylib-load-path> <binary>   # exit 0 if present
+    macho_insert_dylib.py insert  <dylib-load-path> <scratch-binary>
+    macho_insert_dylib.py remove  <dylib-load-path> <scratch-binary>
+    macho_insert_dylib.py present <dylib-load-path> <binary>
     macho_insert_dylib.py --self-test
 
-Stdlib only (Python 3.8+), same conventions as chrome-mv2.py's Mach-O parser.
-"""
+Standard library only. The self-test uses temporary synthetic fixtures."""
 import struct
 import sys
 
@@ -263,17 +250,18 @@ def present(buf, dylib_path):
 # --------------------------------------------------------------------------- #
 def _self_test():
     """Round-trip against the repo's synthetic fat Mach-O fixture."""
-    import os
+    import tempfile
     from pathlib import Path
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import _testutil as T  # noqa
 
-    tmp = str(T.REPO / "_scratch" / "insert_dylib_selftest.macho")
-    Path(tmp).parent.mkdir(parents=True, exist_ok=True)
-    T.make_fat_macho(tmp)
+    with tempfile.TemporaryDirectory(prefix="mv2-macho-") as directory:
+        tmp = Path(directory) / "fixture.macho"
+        T.make_fat_macho(tmp)
+        raw = bytearray(tmp.read_bytes())
+    orig = raw.copy()
     path = "@executable_path/../Frameworks/mv2/mv2-mem-patch.dylib"
 
-    raw = bytearray(Path(tmp).read_bytes())
     slices_before = list(_iter_slices(raw))
     assert len(slices_before) == 2, "fixture should have 2 slices"
 
@@ -288,7 +276,6 @@ def _self_test():
     # idempotent: a second insert changes nothing
     assert insert(raw, path) == 0, "insert should be idempotent"
     # __text bytes (the fixture's gate) must be untouched by the edit
-    orig = bytearray(Path(tmp).read_bytes())
     for base in _iter_slices(orig):
         # section data starts at slice+0x200 in the fixture
         assert raw[base + 0x200:base + 0x260] == orig[base + 0x200:base + 0x260], \
@@ -301,7 +288,6 @@ def _self_test():
         nc, sc, mc, loads, end = _slice_info(raw, base)
         assert not any(p == path for _, _, p in loads)
 
-    os.remove(tmp)
     print("self-test OK: insert (x2, idempotent), section data intact, remove")
 
     _self_test_reclaim()

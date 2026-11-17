@@ -1,17 +1,10 @@
-"""Dump an ELF's .symtab as `nm -S`-style lines: "<addr> <size> T <name>".
+"""Dump ELF function symbols as nm -S style lines: "<addr> <size> T <name>".
 
-A fast, low-memory stand-in for `nm -SC chrome.debug` when naming MV2 gate
-functions for derive_milestone.py's --symbols filter. On Chrome's ~1.4 GB
-chrome.debug, `nm -SC` (demangle + sort) runs many minutes and can thrash a
-small-RAM box; this streams only the .symtab + its string table and finishes in
-a few minutes. Names are left *mangled* on purpose — the C++ source identifier
-is a substring of the mangled name (…19IsExtensionAffected…), which is all the
-keyword filter in derive_milestone.load_symbols needs.
+A streaming, low-memory research aid for large chrome.debug files. Names remain
+mangled so Chromium identifiers can be searched without demangling and sorting
+the entire file. The native auto patcher does not use these symbols.
 
-Usage:
-    python scripts/symbols_from_elf.py <elf-with-symbols> [out.txt]
-    python scripts/derive_milestone.py <chrome> --symbols out.txt --name <ver> --json
-"""
+    python scripts/symbols_from_elf.py <elf-with-symbols> [out.txt]"""
 
 import struct
 import sys
