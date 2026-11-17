@@ -95,17 +95,23 @@ if "%MV2_QUIET%"=="1" (
   goto :load_target
 )
 :choose_browser
-rem Validate input before expanding it in commands. Numbered entries can have multiple digits.
+rem Numbered entries can have multiple digits; other input is treated as a pasted path.
 set "MV2_SELECTED="
-set /p "MV2_SELECTED=Select browser, or 0 for a custom path: "
+set /p "MV2_SELECTED=Select a browser number or enter a custom path: "
 if not defined MV2_SELECTED (set "MV2_CODE=0" & goto :finish)
 set MV2_SELECTED | findstr.exe /r /x /c:"MV2_SELECTED=[0-9][0-9]*" >nul
-if errorlevel 1 goto :bad_selection
+if errorlevel 1 goto :pasted_path
 if "%MV2_SELECTED%"=="0" goto :custom_path
 for /l %%N in (1,1,%MV2_COUNT%) do if "%MV2_SELECTED%"=="%%N" goto :load_target
+goto :bad_selection
+
+:pasted_path
+rem Strip pasted quotes before expanding input so shell syntax stays inside the quoted path.
+set "MV2_PATH=%MV2_SELECTED:"=%"
+if exist "%MV2_PATH%" goto :resolve_target
 
 :bad_selection
-echo %MV2_ERROR%Enter one of the listed numbers.%MV2_RESET%
+echo %MV2_ERROR%Enter a listed browser number or an existing browser path.%MV2_RESET%
 goto :choose_browser
 
 :load_target
@@ -126,11 +132,13 @@ if "%MV2_QUIET%"=="1" (
   echo %MV2_ERROR%No browser found. Specify its Application folder or executable path.%MV2_RESET%
   goto :finish
 )
+set "MV2_PATH="
 set /p "MV2_PATH=Browser folder, executable or DLL path (blank to quit): "
 if not defined MV2_PATH (set "MV2_CODE=0" & goto :finish)
 
 :resolve_target
 rem Accept an Application folder or a browser binary and resolve the executable's folder.
+set "MV2_PATH=%MV2_PATH:"=%"
 if not exist "%MV2_PATH%" (
   echo %MV2_ERROR%Browser path does not exist.%MV2_RESET%
   goto :finish

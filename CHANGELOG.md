@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## [2.0.0] - 2026-11-17
 
 - Windows Patcher v2 for Chrome, Chromium, Edge.
 - Auto MV2 signatures search for any versions starting from 151.

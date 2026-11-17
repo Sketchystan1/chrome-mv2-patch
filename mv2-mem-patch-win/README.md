@@ -92,9 +92,11 @@ In Visual Studio, open this folder, select **x64 Release**, **x86 Release** or
 ### secur32.dll automatic patcher beside the executable
 
 Right-click `build/<arch>/install.bat` (or the batch file in an extracted release)
-and select **Run as administrator**. Choose an installation by number. The list
-groups Chrome, Chromium and Edge in that order, without full paths. Recognized
-patches show **patch installed**; other entries show only the browser name.
+and select **Run as administrator**. Choose an installation by number or paste
+its folder, executable or DLL path at the same prompt. Paths with spaces work
+with or without surrounding quotes; **0** also opens the custom-path prompt.
+The list groups Chrome, Chromium and Edge in that order, without full paths.
+Recognized patches show **patch installed**; other entries show only the browser name.
 The action menu offers **1 Install**, **2 Uninstall**
 and **0 Quit**.
 The batch uses built-in Windows commands and an embedded Windows PowerShell

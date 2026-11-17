@@ -465,10 +465,24 @@ def main():
         output, _ = expect(0, input_text="6\n", BAT_INSTALL_TEST_CHOICES="3")
         assert "[1] Install" in output and "Check" not in output and "Cleanup" not in output
         output, _ = expect(0, input_text='1"& echo injected\n01\n-1\n10\n999999999999999999\n6\n', BAT_INSTALL_TEST_CHOICES="3")
-        assert output.count("Enter one of the listed numbers.") == 5, output
+        assert output.count("Enter a listed browser number or an existing browser path.") == 5, output
         assert "Selected: Edge Stable" in output and "injected" not in output
         expect(0, input_text="6\n", BAT_INSTALL_TEST_CHOICES="0")
         expect(0, input_text=f"0\n{edge / 'msedge.exe'}\n", BAT_INSTALL_TEST_CHOICES="3")
+        # Pasted paths keep spaces and shell metacharacters, with or without Explorer's quotes.
+        for target in (edge, edge / "msedge.exe", edge / "1.0.0.1/msedge.dll"):
+            for reply in (str(target), f'"{target}"'):
+                output, _ = expect(0, input_text=f"{reply}\n", BAT_INSTALL_TEST_CHOICES="3")
+                assert "Selected: Edge" in output and "[1] Install" in output
+                assert "Browser folder, executable or DLL path" not in output
+        output, _ = expect(0, input_text=f'0\n"{edge / "msedge.exe"}"\n', BAT_INSTALL_TEST_CHOICES="3")
+        assert "Selected: Edge" in output and "[1] Install" in output
+        output, _ = expect(0, input_text=f"{work / 'missing browser'}\n0\n\n")
+        assert "Enter a listed browser number or an existing browser path." in output
+        assert "Selected:" not in output
+        output, _ = expect(0, input_text=f'"{edge}"\n', BAT_INSTALL_TEST_CHOICES="3",
+                           **{name: "" for name in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA")})
+        assert "Selected: Edge" in output and "[1] Install" in output
         expect(1, "install", edge, "-Quiet", "-Unknown")
         expect(1, "install", edge, "-Quiet", "-Ublock")
         assert not payload.exists()
