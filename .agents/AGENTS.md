@@ -3,7 +3,9 @@
 Read [mv2-reversing.md](../mv2-reversing.md) before changing discovery or patch
 semantics. [scripts/README.md](../scripts/README.md) describes the research and
 verification tools; [the Windows README](../mv2-mem-patch-win/README.md) describes
-the deployed implementation.
+the deployed implementation. Keep source/proof details in the reversing notes and
+artifact hashes, measurements, reproduction commands and unresolved failures in
+[PERFORMANCE.md](../mv2-mem-patch-win/PERFORMANCE.md); summarize results in the README.
 
 ## Current repository
 
@@ -98,6 +100,7 @@ CMake; after building the test targets, run `ctest --preset <arch>` in
 
 Use `mv2-scan.exe` and `scripts/check_autoscan_matrix.py` for read-only discovery
 checks against independently reviewed, hash-bound address baselines. Use
-`scripts/test_autoscan_runtime.py` only with isolated browser copies and its
-private registry subtree. Never derive a baseline from the scanner under test or
-modify a live browser installation during research.
+`scripts/test_autoscan_runtime.py` and `scripts/test_autoscan_crx.py` only with
+isolated browser copies and their private registry subtrees. Never derive a
+baseline from the scanner under test or modify a live browser installation during
+research.

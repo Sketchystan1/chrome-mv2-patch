@@ -53,6 +53,29 @@ void lengths() {
   i = LiftX86(stackRead, 0x1000, true);
   check(i.length() == 5 && i.other() == Other::Overwrite && i.dst == 14 && i.src == 4 && i.disp == 0x48 &&
         i.memory() && i.setsFlags() && Writes(i, 14) && !Writes(i, 4), "ADD from a stack slot writes only its destination and flags");
+  for (bool x64 : {false, true}) {
+    for (auto code : {std::array<uint8_t, 3>{0xc1,0xe0,2}, {0xc1,0xfa,2}}) {
+      i = LiftX86(code, 0x1000, x64);
+      check(i.length() == 3 && i.width() == 4 && !i.memory() && i.setsFlags() &&
+            Writes(i, code[1] & 7) && !Writes(i, 4) && !Writes(i, 5),
+            "register SHL/SAR preserve the stack and frame while invalidating their destination and flags");
+    }
+    constexpr std::array<uint8_t, 2> registerSubtract{0x29,0xca};
+    i = LiftX86(registerSubtract, 0x1000, x64);
+    check(i.length() == 2 && i.width() == 4 && i.src == 1 && i.setsFlags() && Writes(i, 2) &&
+          !Writes(i, 1) && !Writes(i, 4) && !Writes(i, 5),
+          "register SUB retains its input and frame while invalidating its destination and flags");
+  }
+  constexpr std::array<uint8_t, 4> extendedShift{0x49,0xc1,0xfe,2};
+  i = LiftX86(extendedShift, 0x1000, true);
+  check(i.length() == 4 && i.width() == 8 && i.setsFlags() && Writes(i, 14) && !Writes(i, 4) && !Writes(i, 5),
+        "REX.W SAR invalidates its extended destination without clobbering the frame");
+  for (auto code : {std::array<uint8_t, 3>{0xc1,0x20,2}, {0xc1,0xc0,2}, {0xc0,0xfa,2}})
+    check(LiftX86(code, 0x1000, false).other() == Other::Unknown,
+          "memory shifts, rotations and unmodeled byte shifts retain conservative rejection");
+  constexpr std::array<uint8_t, 2> memorySubtract{0x29,0x08};
+  check(LiftX86(memorySubtract, 0x1000, false).other() == Other::Unknown,
+        "unmodeled memory subtraction cannot be mistaken for a register overwrite");
   constexpr std::array<uint8_t, 6> back{0x0f,0x8d,0xf0,0xff,0xff,0xff};
   i = LiftX86(back, 0x1000, true);
   check(i.op == Op::JccSigned && i.target() == 0xff6 && i.condition() == 13, "near branch sign extension");

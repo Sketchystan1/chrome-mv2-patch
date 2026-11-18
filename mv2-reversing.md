@@ -46,6 +46,24 @@ type/location relationships, Boolean result and both branch outcomes. Calls can
 have required side effects, and callers can contain additional checks. A local
 predicate proof does not prove complete enforcement coverage.
 
+The November 18 source/disassembly review explains Stable 158.0.8127.37 x86's
+additional core site. `ExtensionService::CheckManagementPolicy` inlines
+`ManifestV2Handler::ShouldBlockExtensionEnable` at RVA `0x1ef6a03`; the
+[tagged source](https://github.com/chromium/chromium/blob/158.0.8127.37/chrome/browser/extensions/extension_service.cc#L628)
+adds `DISABLE_UNSUPPORTED_MANIFEST_VERSION` to the removal set when that predicate
+is false. Stock `7F28` reaches the existing not-affected path at `0x1ef6a2d`,
+which inserts `0x800000` into that set. `EB28` selects the same path while keeping
+the surrounding policy checks and reason-removal operations.
+
+Independent Capstone disassembly confirms the full version/type/location
+predicate and its removal outcome. The unique policy-uninstall log text and
+`extension_service.cc` file/line constants identify the stock caller against the
+source. Beta 159.0.8154.6, Dev 160.0.8157.0 and Canary 160.0.8168.0 call their
+already recognized shared predicate and test its Boolean result before the same
+removal-set operation. Stable therefore has eight core patch sites and the other
+builds have seven. This review confirms the additional MV2 decision; it does not
+establish an independent baseline for every core site.
+
 ## 2. Select the existing not-affected outcome
 
 Never remove a call, change the manifest-version operand or invent a destination.
@@ -88,10 +106,9 @@ handle the read-only image, isolated helper and cache;
 instruction and proof helpers live in `lifter.hpp` and `solver.hpp`.
 The native path uses no maintained byte table, PDB, Capstone or Z3.
 
-The x86 `rundll32` host reserves only 256 KiB for its main stack. Running bounded
-analysis directly on that stack overflowed before returning a plan, leaving
-Chrome unpatched. The helper now joins a worker with a 1 MiB stack reserve;
-the browser still enforces the helper deadline and validates its reply.
+The helper joins an analysis worker with a 1 MiB stack reserve. The x86
+`rundll32` host's 256 KiB main stack overflowed when it ran analysis directly.
+The browser enforces the helper deadline and validates the reply.
 
 The browser's complete BLAKE3 identity, scanner SHA-256 identity and protocol
 version bind the cache. Windows protects entries for the current user; temporary
@@ -178,17 +195,34 @@ and download decisions and requires both for its recognized installer path.
 Chrome's unknown optional checks are skipped. See the Windows README for
 architecture and runtime-validation limits.
 
-Chrome Canary 160.0.8166.2 x86 uses a framed constant-zero external verifier
-(`push ebp; mov ebp,esp; xor eax,eax; pop ebp; ret`). Its download path calls a
-security-cookie helper whose terminal trap is exactly at the trimmed function
-boundary. Recognition checks the complete framed helper and accepts that exact
-terminal destination while still rejecting conflicting return cleanup or other
-out-of-range destinations. Independent source/disassembly review identifies the
-`off_store_install_allow_reason_` field at `+0x12c`; reason 2 is
-`AllowedBecausePref`. The reviewed branch at RVA `0x2c84d2a` changes `74 0E` to
-`90 90`, selecting the existing external-verifier path while preserving calls,
-developer proofs, package integrity and installation confirmation. These
-addresses document this image; the scanner does not consume a version table.
+Two reviewed x86 download layouts select the existing external CRX3 verifier by
+changing `74 0E` to `90 90`. Their fall-through stores
+`OffStoreInstallAllowedBecausePref` (`AllowedBecausePref`, 2) in the installer's
+`off_store_install_allow_reason_` field at `+0x12c`; the same installer pointer
+reaches `CrxInstaller::InstallCrx`. Calls, developer proofs, package integrity and
+native confirmation remain in the path.
+
+| Reviewed x86 image | Branch RVA | Recognition requirement |
+| --- | --- | --- |
+| Canary 160.0.8166.2 | `0x2c84d2a` | Complete framed constant-zero external verifier and exact terminal trap at the security-cookie helper's trimmed boundary. |
+| Stable 158.0.8127.37 | `0x4903f46` | Register `SHL`/`SUB`/`SAR` in the caller and a helper with 2,327 reachable instructions. |
+
+Canary's external verifier at RVA `0x51f4f10` is
+`push ebp; mov ebp,esp; xor eax,eax; pop ebp; ret`; its security-cookie terminal
+trap is at `0x79737a5`. Recognition validates the complete frame and exact
+terminal destination, rejecting conflicting return cleanup and other out-of-range
+destinations.
+
+For Stable's caller, register arithmetic leaves its destination value and flags
+unknown; those results cannot establish predicate or pointer evidence. Arithmetic
+on a known stack-derived address still declines, including zero shifts that could
+hide an overlapping write. Every returning helper path must fit the fixed
+4,096-instruction budget. Conflicting cleanup, stack changes, unmodeled memory
+operations and exhausted bounds remain rejected.
+
+These source/disassembly addresses are evidence for the stock hashes in the
+[validation record](mv2-mem-patch-win/PERFORMANCE.md), rather than scanner input
+or version-table entries.
 
 MV2 request blocking follows MV2's normal permissions. The historical optional
 MV3 `webRequestBlocking` data patches were removed; they are not part of the
@@ -237,22 +271,15 @@ The Python Capstone/Z3 scanner is retained as an x64 analysis prototype; it
 emits reports and has different compiler coverage from the native implementation.
 [The scripts README](scripts/README.md) documents its commands and both matrices.
 
-Recorded native x64 behavior includes Chrome 157.0.8103.79 MV2 enablement/request
-blocking and Edge 157.0.4341.46 developer-signed CRX installation, including
-tampered-package and missing-developer-proof rejection. Earlier native scanner
-analysis covered x64, x86 and ARM64 reference images. Historical disk/table
-experiments covered Chrome 152–159 and included ELF/Mach-O scratch patch/restore
-and Windows/Wine/WSL launches. Those results apply to their recorded artifacts;
-they do not certify the current DLL or future Unix ports.
+[PERFORMANCE.md](mv2-mem-patch-win/PERFORMANCE.md) records native Windows x64/x86
+MV2 and signed-CRX lifecycle results, exact browser/DLL hashes, test counts and
+unresolved startup failures. Scanner readiness, regression comparisons and
+successful runtime phases are distinct evidence; none establishes complete
+enforcement coverage or startup reliability.
 
-The rebuilt 2.0.0 x86 DLL passed Chrome Canary 160.0.8167.0 packed MV2 enablement,
-request blocking, cached and empty-cache restarts, and removal; the exact browser
-and patcher hashes are recorded in [PERFORMANCE.md](mv2-mem-patch-win/PERFORMANCE.md).
-The later corrected DLL also passed signed CRX3 installation on Canary
-160.0.8166.2 x86 through the real Downloads flow and native confirmation, with
-tampered-signature and missing-developer-proof rejection, both restart types,
-and removal. The same validation record binds these results to their artifacts.
-Native ARM64 browser lifecycle, native macOS loading/signing, Linux ARM64,
-browser updates and DRM still need validation. Preserve sandbox and signature
-behavior when porting; fixture tests and bounded proofs are only part of that
-evidence.
+Historical disk/table experiments covered Chrome 152–159, including ELF/Mach-O
+scratch patch/restore and Windows/Wine/WSL launches. They apply to their recorded
+artifacts and do not certify the current DLL or future Unix ports. Native Windows
+ARM64 browser behavior, macOS loading/signing, Linux ARM64, browser updates and
+DRM still need validation. Preserve sandbox and signature behavior when porting;
+fixtures and bounded proofs provide only part of that evidence.

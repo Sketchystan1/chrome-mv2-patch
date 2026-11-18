@@ -2,7 +2,7 @@
 
 ## [Unreleased]
 
-- Fix Chrome 160 x86 off-store CRX.
+- Fix Chrome x86 off-store CRX bug.
 
 ## [2.0.0] - 2026-11-17
 

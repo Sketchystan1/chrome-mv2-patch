@@ -447,7 +447,8 @@ bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Progra
     if (!target || depth == 4) return false;
     auto range = boundaries.find(target);
     if (!range || range.begin != target) return false;
-    FixedList<uint32_t, 2048> todo, seen; todo.push_back(target); bool found = false;
+    // Larger helpers still need a complete, bounded walk of every returning path.
+    FixedList<uint32_t, 4096> todo, seen; todo.push_back(target); bool found = false;
     auto accept = [&](int32_t value) { if (found && value != pop) return false; found = true; pop = value; return true; };
     while (!todo.empty()) {
       auto pc = todo.back(); --todo.count;
@@ -524,6 +525,11 @@ bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Progra
     if (repeat) continue;
     if (!seen.push_back(state)) return false;
     const auto& i = node->insn;
+    // Unmodeled arithmetic may retain a stack alias (for example, a zero
+    // shift). Reject it before forgetting an address needed for the slot proof.
+    if (i.op == Op::Other && i.other() == Other::Overwrite && i.setsFlags() &&
+        ((i.dst < 8 && state.addresses[i.dst] != unknown) ||
+         (!i.memory() && i.src < 8 && state.addresses[i.src] != unknown))) return false;
     bool store = i.op == Op::Other && (i.other() == Other::Store || i.other() == Other::AtomicAdd);
     unsigned base = i.other() == Other::AtomicAdd ? i.src : i.dst;
     if (store && base < 8 && state.addresses[base] != unknown) {

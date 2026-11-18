@@ -129,11 +129,13 @@ static void application(const Bytes& bytes) {
   auto plan = MakePlan(Discover(bytes)); check(!plan.status && plan.count == 4, "native plan includes both optional gates automatically");
   auto memory = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x5000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
   check(memory != nullptr, "allocate isolated application fixture");
-  std::memcpy(memory, bytes.data(), 0x400); std::memcpy(memory + 0x1000, bytes.data() + 0x400, 0x1000);
+  PeImage pe(bytes); auto text = pe.at(pe.text.rva, pe.text.size);
+  check(!text.empty() && pe.text.rva + text.size() <= 0x5000, "fixture code fits its allocated image");
+  std::memcpy(memory, bytes.data(), 0x400); std::memcpy(memory + pe.text.rva, text.data(), text.size());
   DWORD previous = 0; check(VirtualProtect(memory, 0x5000, PAGE_EXECUTE_READ, &previous) != 0, "protect isolated fixture");
   StockImage stock(bytes); std::string_view reason;
   auto apply = [&](const WirePlan& candidate, MemoryOps ops = {}) { return ApplyPlan({memory, 0x5000}, stock, candidate, reason, ops); };
-  auto unchanged = [&] { return !std::memcmp(memory + 0x1000, bytes.data() + 0x400, 0x1000); };
+  auto unchanged = [&] { return !std::memcmp(memory + pe.text.rva, text.data(), text.size()); };
   auto wrong = plan; std::swap(wrong.offstoreRva, wrong.crxDownloadRva);
   check(apply(wrong) == ApplyResult::declined && unchanged(), "swapped optional metadata cannot modify code");
   flushes = 0;
@@ -147,6 +149,81 @@ static void application(const Bytes& bytes) {
   VirtualFree(memory, 0, MEM_RELEASE);
 }
 #if defined(AUTOSCAN_X86)
+static Bytes downloadCalleeFixture(size_t nops, const char* tail) {
+  auto bytes = fixture();
+  // Keep the original RVAs and grow the raw .text area before the two data
+  // sections, so the final CFG-listed helper can contain a larger body.
+  bytes.insert(bytes.begin() + 0x1400, 0x1000, 0xcc);
+  for (unsigned n = 0; n < 3; ++n) {
+    IMAGE_SECTION_HEADER header{};
+    std::memcpy(&header, bytes.data() + 0x178 + n * sizeof(header), sizeof(header));
+    if (!n) header.Misc.VirtualSize = header.SizeOfRawData = 0x2000;
+    else header.PointerToRawData += 0x1000;
+    put(bytes, 0x178 + n * sizeof(header), header);
+  }
+  auto ending = hex(tail);
+  check(0xa80 + nops + ending.size() < 0x2400, "large callee stays in the fabricated code section");
+  std::fill(bytes.begin() + 0xa80, bytes.begin() + 0x2400, 0xcc);
+  std::fill_n(bytes.begin() + 0xa80, nops, 0x90);
+  std::copy(ending.begin(), ending.end(), bytes.begin() + 0xa80 + nops);
+  return bytes;
+}
+static void largeDownloadCallee() {
+  auto control = Discover(downloadCalleeFixture(0, "c20400"));
+  check(control.ready() && control.gates.size() == 4 && has(control, CrxDownload),
+        "expanded fixture keeps its known installer and helper cleanup");
+  auto bytes = downloadCalleeFixture(2600, "c20400");
+  auto report = Discover(bytes);
+  check(report.ready() && report.gates.size() == 4 && has(report, InstallVerifier) && has(report, CrxDownload),
+        "a larger returning helper can still prove the unchanged download slot");
+  for (auto tail : {"85c07503c20400c20800", "c20800"}) {
+    auto refused = Discover(downloadCalleeFixture(2600, tail));
+    check(refused.ready() && refused.gates.size() == 3 && has(refused, InstallVerifier) && !has(refused, CrxDownload),
+          "larger helpers with conflicting returns or changed stack cleanup remain rejected");
+  }
+  auto excessive = Discover(downloadCalleeFixture(4300, "c20400"));
+  check(excessive.ready() && excessive.gates.size() == 3 && has(excessive, InstallVerifier) && !has(excessive, CrxDownload),
+        "callee analysis still declines when the bounded instruction budget is exhausted");
+  application(bytes);
+}
+static Bytes downloadArithmeticFixture(const char* arithmetic) {
+  auto bytes = fixture();
+  auto code = hex("5589e583ec28e83501000084c0740e8b442404c7802c01000002000000"
+                  "8d44241050e83901000083c40450e850010000");
+  for (auto part : {arithmetic, "8b4c24048d44240850"}) {
+    auto instructions = hex(part); code.insert(code.end(), instructions.begin(), instructions.end());
+  }
+  uint32_t relative = 0x1400 - (0x1500 + static_cast<uint32_t>(code.size()) + 5);
+  code.push_back(0xe8);
+  for (unsigned byte = 0; byte < 4; ++byte) code.push_back(static_cast<uint8_t>(relative >> (byte * 8)));
+  auto tail = hex("83c4285dc3"); code.insert(code.end(), tail.begin(), tail.end());
+  check(code.size() <= 0x100, "arithmetic caller stays within its fixture entry");
+  std::fill(bytes.begin() + 0x900, bytes.begin() + 0xa00, 0xcc);
+  std::copy(code.begin(), code.end(), bytes.begin() + 0x900);
+  return bytes;
+}
+static void downloadArithmetic() {
+  // Model unrelated register SUB/SHL/SAR between helper calls and the reload.
+  auto bytes = downloadArithmeticFixture("c1e00229cac1fa02");
+  auto report = Discover(bytes);
+  check(report.ready() && report.gates.size() == 4 && has(report, InstallVerifier) && has(report, CrxDownload),
+        "unrelated register shifts preserve the verified download decision");
+  for (auto mutation : {std::pair{"c1e002", "c1e402"}, {"c1fa02", "c1fc02"}, {"29ca", "29cc"},
+                       {"c1e002", "c12002"}, {"29ca", "290a"}, {"c1fa02", "c1c002"}, {"c1fa02", "c0fa02"}}) {
+    auto changed = bytes;
+    replace(changed, mutation.first, mutation.second);
+    auto refused = Discover(changed);
+    check(refused.ready() && refused.gates.size() == 3 && has(refused, InstallVerifier) && !has(refused, CrxDownload),
+          "stack-pointer shifts and unmodeled arithmetic cannot prove a download slot");
+  }
+  for (auto arithmetic : {"8d442404c1e000c70000000000", "8d442404c1f800c70000000000",
+                          "8d44240431c929c8c70000000000", "89e131c029c8", "29e0"}) {
+    auto refused = Discover(downloadArithmeticFixture(arithmetic));
+    check(refused.ready() && refused.gates.size() == 3 && has(refused, InstallVerifier) && !has(refused, CrxDownload),
+          "unmodeled arithmetic cannot discard a stack-derived address and hide an overlapping write");
+  }
+  application(bytes);
+}
 static void framedExternalVerifier() {
   auto bytes = fixture();
   auto body = hex("5589e531c05dc3");
@@ -268,6 +345,8 @@ int main() {
 #if defined(AUTOSCAN_X86)
   framedExternalVerifier();
   providerReload();
+  largeDownloadCallee();
+  downloadArithmetic();
 #endif
   std::printf("PASS: %u native optional checks\n", checks);
 }

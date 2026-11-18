@@ -240,6 +240,11 @@ inline LiftedInsn LiftX86(std::span<const uint8_t> bytes, uint32_t pc, bool x64)
   if (!escaped && op == 0x03) {
     other(Other::Overwrite); out.dst = reg; out.src = mod == 3 ? rm : base; out.encoding |= 0x40; return out;
   }
+  if (!escaped && mod == 3 && (op == 0x29 || (op == 0xc1 && (group == 4 || group == 7)))) {
+    // Register SUB/SHL/SAR leave other integer registers intact. Forget their destination
+    // value and flags instead of using an unmodeled shift result as proof.
+    other(Other::Overwrite); out.dst = rm; out.src = op == 0x29 ? reg : NoReg; out.encoding |= 0x40; return out;
+  }
   if (!escaped && x64 && op == 0x63) {
     other(Other::Overwrite); out.dst = reg; out.src = mod == 3 ? rm : base; return out;
   }
