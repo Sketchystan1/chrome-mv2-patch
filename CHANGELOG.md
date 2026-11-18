@@ -1,6 +1,6 @@
 # Changelog
 
-## [Unreleased]
+## [2.0.1] - 2026-11-18
 
 - Fix Chrome x86 off-store CRX bug.
 

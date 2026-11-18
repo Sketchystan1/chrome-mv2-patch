@@ -2,7 +2,8 @@
 # mv2-patch-<ver>-win-<arch>.zip to a release tagged v<ver>. <ver> is the DLL's
 # ProductVersion, whose single source of truth is CMakeLists.txt's project
 # version. Each ZIP contains only install.bat and secur32.dll at its root.
-# Release notes come from the matching version's entry in CHANGELOG.md.
+# Release notes include the matching CHANGELOG.md entry and earlier entries
+# in the same major version.
 # (GitHub also auto-attaches "Source code" links to every release - the whole
 # repo, minus gitignored build/ and out/ - which cannot be scoped or
 # disabled.)
@@ -67,12 +68,14 @@ jobs:
         run: |
           $ver = $env:RELEASE_TAG -replace '^v', ''
           $changelog = Get-Content -LiteralPath 'CHANGELOG.md' -Raw
+          $major = [regex]::Escape($ver.Split('.')[0])
           $pattern = '(?ms)^## \[' + [regex]::Escape($ver) + '\][^\r\n]*\r?\n(?<notes>.*?)(?=^## |\z)'
+          $pattern += '(?:^## \[' + $major + '\.\d+\.\d+\][^\r\n]*\r?\n.*?(?=^## |\z))*'
           $entry = [regex]::Match($changelog, $pattern)
           if (-not $entry.Success) { throw "no changelog entry for $ver" }
           $notes = $entry.Groups['notes'].Value.Trim()
           if (-not $notes) { throw "empty changelog entry for $ver" }
-          Set-Content -LiteralPath 'release-notes.md' -Value $notes -Encoding utf8
+          Set-Content -LiteralPath 'release-notes.md' -Value $entry.Value.Trim() -Encoding utf8
 
       - name: Publish release
         uses: softprops/action-gh-release@v2

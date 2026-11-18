@@ -3,6 +3,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -343,6 +344,109 @@ public static class Fixture {
     print("Embedded process control passed: exact Chrome/Chromium/Edge paths, multiple windows, background workers and force close")
 
 
+def test_search():
+    """Check MFT record boundaries and search only isolated folder fixtures."""
+    host = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    native_host = Path(os.environ["SystemRoot"]) / "Sysnative/WindowsPowerShell/v1.0/powershell.exe"
+    if native_host.exists():
+        host = native_host
+    source = (REPO / "mv2-mem-patch-win/install.bat").read_text()
+    code = source.split("# MV2_SEARCH_SCRIPT\n", 1)[1].split("Add-Type -TypeDefinition @'\n", 1)[1].split("\n'@", 1)[0]
+    code += r'''
+public static class SearchFileIdFixture {
+    [DllImport("kernel32.dll", SetLastError = true)]
+    public static extern bool GetFileInformationByHandleEx(SafeFileHandle file, int type, [Out] byte[] data, uint size);
+}
+'''
+
+    def record(name, number, attributes=0):
+        filename = name.encode("utf-16le")
+        data = bytearray((60 + len(filename) + 7) & ~7)
+        struct.pack_into("<IH", data, 0, len(data), 2)
+        struct.pack_into("<Q", data, 8, number)
+        struct.pack_into("<IHH", data, 52, attributes, len(filename), 60)
+        data[60:60 + len(filename)] = filename
+        return data
+
+    with tempfile.TemporaryDirectory(prefix="mv2 search ! & ' ") as directory:
+        work = Path(directory).resolve()
+        assert work.parent == Path(tempfile.gettempdir()).resolve()
+        roots = [work / "one", work / "two"]
+        expected = []
+        for root, folder, image in ((roots[0], "portable (chrome) ! & % ü Ω 中文", "chrome.exe"),
+                                    (roots[1], "deep/portable/edge", "MSEDGE.EXE")):
+            app = root / folder
+            app.mkdir(parents=True)
+            executable = app / image
+            fixture(executable)
+            expected.append(str(executable))
+        (roots[0] / "chrome.exe").mkdir()  # A matching directory is not an executable.
+        (roots[0] / "chrome.exe.old").write_bytes(b"ignored")
+        linked = subprocess.run([os.environ["COMSPEC"], "/d", "/c", "mklink", "/J",
+                                 str(roots[0] / "loop"), str(roots[0])],
+                                capture_output=True, text=True, timeout=10)
+        assert linked.returncode == 0, linked
+        data = bytearray(8)
+        for name, number, attributes in (("CHROME.EXE", 7, 0), ("msedge.exe", 9, 0),
+                                         ("chrome.exe.old", 11, 0), ("chrome.exe", 13, 0x10),
+                                         ("msedge.exe", 15, 0x400)):
+            data.extend(record(name, number, attributes))
+        (work / "records.bin").write_bytes(data)
+        bad = [data[:7], data[:-1]]
+        for offset, value, fmt in ((8, 0, "<I"), (12, 3, "<H"), (64, 21, "<H"), (66, 1000, "<H")):
+            invalid = data.copy()
+            struct.pack_into(fmt, invalid, offset, value)
+            bad.append(invalid)
+        for index, invalid in enumerate(bad):
+            (work / f"{index}.bad").write_bytes(invalid)
+        script = work / "search-check.ps1"
+        script.write_text("Add-Type -TypeDefinition @'\n" + code + "\n'@\n" + r'''
+$ErrorActionPreference = 'Stop'
+$data = [IO.File]::ReadAllBytes((Join-Path $env:MV2_TEST_SEARCH_WORK 'records.bin'))
+if ((@([Mv2BrowserSearch]::BrowserIds($data, $data.Length)) -join ',') -ne '7,9') { throw 'Wrong browser IDs.' }
+foreach ($file in [IO.Directory]::GetFiles($env:MV2_TEST_SEARCH_WORK, '*.bad')) {
+    $invalid = [IO.File]::ReadAllBytes($file)
+    $rejected = $false
+    try { $null = @([Mv2BrowserSearch]::BrowserIds($invalid, $invalid.Length)) } catch { $rejected = $true }
+    if (-not $rejected) { throw "Accepted malformed MFT record: $file" }
+}
+$roots = [string[]]($env:MV2_TEST_SEARCH_ROOTS | ConvertFrom-Json)
+$found = [Mv2BrowserSearch]::Find($roots)
+$type = [Mv2BrowserSearch]
+$binding = [Reflection.BindingFlags]'Static,NonPublic'
+$idType = $type.GetNestedType('FileId', [Reflection.BindingFlags]::NonPublic)
+$id = [Activator]::CreateInstance($idType)
+if ([Runtime.InteropServices.Marshal]::SizeOf($id) -ne 24) { throw 'Wrong FILE_ID_DESCRIPTOR layout.' }
+$hint = [IO.File]::OpenRead($found[0])
+$file = $null
+try {
+    $info = New-Object byte[] 24
+    if (-not [SearchFileIdFixture]::GetFileInformationByHandleEx($hint.SafeFileHandle, 18, $info, 24)) { throw 'Cannot read fixture file ID.' }
+    $idType.GetField('Size').SetValue($id, [uint32]24)
+    $idType.GetField('Id').SetValue($id, [BitConverter]::ToUInt64($info, 8))
+    $file = $type.GetMethod('OpenFileById', $binding).Invoke($null, @($hint.SafeFileHandle, $id, [uint32]0, [uint32]7, [IntPtr]::Zero, [uint32]0x00200000))
+    if ($file.IsInvalid) { throw 'Cannot open fixture by file ID.' }
+    $path = [Text.StringBuilder]::new(32768)
+    $size = $type.GetMethod('GetFinalPathNameByHandleW', $binding).Invoke($null, @($file, $path, [uint32]$path.Capacity, [uint32]0))
+    if (-not $size -or $path.ToString().Substring(4) -ne $found[0]) { throw 'Wrong path for fixture file ID.' }
+} finally {
+    if ($file) { $file.Dispose() }
+    $hint.Dispose()
+}
+if ([Mv2BrowserSearch]::Folders((Join-Path $env:MV2_TEST_SEARCH_WORK 'missing')).Count) { throw 'Unexpected missing-folder result.' }
+if ([Mv2BrowserSearch]::Find([string[]]@()).Count) { throw 'Unexpected empty-drive result.' }
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false)
+[Console]::WriteLine(($found | ConvertTo-Json -Compress))
+''', encoding="utf-8")
+        result = subprocess.run([str(host), "-NoProfile", "-NonInteractive", "-File", str(script)],
+                                env=dict(os.environ, MV2_TEST_SEARCH_WORK=str(work),
+                                         MV2_TEST_SEARCH_ROOTS=json.dumps(list(map(str, roots)))),
+                                capture_output=True, text=True, encoding="utf-8", timeout=30)
+        assert result.returncode == 0, result
+        assert sorted(json.loads(result.stdout)) == sorted(expected), result
+    print("Browser search checks passed: MFT parsing, native file-ID lookup, parallel roots, exact filenames, Unicode paths and junction loops")
+
+
 def main():
     source_bytes = (REPO / "mv2-mem-patch-win/install.bat").read_bytes()
     assert b"\r\n" in source_bytes and b"\n" not in source_bytes.replace(b"\r\n", b""), "cmd.exe requires CRLF batch line endings"
@@ -352,6 +456,7 @@ def main():
         print("Native installer runtime tests skipped: Windows required")
         return
     test_console_control()
+    test_search()
     test_process_control()
     with tempfile.TemporaryDirectory(prefix="mv2 batch ! & ' ") as directory:
         work = Path(directory).resolve()
@@ -367,6 +472,8 @@ def main():
                 source = source.replace(f"{name}.exe", f'call "%BAT_INSTALL_TEST_TOOLS%\\{name}.cmd"')
         process_command = next(line for line in source.splitlines() if line.startswith('"%MV2_POWERSHELL%"'))
         source = source.replace(process_command, 'call "%BAT_INSTALL_TEST_TOOLS%\\browser.cmd" "%MV2_PROCESS_MODE%" "%MV2_PROCESS_PATH%"')
+        source = source.replace("[IO.DriveInfo]::GetDrives()",
+                                "[pscustomobject]@{ DriveType='Fixed'; IsReady=$true; Name=$env:BAT_INSTALL_TEST_SEARCH_ROOT }")
         source = source.replace(" pause", ' call "%BAT_INSTALL_TEST_TOOLS%\\pause.cmd"')
         batch = work / "install.bat"
         # Preserve line endings so test copies cannot hide cmd.exe label-scanning bugs.
@@ -378,10 +485,12 @@ def main():
         roots = work / "roots"
         scratch = work / "temp"
         scratch.mkdir()
+        search_root = work / "custom browsers"
+        search_root.mkdir()
         log = work / "calls.jsonl"
         env = dict(os.environ, TEMP=str(scratch), TMP=str(scratch),
                    BAT_INSTALL_TEST_TOOLS=str(tools), BAT_INSTALL_TEST_LOG=str(log),
-                   BAT_INSTALL_TEST_ADMIN="1")
+                   BAT_INSTALL_TEST_ADMIN="1", BAT_INSTALL_TEST_SEARCH_ROOT=str(search_root))
         for name in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
             env[name] = str(roots)
 
@@ -399,7 +508,8 @@ def main():
                 replies.write(input_text)
                 replies.seek(0)
                 result = subprocess.run(f'cmd /d /s /c "{command}"', cwd=cwd,
-                                        env=dict(env, **extra_env), stdin=replies, capture_output=True, text=True)
+                                        env=dict(env, **extra_env), stdin=replies, capture_output=True,
+                                        text=True, encoding="utf-8", errors="replace", timeout=60)
             calls = [json.loads(line) for line in log.read_text().splitlines()] if log.exists() else []
             assert not list(scratch.iterdir()), (result, list(scratch.iterdir()))
             assert not any(tool == "reg" and values[0] == "add" for tool, values in calls), calls
@@ -448,12 +558,12 @@ def main():
         assert "[WARNING]" not in output
         assert calls == [["fltmc", []], ["pause", []]]
         for args in ((), ("check", "-Quiet"), ("install", edge, "-Quiet"), ("uninstall", edge, "-Quiet"),
-                     ("cleanup",), ("cleanup", edge, "-Quiet")):
+                     ("cleanup",), ("cleanup", edge, "-Quiet"), ("check", "-Search", "-Quiet")):
             output, calls = expect(1, *args, BAT_INSTALL_TEST_ADMIN="0")
             assert "Not running as administrator." in output
             assert 'Right-click this batch file and select "Run as administrator".' in output
             assert all(text not in output for text in ("Chrome / Chromium / Edge MV2 installer", "[1] Chrome Stable",
-                                                       "Select browser", "Selected:", "[1] Install"))
+                                                       "Select browser", "Selected:", "[1] Install", "Searching local drives"))
             assert calls == [["fltmc", []], ["pause", []]]
         write_batch(source.replace("goto :resolve_target", "goto :missing_target"))
         result, calls = run("check", edge, "-Quiet")
@@ -464,8 +574,9 @@ def main():
         expect(0, "install", "/?")
         output, _ = expect(0, input_text="6\n", BAT_INSTALL_TEST_CHOICES="3")
         assert "[1] Install" in output and "Check" not in output and "Cleanup" not in output
-        output, _ = expect(0, input_text='1"& echo injected\n01\n-1\n10\n999999999999999999\n6\n', BAT_INSTALL_TEST_CHOICES="3")
-        assert output.count("Enter a listed browser number or an existing browser path.") == 5, output
+        assert "[10] Scan for Custom Browser Paths\n[0] Custom path\n" in output, output
+        output, _ = expect(0, input_text='1"& echo injected\n01\n-1\n11\n999999999999999999\nS\ns\n6\n', BAT_INSTALL_TEST_CHOICES="3")
+        assert output.count("Enter a listed number or an existing browser path.") == 7, output
         assert "Selected: Edge Stable" in output and "injected" not in output
         expect(0, input_text="6\n", BAT_INSTALL_TEST_CHOICES="0")
         expect(0, input_text=f"0\n{edge / 'msedge.exe'}\n", BAT_INSTALL_TEST_CHOICES="3")
@@ -478,11 +589,65 @@ def main():
         output, _ = expect(0, input_text=f'0\n"{edge / "msedge.exe"}"\n', BAT_INSTALL_TEST_CHOICES="3")
         assert "Selected: Edge" in output and "[1] Install" in output
         output, _ = expect(0, input_text=f"{work / 'missing browser'}\n0\n\n")
-        assert "Enter a listed browser number or an existing browser path." in output
+        assert "Enter a listed number or an existing browser path." in output
         assert "Selected:" not in output
         output, _ = expect(0, input_text=f'"{edge}"\n', BAT_INSTALL_TEST_CHOICES="3",
                            **{name: "" for name in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA")})
         assert "Selected: Edge" in output and "[1] Install" in output
+        portable_apps = []
+        for folder, image in (("Chrome Portable", "chrome.exe"), ("Chromium/Application", "chrome.exe"),
+                              ("Edge Portable", "msedge.exe")):
+            app = search_root / folder
+            app.mkdir(parents=True)
+            fixture(app / image)
+            portable_apps.append(app)
+        portable_edge = portable_apps[-1]
+        fixture(portable_edge / "secur32.dll", branded=True)
+        output, calls = expect(1, "check", "-Search", "-Quiet")
+        assert "Found 3 additional browser installation(s)." in output
+        assert f'[10] Chrome - "{portable_apps[0]}"' in output, output
+        assert f'[11] Chromium - "{portable_apps[1]}"' in output, output
+        assert f'[12] Edge - patch installed - "{portable_edge}"' in output, output
+        assert calls == [["fltmc", []], ["pause", []]]  # Search never stops a browser or edits registry data.
+        output, _ = expect(0, input_text="10\n13\n12\n", BAT_INSTALL_TEST_CHOICES="3")
+        assert "Found 3 additional browser installation(s)." in output
+        assert "Found 0 additional browser installation(s)." in output and "[14]" not in output, output
+        assert "[13] Scan for Custom Browser Paths\n[0] Custom path\n" in output, output
+        assert "Selected: Edge" in output
+        no_standard_roots = {name: "" for name in ("ProgramW6432", "ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA")}
+        output, _ = expect(0, "check", "-Search", "-Quiet", **no_standard_roots,
+                           BAT_INSTALL_TEST_SEARCH_ROOT=str(portable_edge))
+        assert "Selected: Edge" in output and "secur32.dll is installed (x64)." in output
+        output, _ = expect(0, input_text="1\n1\n", BAT_INSTALL_TEST_CHOICES="3", **no_standard_roots,
+                           BAT_INSTALL_TEST_SEARCH_ROOT=str(portable_edge))
+        assert "Selected: Edge" in output
+        unicode_app = work / "portable ü Ω 中文 ! % browser"
+        unicode_app.mkdir()
+        fixture(unicode_app / "chrome.exe")
+        fixture(unicode_app / "secur32.dll", branded=True)
+        output, _ = expect(0, "check", "-Search", "-Quiet", **no_standard_roots,
+                           BAT_INSTALL_TEST_SEARCH_ROOT=str(unicode_app))
+        assert "Selected: Chrome" in output and "secur32.dll is installed (x64)." in output
+        portable_data = work / "portable appdata"
+        portable_data.mkdir()
+        unicode_env = dict(no_standard_roots, LOCALAPPDATA=str(portable_data),
+                           BAT_INSTALL_TEST_SEARCH_ROOT=str(unicode_app))
+        fixture(payload, branded=True)
+        changed = bytearray(payload.read_bytes())
+        changed[0x620] = 1
+        payload.write_bytes(changed)
+        expect(0, "install", "-Search", "-Quiet", **unicode_env)
+        assert (unicode_app / "secur32.dll").read_bytes() == payload.read_bytes()
+        expect(0, "uninstall", "-Search", "-Quiet", **unicode_env)
+        assert not (unicode_app / "secur32.dll").exists()
+        payload.unlink()
+        empty_search = work / "empty search"
+        empty_search.mkdir()
+        output, _ = expect(1, "check", "-Search", "-Quiet", **no_standard_roots,
+                           BAT_INSTALL_TEST_SEARCH_ROOT=str(empty_search))
+        assert "Found 0 additional browser installation(s)." in output and "No browser found." in output
+        output, _ = expect(0, input_text="10\n\n", BAT_INSTALL_TEST_SEARCH_ROOT=str(empty_search))
+        assert "Found 0 additional browser installation(s)." in output
         expect(1, "install", edge, "-Quiet", "-Unknown")
         expect(1, "install", edge, "-Quiet", "-Ublock")
         assert not payload.exists()
@@ -830,12 +995,12 @@ def main():
         output, _ = expect(0, "check", input_text="18\n",
                            **{"ProgramFiles(x86)": str(other_roots)})
         assert "[18] Edge Canary - patch installed" in output and "Selected: Edge Canary" in output
-        rows = re.findall(r"^\[\d+\] (.+)$", output, re.M)
+        rows = re.findall(r"^\[\d+\] ((?:Chrome|Chromium|Edge)\b.*)$", output, re.M)
         assert [row.split()[0] for row in rows] == ["Chrome"] * 8 + ["Chromium"] * 2 + ["Edge"] * 8
         assert str(other_roots) not in output
         payload.unlink()
         expect(0, "uninstall", edge, "-Quiet")
-    print("Native batch installer tests passed: manual elevation, grouped Chrome/Chromium/Edge, patch status, automatic cleanup and safety")
+    print("Native batch installer tests passed: manual elevation, grouped Chrome/Chromium/Edge, drive search, patch status, automatic cleanup and safety")
 
 
 if __name__ == "__main__":

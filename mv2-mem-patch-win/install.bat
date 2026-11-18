@@ -61,6 +61,7 @@ if /i "%~1"=="uninstall" (set "MV2_COMMAND=uninstall" & shift /1 & goto :argumen
 if /i "%~1"=="check" (set "MV2_COMMAND=check" & shift /1 & goto :arguments)
 if /i "%~1"=="cleanup" (set "MV2_COMMAND=cleanup" & shift /1 & goto :arguments)
 if /i "%~1"=="-Quiet" (set "MV2_QUIET=1" & shift /1 & goto :arguments)
+if /i "%~1"=="-Search" (set "MV2_SEARCH=1" & shift /1 & goto :arguments)
 set "MV2_ARGUMENT=%~1"
 if "%MV2_ARGUMENT:~0,1%"=="-" goto :bad_arguments
 if defined MV2_PATH goto :bad_arguments
@@ -82,9 +83,12 @@ if "%MV2_ADMIN%"=="0" (
 )
 if "%MV2_COMMAND%"=="cleanup" (echo %MV2_INFO%Chrome / Chromium / Edge legacy cleanup%MV2_RESET%) else echo %MV2_INFO%Chrome / Chromium / Edge MV2 installer%MV2_RESET%
 call :discover
+if defined MV2_SEARCH call :search_browsers
+if errorlevel 1 goto :finish
 if defined MV2_PATH goto :resolve_target
 if "%MV2_COMMAND%"=="cleanup" goto :cleanup_old
-if "%MV2_COUNT%"=="0" goto :custom_path
+if "%MV2_COUNT%"=="0" if "%MV2_QUIET%"=="1" goto :custom_path
+:browser_menu
 call :show_browsers
 if "%MV2_QUIET%"=="1" (
   if not "%MV2_COUNT%"=="1" (
@@ -94,16 +98,25 @@ if "%MV2_QUIET%"=="1" (
   set "MV2_SELECTED=1"
   goto :load_target
 )
+set /a MV2_SEARCH_OPTION=MV2_COUNT+1 >nul
+echo %MV2_INFO%[%MV2_SEARCH_OPTION%] Scan for Custom Browser Paths%MV2_RESET%
+echo %MV2_INFO%[0] Custom path%MV2_RESET%
 :choose_browser
 rem Numbered entries can have multiple digits; other input is treated as a pasted path.
 set "MV2_SELECTED="
-set /p "MV2_SELECTED=Select a browser number or enter a custom path: "
+set /p "MV2_SELECTED=Select a number or paste a browser path (blank to quit): "
 if not defined MV2_SELECTED (set "MV2_CODE=0" & goto :finish)
 set MV2_SELECTED | findstr.exe /r /x /c:"MV2_SELECTED=[0-9][0-9]*" >nul
 if errorlevel 1 goto :pasted_path
 if "%MV2_SELECTED%"=="0" goto :custom_path
+if "%MV2_SELECTED%"=="%MV2_SEARCH_OPTION%" goto :search_drives
 for /l %%N in (1,1,%MV2_COUNT%) do if "%MV2_SELECTED%"=="%%N" goto :load_target
 goto :bad_selection
+
+:search_drives
+call :search_browsers
+if errorlevel 1 goto :finish
+goto :browser_menu
 
 :pasted_path
 rem Strip pasted quotes before expanding input so shell syntax stays inside the quoted path.
@@ -111,7 +124,7 @@ set "MV2_PATH=%MV2_SELECTED:"=%"
 if exist "%MV2_PATH%" goto :resolve_target
 
 :bad_selection
-echo %MV2_ERROR%Enter a listed browser number or an existing browser path.%MV2_RESET%
+echo %MV2_ERROR%Enter a listed number or an existing browser path.%MV2_RESET%
 goto :choose_browser
 
 :load_target
@@ -194,7 +207,8 @@ if not exist "%MV2_SOURCE%" (
   echo %MV2_ERROR%Missing secur32.dll beside install.bat.%MV2_RESET%
   goto :finish
 )
-findstr.exe /m /l /c:"[mv2patch" "%MV2_SOURCE%" >nul 2>&1
+rem Let cmd open Unicode paths that findstr cannot pass as filenames.
+findstr.exe /m /l /c:"[mv2patch" <"%MV2_SOURCE%" >nul 2>&1
 if errorlevel 1 (
   echo %MV2_ERROR%The adjacent secur32.dll is not a recognized MV2 patcher.%MV2_RESET%
   goto :finish
@@ -213,7 +227,7 @@ if not "%MV2_ARCH%"=="%MV2_SOURCE_ARCH%" (
   goto :finish
 )
 if exist "%MV2_APP%\secur32.dll" (
-  findstr.exe /m /l /c:"[mv2patch" "%MV2_APP%\secur32.dll" >nul 2>&1
+  findstr.exe /m /l /c:"[mv2patch" <"%MV2_APP%\secur32.dll" >nul 2>&1
   if errorlevel 1 (echo %MV2_ERROR%Refusing to overwrite an unrelated secur32.dll.%MV2_RESET% & goto :finish)
 )
 rem Skip replacement when the installed DLL matches the local DLL.
@@ -256,7 +270,7 @@ goto :finish
 :uninstall
 rem Preserve unrelated DLLs even when their filename matches the proxy.
 if exist "%MV2_APP%\secur32.dll" (
-  findstr.exe /m /l /c:"[mv2patch" "%MV2_APP%\secur32.dll" >nul 2>&1
+  findstr.exe /m /l /c:"[mv2patch" <"%MV2_APP%\secur32.dll" >nul 2>&1
   if errorlevel 1 (echo %MV2_ERROR%Refusing to delete an unrelated secur32.dll.%MV2_RESET% & goto :finish)
 )
 rem Leave the browser running when no proxy or old installer data needs removal.
@@ -286,7 +300,7 @@ goto :finish
 :check
 set "MV2_PROBE=%MV2_APP%\secur32.dll"
 if not exist "%MV2_PROBE%" (echo %MV2_WARN%secur32.dll is not installed.%MV2_RESET% & goto :finish)
-findstr.exe /m /l /c:"[mv2patch" "%MV2_PROBE%" >nul 2>&1
+findstr.exe /m /l /c:"[mv2patch" <"%MV2_PROBE%" >nul 2>&1
 if errorlevel 1 (echo %MV2_ERROR%The installed secur32.dll is unrelated to this project.%MV2_RESET% & goto :finish)
 call :make_work
 if errorlevel 1 goto :finish
@@ -339,6 +353,45 @@ set "MV2_ITEM_EXE_%MV2_COUNT%=%MV2_EXE%"
 set "MV2_ITEM_REG_%MV2_COUNT%=%MV2_REG%"
 exit /b 0
 
+:search_browsers
+if not exist "%MV2_POWERSHELL%" (echo %MV2_ERROR%Windows PowerShell is unavailable. Cannot search local drives.%MV2_RESET% & exit /b 1)
+call :make_work
+if errorlevel 1 exit /b 1
+set "MV2_SEARCH_FILE=%MV2_WORK%\browsers.txt"
+set "MV2_SEARCH_BEFORE=%MV2_COUNT%"
+echo %MV2_INFO%Searching local drives for chrome.exe and msedge.exe...%MV2_RESET%
+call :search_powershell
+if errorlevel 1 (echo %MV2_ERROR%Browser search failed.%MV2_RESET% & exit /b 1)
+rem Read UTF-8 paths without consuming pending menu replies.
+if not defined MV2_CODE_PAGE for /f "tokens=2 delims=:" %%C in ('chcp ^<nul') do set "MV2_CODE_PAGE=%%C"
+chcp 65001 <nul >nul
+for /f "usebackq delims=" %%P in ("%MV2_SEARCH_FILE%") do (
+  set "MV2_CANDIDATE=%%P"
+  call :record_search
+)
+set "MV2_NAME="
+set "MV2_EXE="
+set "MV2_REG="
+set /a MV2_FOUND=MV2_COUNT-MV2_SEARCH_BEFORE >nul
+echo %MV2_INFO%Found %MV2_FOUND% additional browser installation(s).%MV2_RESET%
+exit /b 0
+
+:record_search
+for %%I in ("%MV2_CANDIDATE%") do (
+  set "MV2_EXE=%%~nxI"
+  set "MV2_CANDIDATE=%%~dpI."
+)
+for %%I in ("%MV2_CANDIDATE%") do set "MV2_CANDIDATE=%%~fI"
+set "MV2_NAME=Chrome"
+set "MV2_REG=Google\Chrome"
+for %%I in ("%MV2_CANDIDATE%" "%MV2_CANDIDATE%\..") do if /i "%%~nxI"=="Chromium" set "MV2_NAME=Chromium"
+if "%MV2_NAME%"=="Chromium" set "MV2_REG=Chromium"
+if /i "%MV2_EXE%"=="msedge.exe" (set "MV2_NAME=Edge" & set "MV2_REG=Microsoft\Edge")
+set "MV2_COUNT_BEFORE=%MV2_COUNT%"
+call :record_install
+if not "%MV2_COUNT%"=="%MV2_COUNT_BEFORE%" set "MV2_ITEM_SEARCH_%MV2_COUNT%=1"
+exit /b 0
+
 :show_browsers
 setlocal
 for /l %%N in (1,1,%MV2_COUNT%) do (
@@ -352,10 +405,12 @@ exit /b 0
 call :load_item
 set "MV2_STATE="
 if exist "%MV2_APP%\secur32.dll" (
-  findstr.exe /m /l /c:"[mv2patch" "%MV2_APP%\secur32.dll" >nul 2>&1
+  findstr.exe /m /l /c:"[mv2patch" <"%MV2_APP%\secur32.dll" >nul 2>&1
   if not errorlevel 1 set "MV2_STATE= - patch installed"
 )
-echo %MV2_INFO%[%MV2_SELECTED%] %MV2_NAME%%MV2_STATE%%MV2_RESET%
+if defined MV2_ITEM_SEARCH_%MV2_SELECTED% (
+  echo %MV2_INFO%[%MV2_SELECTED%] %MV2_NAME%%MV2_STATE% - "%MV2_APP%"%MV2_RESET%
+) else echo %MV2_INFO%[%MV2_SELECTED%] %MV2_NAME%%MV2_STATE%%MV2_RESET%
 exit /b 0
 
 :make_work
@@ -477,6 +532,11 @@ if not exist "%MV2_POWERSHELL%" (echo %MV2_ERROR%Windows PowerShell is unavailab
 
 :powershell_script
 "%MV2_POWERSHELL%" -NoProfile -NonInteractive -Command "$source=[IO.File]::ReadAllText($env:MV2_BATCH); & ([scriptblock]::Create(($source -split '(?m)^# MV2_PROCESS_SCRIPT\r?$',2)[1]))" >nul 2>&1
+exit /b %errorlevel%
+
+:search_powershell
+rem The search worker must not consume replies intended for the browser menu.
+"%MV2_POWERSHELL%" -NoProfile -NonInteractive -Command "$source=[IO.File]::ReadAllText($env:MV2_BATCH); & ([scriptblock]::Create(($source -split '(?m)^# MV2_SEARCH_SCRIPT\r?$',2)[1]))" <nul
 exit /b %errorlevel%
 
 :wait_closed
@@ -629,7 +689,7 @@ if /i not "%MV2_COMMAND%"=="uninstall" if /i "%MV2_EXE%"=="chrome.exe" (
 )
 rem Remove only this project's branded legacy proxy and preserve unrelated version DLLs.
 if exist "%MV2_APP%\version.dll" (
-  findstr.exe /m /l /c:"[mv2patch" "%MV2_APP%\version.dll" >nul 2>&1
+  findstr.exe /m /l /c:"[mv2patch" <"%MV2_APP%\version.dll" >nul 2>&1
   if not errorlevel 1 (
     set "MV2_LEGACY=1"
     set "MV2_CLEANUP_NEEDED=1"
@@ -651,7 +711,7 @@ if not errorlevel 1 (
   exit /b 1
 )
 if exist "%MV2_APP%\version.dll" (
-  findstr.exe /m /l /c:"[mv2patch" "%MV2_APP%\version.dll" >nul 2>&1
+  findstr.exe /m /l /c:"[mv2patch" <"%MV2_APP%\version.dll" >nul 2>&1
   if not errorlevel 1 (
     echo %MV2_WARN%%MV2_NAME%: removing the old version.dll proxy.%MV2_RESET%
     del /f /q "%MV2_APP%\version.dll" >nul 2>&1
@@ -696,8 +756,9 @@ for %%V in (%MV2_VIEWS%) do (
 exit /b 0
 
 :usage
-echo %MV2_INFO%Usage: install.bat [install^|uninstall^|check^|cleanup] ["browser path"] [-Quiet]%MV2_RESET%
+echo %MV2_INFO%Usage: install.bat [install^|uninstall^|check^|cleanup] ["browser path"] [-Search] [-Quiet]%MV2_RESET%
 echo %MV2_INFO%No arguments: select a browser and action. Use Run as administrator.%MV2_RESET%
+echo %MV2_INFO%-Search: find browsers on all local drives before selecting a target.%MV2_RESET%
 exit /b 0
 
 :finish_work
@@ -709,9 +770,10 @@ if defined MV2_TASK_READY (
   if errorlevel 1 echo %MV2_WARN%[WARNING] Could not remove temporary restart task "%MV2_TASK%".%MV2_RESET%
 )
 if defined MV2_WORK (
-  for %%F in (image.hex reopen.xml xml-bom.hex) do if exist "%MV2_WORK%\%%F" del /q "%MV2_WORK%\%%F" >nul 2>&1
+  for %%F in (image.hex reopen.xml xml-bom.hex browsers.txt) do if exist "%MV2_WORK%\%%F" del /q "%MV2_WORK%\%%F" >nul 2>&1
   rd "%MV2_WORK%" >nul 2>&1
 )
+if defined MV2_CODE_PAGE chcp %MV2_CODE_PAGE% <nul >nul
 exit /b 0
 
 :finish
@@ -867,5 +929,151 @@ public static class Mv2BrowserWindows {
     exit 2
 } finally {
     foreach ($process in $live) { $process.Dispose() }
+}
+
+# MV2_SEARCH_SCRIPT
+$ErrorActionPreference = 'Stop'
+try {
+    Add-Type -TypeDefinition @'
+using System;
+using System.Collections.Generic;
+using System.Collections.Concurrent;
+using System.ComponentModel;
+using System.IO;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Threading.Tasks;
+using Microsoft.Win32.SafeHandles;
+public static class Mv2BrowserSearch {
+    [StructLayout(LayoutKind.Sequential)]
+    struct MftEnumData {
+        public ulong Start;
+        public long Low, High;
+    }
+    [StructLayout(LayoutKind.Sequential)]
+    struct FileId {
+        public uint Size, Type;
+        public ulong Id, Padding;
+    }
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern SafeFileHandle CreateFileW(string name, uint access, uint share, IntPtr security, uint creation, uint flags, IntPtr template);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern bool DeviceIoControl(SafeFileHandle volume, uint code, ref MftEnumData input, uint inputSize, [Out] byte[] output, uint outputSize, out uint returned, IntPtr overlapped);
+    [DllImport("kernel32.dll", SetLastError = true)]
+    static extern SafeFileHandle OpenFileById(SafeFileHandle volume, ref FileId id, uint access, uint share, IntPtr security, uint flags);
+    [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
+    static extern uint GetFinalPathNameByHandleW(SafeFileHandle file, StringBuilder path, uint size, uint flags);
+
+    static bool IsBrowser(string name) {
+        return name.Equals("chrome.exe", StringComparison.OrdinalIgnoreCase) ||
+               name.Equals("msedge.exe", StringComparison.OrdinalIgnoreCase);
+    }
+
+    public static IEnumerable<ulong> BrowserIds(byte[] data, int count) {
+        if (count < 8 || count > data.Length) throw new InvalidDataException("Invalid MFT buffer.");
+        for (int offset = 8; offset < count;) {
+            if (count - offset < 60) throw new InvalidDataException("Truncated MFT record.");
+            uint length = BitConverter.ToUInt32(data, offset);
+            if (length < 60 || length > count - offset || (length & 7) != 0 ||
+                BitConverter.ToUInt16(data, offset + 4) != 2)
+                throw new InvalidDataException("Unsupported MFT record.");
+            int nameLength = BitConverter.ToUInt16(data, offset + 56);
+            int nameOffset = BitConverter.ToUInt16(data, offset + 58);
+            if (nameOffset < 60 || nameOffset > length || nameLength > length - nameOffset ||
+                (nameLength & 1) != 0)
+                throw new InvalidDataException("Invalid MFT filename.");
+            uint attributes = BitConverter.ToUInt32(data, offset + 52);
+            if ((attributes & 0x410) == 0 && nameLength == 20 &&
+                IsBrowser(Encoding.Unicode.GetString(data, offset + nameOffset, nameLength)))
+                yield return BitConverter.ToUInt64(data, offset + 8);
+            offset += (int)length;
+        }
+    }
+
+    // NTFS enumeration visits metadata once; resolve paths only for browser names.
+    static List<string> Mft(string root) {
+        var found = new List<string>();
+        using (var volume = CreateFileW(@"\\.\" + root.Substring(0, 2), 0x80000000, 7, IntPtr.Zero, 3, 0, IntPtr.Zero)) {
+            if (volume.IsInvalid) throw new Win32Exception();
+            var input = new MftEnumData { High = long.MaxValue };
+            var data = new byte[1024 * 1024];
+            var path = new StringBuilder(32768);
+            while (true) {
+                uint returned;
+                if (!DeviceIoControl(volume, 0x000900b3, ref input, 24, data, (uint)data.Length, out returned, IntPtr.Zero)) {
+                    int error = Marshal.GetLastWin32Error();
+                    if (error == 38) break; // ERROR_HANDLE_EOF ends MFT enumeration.
+                    throw new Win32Exception(error);
+                }
+                foreach (ulong number in BrowserIds(data, checked((int)returned))) {
+                    var id = new FileId { Size = 24, Id = number };
+                    using (var file = OpenFileById(volume, ref id, 0, 7, IntPtr.Zero, 0x00200000)) {
+                        if (file.IsInvalid) continue; // Deleted or inaccessible since enumeration.
+                        uint size = GetFinalPathNameByHandleW(file, path, (uint)path.Capacity, 0);
+                        if (size == 0 || size >= path.Capacity) continue;
+                        string full = path.ToString();
+                        if (full.StartsWith(@"\\?\", StringComparison.Ordinal)) full = full.Substring(4);
+                        // shortcut: MFT returns one path per file ID; scan directories if hard-link aliases must all be listed.
+                        if (full.StartsWith(root, StringComparison.OrdinalIgnoreCase) &&
+                            IsBrowser(Path.GetFileName(full)) && File.Exists(full)) found.Add(full);
+                    }
+                }
+                ulong next = BitConverter.ToUInt64(data, 0);
+                if (next <= input.Start) throw new InvalidDataException("MFT enumeration did not advance.");
+                input.Start = next;
+            }
+        }
+        return found;
+    }
+
+    public static List<string> Folders(string root) {
+        var found = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(root);
+        while (pending.Count != 0) {
+            string folder = pending.Pop();
+            try {
+                // One pass per directory; junctions can leave the drive or form cycles.
+                foreach (var entry in new DirectoryInfo(folder).EnumerateFileSystemInfos()) {
+                    if ((entry.Attributes & FileAttributes.ReparsePoint) != 0) continue;
+                    if ((entry.Attributes & FileAttributes.Directory) != 0) pending.Push(entry.FullName);
+                    else if (IsBrowser(entry.Name)) found.Add(entry.FullName);
+                }
+            } catch (UnauthorizedAccessException) {
+            } catch (IOException) {
+            }
+        }
+        return found;
+    }
+
+    public static string[] Find(string[] roots) {
+        var found = new ConcurrentBag<string>();
+        Parallel.ForEach(roots, root => {
+            Console.Error.WriteLine("Searching " + root);
+            List<string> matches;
+            try {
+                matches = root.Equals(Path.GetPathRoot(root), StringComparison.OrdinalIgnoreCase) ? Mft(root) : Folders(root);
+            } catch (Win32Exception) {
+                Console.Error.WriteLine(root + ": fast search unavailable; searching folders.");
+                matches = Folders(root);
+            } catch (IOException) {
+                Console.Error.WriteLine(root + ": fast search unavailable; searching folders.");
+                matches = Folders(root);
+            }
+            foreach (string match in matches) found.Add(match);
+        });
+        return found.ToArray();
+    }
+}
+'@
+    $roots = @([IO.DriveInfo]::GetDrives() | Where-Object {
+        $_.DriveType -in 'Fixed', 'Removable', 'Ram' -and $_.IsReady
+    } | ForEach-Object { $_.Name })
+    $found = [string[]]@([Mv2BrowserSearch]::Find([string[]]$roots) | Sort-Object -Unique)
+    [IO.File]::WriteAllLines($env:MV2_SEARCH_FILE, $found, [Text.UTF8Encoding]::new($false))
+    exit 0
+} catch {
+    [Console]::Error.WriteLine($_.Exception.Message)
+    exit 1
 }
 

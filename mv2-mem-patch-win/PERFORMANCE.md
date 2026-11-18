@@ -402,6 +402,37 @@ python scripts/test_autoscan_crx.py _scratch/x86-4ch/dev-x86-runtime.json --arch
 python scripts/test_autoscan_crx.py _scratch/x86-4ch/canary-x86-runtime.json --arch x86 --dll _scratch/x86-4ch/patcher/secur32.dll --work _scratch/x4c-new
 ```
 
+## Installer drive search (November 18, 2026)
+
+The optional installer search scans ready fixed, removable and RAM drives in
+parallel. NTFS reads MFT records and resolves paths only for exact `chrome.exe`
+or `msedge.exe` matches. Unsupported or unavailable metadata uses one directory
+traversal, excluding reparse points.
+
+The disposable benchmark used 500 folders and 20,002 files, including one Chrome
+and one Edge executable. Results are medians of three warm runs after one warmup
+on this Windows host; fixture creation and PowerShell/C# startup are excluded.
+
+| Operation | Median time |
+| --- | ---: |
+| Installer directory fallback | 135.5 ms |
+| Native `where /r` with both filenames | 1,195.5 ms |
+| PowerShell recursive file enumeration with name filtering | 1,986.9 ms |
+| Filter 100,000 synthetic USN records | 14.7 ms |
+
+The fallback was about 8.8 times faster than `where /r` on this fixture.
+An elevated full-volume NTFS scan and cold-disk timings remain unmeasured.
+The embedded search C# (UTF-8, LF, excluding the PowerShell here-string markers)
+has SHA-256 `8e4f23a5b3625316bd92fb673254ae5d91b3c8b54188d3ba13b32985d2f60141`.
+Reproduce the fixture timings with `python _scratch/install-search-bench.py`.
+
+`python scripts/test_install.py` passed, covering record bounds and versions, native
+file-ID/path lookup, case-insensitive names, parallel folder roots, Unicode
+paths, junction cycles, repeated menu searches, quiet selection and empty
+results, plus staged install and uninstall in a CJK path, using isolated browser
+fixtures. DLL marker detection also passed against the built x64, x86 and ARM64
+DLLs.
+
 ## Remaining limits
 
 `complete_enforcement_coverage_proven` remains **false**. New compiler layouts,

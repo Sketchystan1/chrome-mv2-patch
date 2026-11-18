@@ -42,9 +42,11 @@ Keep `install.bat` and the matching `secur32.dll` together, either in an extract
 release or a local `build/<arch>/` folder. Right-click the batch file and select
 **Run as administrator**; it does not elevate itself.
 
-Choose a browser by number or enter its folder, executable or DLL path. Paths
+Choose a browser by number or paste its folder, executable or DLL path. Paths
 with spaces accept optional surrounding quotes; **0** opens the custom-path
-prompt. The action menu offers **1 Install**, **2 Uninstall** and **0 Quit**.
+prompt. The numbered **Scan for Custom Browser Paths** option finds custom or
+portable installations and adds their paths to the browser list. The action menu
+offers **1 Install**, **2 Uninstall** and **0 Quit**.
 Detection covers Chrome and Edge Stable, Beta, Dev and Canary, plus standard
 machine/per-user `Chromium\Application` folders. The DLL must match the browser's
 processor type. Installation does not guarantee that its code is recognized.
@@ -53,6 +55,7 @@ Install uBlock Origin separately; the batch does not install extensions.
 ```bat
 install.bat install "C:\Program Files (x86)\Microsoft\Edge\Application"
 install.bat check "C:\Program Files (x86)\Microsoft\Edge\Application" -Quiet
+install.bat check -Search
 install.bat uninstall "C:\Program Files (x86)\Microsoft\Edge\Application"
 install.bat cleanup -Quiet
 ```
@@ -60,6 +63,11 @@ install.bat cleanup -Quiet
 `-Quiet` skips normal prompts; errors still wait for a key. `check` is read-only.
 Specify a path when multiple installations are found. `cleanup` handles all
 detected installations; a supplied path also includes a portable installation.
+`-Search` runs the drive search before selecting a browser. Drives are searched
+in parallel; NTFS uses its file metadata instead of walking every directory.
+Other filesystems, or unavailable NTFS metadata, fall back to one directory
+traversal per drive. Network drives and directory junctions are excluded;
+inaccessible folders and additional hard-link aliases can be missed.
 The batch uses built-in Windows commands and embedded PowerShell, and disables
 console QuickEdit so text selection cannot suspend it.
 
