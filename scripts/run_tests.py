@@ -52,6 +52,7 @@ def main():
     steps = [
         ("PE/ELF/Mach-O image readers", py + [str(HERE / "test_binary_image.py")]),
         ("Native scanner evaluation", py + [str(HERE / "test_check_autoscan_matrix.py")]),
+        ("ARM64 browser fetch", py + [str(HERE / "test_fetch_arm64_browser.py")]),
         ("Mach-O load-command research", py + [str(HERE / "macho_insert_dylib.py"), "--self-test"]),
         ("Windows x64 Python discovery (optional dependencies)",
          py + [str(HERE / "test_scan_windows.py")]),

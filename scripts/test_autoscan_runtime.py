@@ -274,7 +274,7 @@ def main():
                            '/mv2-started': 1}, '/probe/current') == {'/blocked': 2, '/mv2-started': 1}
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('matrix', type=Path)
-    parser.add_argument('--arch', choices=('x64', 'x86'), default='x64')
+    parser.add_argument('--arch', choices=('x64', 'x86', 'arm64'), default='x64')
     parser.add_argument('--dll', type=Path)
     parser.add_argument('--work', type=Path, required=True)
     args = parser.parse_args()

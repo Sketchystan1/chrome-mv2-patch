@@ -1,0 +1,113 @@
+name: Test Windows ARM64 browsers
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [test/windows-arm64-browser-channels]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: arm64
+      - uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64_arm64
+      - name: Check portable fixtures
+        run: python scripts/run_tests.py --fast
+      - name: Build ARM64 patcher and test helpers
+        working-directory: mv2-mem-patch-win
+        run: |
+          cmake --preset arm64
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build out/arm64 --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          ctest --preset arm64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arm64-test-binaries
+          if-no-files-found: error
+          path: |
+            mv2-mem-patch-win/build/arm64/secur32.dll
+            mv2-mem-patch-win/out/arm64/mv2-scan.exe
+            mv2-mem-patch-win/out/arm64/test-launch.exe
+            mv2-mem-patch-win/out/arm64/registry-test.dll
+            mv2-mem-patch-win/out/arm64/browser-ui.exe
+
+  browser:
+    name: ${{ matrix.browser }} ${{ matrix.channel }} ARM64
+    needs: build
+    runs-on: windows-11-arm
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chrome, edge]
+        channel: [stable, beta, canary]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.13'
+          architecture: arm64
+      - uses: actions/download-artifact@v4
+        with:
+          name: arm64-test-binaries
+          path: mv2-mem-patch-win
+      - name: Fetch stock ARM64 browser
+        run: python scripts/fetch_arm64_browser.py --browser ${{ matrix.browser }} --channel ${{ matrix.channel }} --out _scratch/browser
+      - name: Check native discovery
+        run: |
+          $entry = @(Get-Content -LiteralPath '_scratch/browser/matrix.json' -Raw | ConvertFrom-Json)[0]
+          & ./mv2-mem-patch-win/out/arm64/mv2-scan.exe $entry.binary > _scratch/scan.json 2> _scratch/scan.stderr
+          if ($LASTEXITCODE) {
+            $report = Get-Content -LiteralPath '_scratch/scan.json' -Raw | ConvertFrom-Json
+            throw "ARM64 discovery failed: $($report.error)"
+          }
+      # shortcut: Edge ARM64 discovery currently declines; add its browser lifecycle when recognition is supported.
+      - name: Check signed CRX and MV2 lifecycle
+        if: matrix.browser == 'chrome'
+        run: python scripts/test_autoscan_crx.py _scratch/browser/matrix.json --arch arm64 --work _scratch/crx
+      - name: Record browser identity and result
+        if: always()
+        env:
+          BROWSER: ${{ matrix.browser }}
+          CHANNEL: ${{ matrix.channel }}
+          RESULT: ${{ job.status }}
+        run: |
+          "### $env:BROWSER $env:CHANNEL ARM64: $env:RESULT" >> $env:GITHUB_STEP_SUMMARY
+          if (Test-Path -LiteralPath '_scratch/browser/source.json') {
+            $source = Get-Content -LiteralPath '_scratch/browser/source.json' -Raw | ConvertFrom-Json
+            "Version: $($source.version)" >> $env:GITHUB_STEP_SUMMARY
+            "Installer SHA-256: $($source.sha256)" >> $env:GITHUB_STEP_SUMMARY
+          }
+          if (Test-Path -LiteralPath '_scratch/scan.json') {
+            $report = Get-Content -LiteralPath '_scratch/scan.json' -Raw | ConvertFrom-Json
+            "Browser DLL SHA-256: $($report.sha256)" >> $env:GITHUB_STEP_SUMMARY
+            "Discovery ready: $($report.ready); error: $($report.error)" >> $env:GITHUB_STEP_SUMMARY
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ${{ matrix.browser }}-${{ matrix.channel }}-arm64-results
+          path: |
+            _scratch/browser/source.json
+            _scratch/browser/matrix.json
+            _scratch/scan.json
+            _scratch/scan.stderr
+            _scratch/crx/*.json
+            _scratch/crx/*.log
+            _scratch/crx/*.stderr
+            _scratch/crx/*.txt

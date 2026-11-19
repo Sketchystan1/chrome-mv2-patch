@@ -65,7 +65,7 @@ def cdp(profile, action, extension_id, value='', download_path=''):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('matrix', type=Path)
-    parser.add_argument('--arch', choices=('x86', 'x64'), default='x86')
+    parser.add_argument('--arch', choices=('x86', 'x64', 'arm64'), default='x86')
     parser.add_argument('--dll', type=Path)
     parser.add_argument('--work', type=Path, required=True)
     parser.add_argument('--phases', default='stock,valid,tampered,no-proof,restart,cold-restart,restore')

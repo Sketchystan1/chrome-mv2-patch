@@ -203,6 +203,11 @@ Windows; the x64 suite also tests ARM64 instruction layouts. The
 [scripts README](../scripts/README.md) documents portable fixtures and isolated
 browser lifecycle/CRX tests.
 
+ARM64 browser-test helpers use a newer checksum-pinned Detours source because
+4.0.1's full ARM64 hooker is incomplete. The deployed DLL retains its existing
+Detours import enumerator. The test source license is copied to
+`out/arm64/Detours-test-LICENSE.md`.
+
 `mv2-scan.exe` reads the file and prints JSON with SHA-256/BLAKE3 fingerprints,
 proposed bytes, skipped optional checks and unresolved candidates. It does not
 launch or patch a browser. Exit codes are **0** for a ready plan, **1** for a

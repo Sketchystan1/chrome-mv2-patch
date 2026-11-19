@@ -17,14 +17,15 @@ approaches and platform lessons.
 | Tool | Purpose | Requirements |
 | --- | --- | --- |
 | `fetch_chrome_binary.py` | Fetch a stock Windows DLL, Linux ELF or macOS framework into `_scratch/`; verify the target architecture and name it using the binary's reported version where available. | Python + 7-Zip |
+| `fetch_arm64_browser.py` | Fetch complete stock Windows ARM64 Chrome/Edge Stable, Beta or Canary copies and write a browser-test matrix; verify vendor installer hashes, sizes, PE machines and versions. | Python + 7-Zip |
 | `fetch_symbols.py` | Fetch matching PDB, Linux debug-info or macOS dSYM symbols; reject identity mismatches. | Python standard library |
 | `symbols_from_pdb.py` | Resolve named MV2-related functions through Windows dbghelp. | Windows + matching PDB |
 | `symbols_from_elf.py` | Stream an ELF's function symbols into `nm -S` style text without a full demangle/sort pass. | Python standard library |
 | `binary_image.py` | Read code-section metadata from PE x64/x86/ARM64, ELF x64/ARM64 and thin/fat Mach-O ARM64; usable as a module or JSON inspection CLI. | Python standard library |
 | `scan_windows.py` | Read-only x64 research prototype: recover field relationships and check local predicate routing. | Capstone + z3-solver |
 | `check_autoscan_matrix.py` | Evaluate the native scanner against independent, hash-bound reviewed address baselines. | Built `mv2-scan.exe` |
-| `test_autoscan_runtime.py`, `autoscan_cdp.mjs` | Exercise the same deployed DLL on isolated x64/x86 browser copies, including MV2/MV3 controls and cache/removal checks. | Windows, native test targets, Node 22+, OpenSSL |
-| `test_autoscan_crx.py`, `autoscan_crx_cdp.mjs` | Install signed CRX3 controls through the browser's Downloads page and native confirmation; reject tampered packages and missing developer proofs. | Windows, matching x64/x86 native test targets, Node 22+, OpenSSL |
+| `test_autoscan_runtime.py`, `autoscan_cdp.mjs` | Exercise the same deployed DLL on isolated browser copies, including MV2/MV3 controls and cache/removal checks. | Windows, matching x64/x86/ARM64 native test targets, Node 22+, OpenSSL |
+| `test_autoscan_crx.py`, `autoscan_crx_cdp.mjs` | Install signed CRX3 controls through the browser's Downloads page and native confirmation; reject tampered packages and missing developer proofs. | Windows, matching x64/x86/ARM64 native test targets, Node 22+, OpenSSL |
 | `macho_insert_dylib.py` | Scratch-copy research for inserting/removing a dylib load command; retained for a future macOS loader. | Python standard library |
 
 `_testutil.py` contains only synthetic PE/ELF/Mach-O fixture builders. The Mach-O
@@ -138,6 +139,22 @@ the x86 DLL. `--dll` can select another local build.
 extension registry reads to a private HKCU subtree, checks stock/patched/removal
 behavior, and restarts with an empty cache. These browser experiments are
 separate from the local fixture suite.
+
+`--arch arm64` selects ARM64 helpers and the ARM64 DLL and requires native ARM64
+Windows. The [Windows ARM64 workflow](../.github/workflows/win-arm64-test.yml)
+builds and runs native CTest on `windows-11-arm`, then tests the latest consumer
+Chrome and Edge Stable (release), Beta and Canary in six independent jobs. It
+runs on pushes to `test/windows-arm64-browser-channels` and supports manual
+dispatch. Each job saves vendor download metadata, browser identities and scan
+reports, including on failure. Chrome also runs the seven-phase signed CRX/MV2
+lifecycle. Edge ARM64 discovery currently fails with
+`Edge installer recognition requires x64`; those jobs remain failures, and Edge
+browser lifecycle coverage must be added when its ARM64 recognition is supported.
+
+```text
+python scripts/fetch_arm64_browser.py --browser chrome --channel canary --out _scratch/arm64-browser
+python scripts/test_autoscan_crx.py _scratch/arm64-browser/matrix.json --arch arm64 --work _scratch/arm64-crx
+```
 
 The CRX installation harness uses a single-entry runtime matrix and a new, short
 directory below `_scratch/`. It launches a browser copy on a private Windows
