@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(mv2_autoscan VERSION 2.0.0 LANGUAGES C CXX RC)
-# This version also appears in the DLL's Windows Properties and release filename.
+file(STRINGS "${CMAKE_CURRENT_LIST_DIR}/../CHANGELOG.md" MV2_RELEASE_HEADING LIMIT_COUNT 1
+  REGEX "^## \\[[0-9]+\\.[0-9]+\\.[0-9]+\\] - [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$")
+if(NOT MV2_RELEASE_HEADING MATCHES "^## \\[([0-9]+\\.[0-9]+\\.[0-9]+)\\] - [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$")
+  message(FATAL_ERROR "CHANGELOG.md must start with a dated [major.minor.patch] release heading")
+endif()
+project(mv2_autoscan VERSION "${CMAKE_MATCH_1}" LANGUAGES C CXX RC)
+# ProductVersion and release filenames follow the newest dated changelog heading.
 if(NOT WIN32 OR NOT MSVC)
   message(FATAL_ERROR "The compact scanner requires MSVC on Windows")
 endif()

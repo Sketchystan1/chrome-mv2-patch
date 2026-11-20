@@ -1,6 +1,7 @@
 # Windows MV2 memory patcher
 
-Version **2.0.0**. A native `secur32.dll` for Windows x64, x86 and ARM64. It
+The latest dated root `CHANGELOG.md` heading sets the DLL and release version.
+A native `secur32.dll` for Windows x64, x86 and ARM64. It
 patches recognized Chrome/Chromium MV2 decisions and optional off-store extension
 and CRX installation checks in memory. Edge uses separate installer checks.
 
@@ -192,8 +193,8 @@ the matching Microsoft Visual C++ runtime and Windows Universal C Runtime.
 
 In Visual Studio, open this folder, select **x64 Release**, **x86 Release** or
 **ARM64 Release**, and build `secur32`. Visual Studio and `build.bat` share
-`CMakePresets.json`. `CMakeLists.txt` supplies the DLL/release version;
-`version.rc` contains its Windows Properties labels.
+`CMakePresets.json`. The latest dated release heading in the root `CHANGELOG.md`
+supplies the DLL/release version; `version.rc` contains its Windows Properties labels.
 
 ## Tests and diagnostics
 

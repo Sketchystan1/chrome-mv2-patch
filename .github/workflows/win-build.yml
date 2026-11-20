@@ -1,20 +1,20 @@
-# Manually builds the Windows secur32.dll proxy (x64/x86/arm64) and publishes
-# mv2-patch-<ver>-win-<arch>.zip to a release tagged v<ver>. <ver> is the DLL's
-# ProductVersion, whose single source of truth is CMakeLists.txt's project
-# version. Each ZIP contains only install.bat and secur32.dll at its root.
+# Builds the Windows secur32.dll proxy (x64/x86/arm64) and publishes
+# mv2-patch-<ver>-win-<arch>.zip to v<ver>. The newest dated CHANGELOG.md
+# heading supplies <ver> and CMake stamps it into the DLL ProductVersion.
+# Each ZIP contains only install.bat and secur32.dll at its root.
 # Release notes include the matching CHANGELOG.md entry and earlier entries
 # in the same major version.
 # (GitHub also auto-attaches "Source code" links to every release - the whole
 # repo, minus gitignored build/ and out/ - which cannot be scoped or
 # disabled.)
 #
-# Manual runs only: Actions tab -> "Build Windows MV2 Patcher" -> Run workflow.
-# The file must exist on the default branch for the button to appear.
-#
 # Requires mv2-mem-patch-win/version.rc to be committed (build.bat compiles it).
 name: Build Windows MV2 Patcher
 
 on:
+  push:
+    branches: [master]
+    paths: [CHANGELOG.md]
   workflow_dispatch:
 
 permissions:
@@ -40,9 +40,14 @@ jobs:
         id: package
         shell: pwsh
         run: |
+          $pattern = '^## \[(?<version>\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}$'
+          $heading = Get-Content -LiteralPath 'CHANGELOG.md' | Where-Object { $_ -match $pattern } | Select-Object -First 1
+          if (-not $heading -or $heading -notmatch $pattern) { throw 'CHANGELOG.md must start with a dated [major.minor.patch] release heading' }
+          $changelogVersion = $Matches['version']
           $buildRoot = Join-Path $env:GITHUB_WORKSPACE 'mv2-mem-patch-win/build'
           $ver = (Get-Item -LiteralPath (Join-Path $buildRoot 'x64/secur32.dll')).VersionInfo.ProductVersion
           if (-not $ver) { throw "couldn't read ProductVersion from the x64 secur32.dll" }
+          if ($ver -ne $changelogVersion) { throw "DLL version $ver differs from CHANGELOG.md version $changelogVersion" }
           $outDir = Join-Path $env:GITHUB_WORKSPACE 'release-assets'
           New-Item -ItemType Directory -Force -Path $outDir | Out-Null
           foreach ($arch in 'arm64', 'x64', 'x86') {
