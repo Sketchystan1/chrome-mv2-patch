@@ -433,12 +433,296 @@ results, plus staged install and uninstall in a CJK path, using isolated browser
 fixtures. DLL marker detection also passed against the built x64, x86 and ARM64
 DLLs.
 
+## November 19, 2026: native Windows ARM64 CI
+
+The testing branch at commit `438cba4` added a six-channel Windows ARM64 matrix.
+[GitHub Actions run 44507649748](https://github.com/Sketchystan1/chrome-mv2-patch/actions/runs/44507649748)
+built on `windows-11-arm` and passed **17/17 native CTest tests** in 2.72 seconds.
+The browser jobs downloaded complete consumer packages, verified their vendor
+installer sizes and SHA-256 hashes, and checked both executable/DLL PE machines
+and file versions before testing isolated copies.
+
+| Browser/channel | Version | Core + optional decisions | Browser result |
+| --- | --- | --- | --- |
+| Chrome Stable ARM64 | 158.0.8127.37 | 7 + 2 | 7/7 CRX/MV2 phases passed. |
+| Chrome Beta ARM64 | 159.0.8154.13 | 7 + 2 | 7/7 CRX/MV2 phases passed. |
+| Chrome Canary ARM64 | 160.0.8171.0 | 7 + 2 | 7/7 CRX/MV2 phases passed. |
+| Edge Stable ARM64 | 157.0.4341.60 | Declined | No browser launch. |
+| Edge Beta ARM64 | 158.0.4370.26 | Declined | No browser launch. |
+| Edge Canary ARM64 | 160.0.4412.0 | Declined | No browser launch. |
+
+Chrome passed **21/21 browser phases, 189 instruction-memory checks and 176
+renderer sandbox checks** with the identical 172,544-byte ARM64 DLL. Phases were
+stock rejection, signed CRX installation/native confirmation, tampered-signature
+rejection, missing-developer-proof rejection, cached restart, empty-cache restart
+and removal. The runs also exercised MV2 enable/disable and request blocking,
+MV3 controls, private registry cleanup and unchanged source/copied browser files.
+
+All three Edge scans failed with `Edge installer recognition requires x64`.
+Those jobs and the overall workflow correctly remained failures. No ARM64 Edge
+runtime support or complete enforcement coverage is claimed. The corrected
+upstream Detours source is used only by ARM64 browser-test helpers; the deployed
+DLL's existing import enumerator and discovery/patch semantics were unchanged.
+
+| Artifact | SHA-256 |
+| --- | --- |
+| Tested ARM64 `secur32.dll` | `b6ab6baed07fbb496235e5d1d894aa9d3c9e330b744b67f090286b5450359451` |
+| Chrome Stable ARM64 `chrome.dll` | `b31377053940c78b29c3a6d9d73abd94b0fe2665f9f7488e369421c62e4a4e50` |
+| Chrome Beta ARM64 `chrome.dll` | `a2c98cc95856c1660946ec8240d8aaefdec438ef95583b7624568b0904b12465` |
+| Chrome Canary ARM64 `chrome.dll` | `6df68f641fba28df848c115fb68c59cf81502bd23d5399664cabe4f2b4a35024` |
+| Edge Stable ARM64 `msedge.dll` | `6184594b61aa86a00074ada46c2fe2e2542188b773bacecaa43f4804c709c2a9` |
+| Edge Beta ARM64 `msedge.dll` | `2a42b64d1b49083d99a2ba6375d2890e35f403c08e144511f93e206daa4b4105` |
+| Edge Canary ARM64 `msedge.dll` | `7172a1dc343ffc7f22066f7b8d9cb70bac069dc6a7b9b2d0bd2f0516dfd79a2e` |
+
+Each browser's Actions artifact contains `browser/source.json`,
+`browser/matrix.json` and `scan.json`; Chrome artifacts also contain the CRX
+phase results and logs. The native binaries are in `arm64-test-binaries`.
+Evidence is downloaded locally beneath `_scratch/ci-run-44507649748/`.
+
+```text
+gh run view 44507649748 --log
+gh run download 44507649748 --dir _scratch/ci-run-44507649748
+```
+
+Pushes to `master` test Stable against the then-current vendor release. Manual
+dispatch can select a browser and channel; `browser=edge, channel=stable` reruns
+Edge Stable alone. New versions require fresh validation.
+
+## November 20, 2026: DLL-only validation attempt
+
+The requested matrix is Chrome and Edge Stable (release), Beta and Canary on
+local x64/x86 and remote native ARM64, with `secur32.dll` alone. Work started
+from primary branch `master` at `62f0c62`; no production launcher or alternate
+proxy was added. The ARM64 provider-result fix selects the already verified
+fall-through for `TBZ` instead of always generating a branch. The new fixture
+failed on the old scanner and passed after the one-line correction. The CRX
+harness now rejects a `--dll` basename other than `secur32.dll` before creating
+its workspace, matching the external-extension harness.
+
+These are cached stock discovery results, not current-channel or runtime passes:
+
+| Browser/architecture | Stable | Beta | Canary |
+| --- | --- | --- | --- |
+| Chrome x64 | 158.0.8127.37: ready | Stock unavailable | 160.0.8168.0: ready |
+| Chrome x86 | 158.0.8127.37: ready | 159.0.8154.6: ready | 160.0.8168.0: ready |
+| Chrome ARM64 | 158.0.8127.37: ready | Stock unavailable | 160.0.8171.0: ready |
+| Edge x64 | 157.0.4341.60: ready | 158.0.4370.26: ready | 160.0.4412.0: ready |
+| Edge x86 | 157.0.4341.60: ready | 158.0.4370.26: ready | 160.0.4412.0: ready |
+| Edge ARM64 | 157.0.4341.60: ready | 158.0.4370.26: ready | 160.0.4412.0: ready |
+
+All 16 available requested combinations passed discovery and stock PE/version
+checks. A separate read-only scan of installed Chrome Canary 160.0.8172.0 x64
+also passed. ARM64 analysis ran in the x64 diagnostic executable, not on ARM64
+Windows. ARM64 Edge's source patches are now `1F2003D5` (`NOP`). Current vendor
+metadata could not be queried, so channel freshness remains unverified.
+
+The Release DLL built for all three architectures. Full local CTest passed
+19/20 x64 and 17/18 x86; the failing cache tests reproduce a sandboxed
+`CryptProtectData` error 2 on synthetic data. After the correction, ARM64
+analysis/optional fixtures passed 222/86 checks on x64, and x86 optional fixtures
+passed 225 checks. Portable image/fetch/runner tests and CRX CDP syntax passed;
+the CRX CLI rejected `version.dll` with exit 2 before filesystem changes.
+
+Both local Chrome Stable lifecycle attempts stopped at the required private
+HKCU registry creation with `WinError 5`, before any browser phase. No isolation,
+cache authentication or sandbox assertion was removed. Latest-browser downloads
+and unsandboxed reruns were not executed because automatic approval review
+returned an internal `content-blocked` router error, explicitly a review failure
+rather than an unsafe-action determination. No fresh remote workflow was
+dispatched. The requested 18-case runtime matrix remains incomplete.
+
+Earlier Edge CI at `62f0c62` failed its patched-memory checks; the wrong ARM64
+branch can explain application rejection. Successful Edge CI at `0e839f2`
+injected `secur32.dll` using a deployed launcher and is excluded from DLL-only
+validation. Its GitHub Actions run was deleted when cleaning results from the
+retired `tests` branch. A prior stock Edge Canary x64 startup module capture had no
+`secur32.dll` loaded; executable/ELF imports across all three architectures
+contain no eager `secur32.dll` import, while `msedge.dll` delay-imports it.
+Fresh dropped-DLL runtime/module checks are still needed to determine whether
+the tested Edge startup path loads the proxy before its installer decisions;
+the later SxS Canary checks are recorded below.
+
+| Built artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| x64 `secur32.dll` | 244,224 | `81b68a49776d2b95522ce77067f5b0388f5a38d6ead22d28f058f3e106440660` |
+| x86 `secur32.dll` | 260,096 | `60ae4d95f637fa02a1480e4839feb009dbc5a7be34831f23a31e0b01d326d753` |
+| ARM64 `secur32.dll` | 178,176 | `4fd80cb54b58943ea0931b5dd7fab80633a62eee34bca014cd34c82d4d785700` |
+
+Evidence: `_scratch/t19-x64-scan/results.json`,
+`_scratch/t19-x86-evidence/results.json`,
+`_scratch/t19-arm64/cached-scanner-results.json`, per-case scan reports,
+`_scratch/t19-arm64-regression-red.log`,
+`_scratch/t19-arm64-final-fixtures.log`, `_scratch/t19-x64-native.log`,
+`_scratch/t19-x86-native.log`, `_scratch/t64cs1.log` and
+`_scratch/t19-x86-chrome-stable-crx.log`. Structured reports contain exact browser
+hashes and input paths; readiness is not an independent address baseline.
+
+## November 20, 2026: ARM64 Canary AST exclusion
+
+Access was restored after the initial sandbox failures. The cache tests then
+passed, and the local native totals became 20/20 x64 and 18/18 x86. The isolated
+CRX harness now waits up to 75 seconds only while decision bytes remain exactly
+stock; unexpected bytes and failed/partial reads still fail immediately. Failed
+phases retain their original error if UI inspection fails, and final module
+diagnostics refresh the loaded security-DLL paths. Seven synthetic Windows memory
+tests passed. Edge packing and launch use its compatibility-relaunch skip flag
+to keep the original isolated process and synchronous packing results.
+
+Initial native ARM64 [run 44616524962](https://github.com/Sketchystan1/chrome-mv2-patch/actions/runs/44616524962)
+at `863fe3a` passed 17/17 native tests. Chrome Stable/Beta and Edge Stable passed
+all seven browser phases each. Chrome Canary 160.0.8172.0 declined discovery;
+Edge Beta 159.0.4402.7 and Canary 160.0.4413.0 failed patched-memory checks.
+The initial local x64/x86 runs likewise passed all Chrome channels and Edge
+Stable, while Edge Beta/Canary loaded only Windows security DLLs. Final rebuilt
+artifact validation is recorded below when completed.
+
+The rejected Canary DLL is SHA-256
+`f13be3049d78329a540319bfac402c48c40d76e4718b44f9215eb00cc2eeed94`.
+Its comparison at RVA `0x3a60938` belongs to V8 AST literal dispatch in a
+163,616-byte function, not MV2 enforcement. The source-bound proof is in
+`_scratch/t20-arm64-canary-source-proof.json` and the reversing notes. Generic
+extraction filtering was rejected during two independent read-only reviews:
+it could silently omit a genuine, unsupported predicate.
+
+The narrower source-family exclusion keeps the 64 KiB program and other proof
+budgets unchanged. It validates the literal origin/guard, the read-only switch
+and its preserving loop, every backed executable section including raw padding,
+and the absence of executable/table/metadata relocations. Failed proofs retain
+the unresolved candidate. The exact stock DLL now produces a ready nine-decision
+plan with no unresolved candidate. A warm read-only x64-host ARM64 CLI run took
+7.418 seconds while another isolated browser test was running; this is not a
+controlled performance benchmark or native ARM64 runtime evidence.
+
+Final local Release builds passed 20/20 x64 and 18/18 x86 native tests. ARM64
+analysis fixtures passed 222 module and 134 optional checks on x64. The ARM64
+DLL cross-built successfully; native execution of that new build remains
+required. The final local matrix uses fresh workspaces and these exact files:
+
+| Built proxy | Bytes | SHA-256 |
+| --- | ---: | --- |
+| x64 `secur32.dll` | 244,736 | `740aca60041793a9a63dbd60dad2d69befe5233df5618403cecf1f1ac20144ec` |
+| x86 `secur32.dll` | 260,096 | `82cc53faf231ef092377619b568dc340368ccceb32fb9833284f3db0c60fc30e` |
+| ARM64 `secur32.dll` cross-build | 185,856 | `0384bba9877cdbdb20be41e60bd294b2354b2eba35dac8ed8ef2b0c6a1fc618b` |
+
+Evidence: `_scratch/t20-final-native-x64.log`,
+`_scratch/t20-final-native-x86.log`, `_scratch/t20-arm64-ast-final-tests.log`,
+`_scratch/t20-arm64-canary-final-scan.json`, `_scratch/t20-final-local/`,
+`_scratch/t20-arm64-results.json` and
+`_scratch/t20-arm64-ci-44616524962/`. All browser runs use `secur32.dll` alone
+as the deployed proxy; the private-registry shim is test-only. No launcher or
+alternate deployment proxy was introduced.
+
+## Final recorded DLL-only matrix (November 20, 2026)
+
+The completed snapshot covers all 18 requested browser/channel/architecture
+cells: **12 passed, six failed**. Each passing cell completed all seven signed
+CRX/MV2 lifecycle phases, including MV3, signature and missing-proof controls,
+cache reuse, cold discovery and removal. These 12 cells passed 84/84 phases,
+616 instruction-memory checks and 768 renderer sandbox checks. All 18 cases,
+including failures, preserved source/copied browser hashes and cleaned their
+private registry subtree. No production launcher or alternate proxy was used.
+
+| Browser / execution host | Stable (release) | Beta | Canary |
+| --- | --- | --- | --- |
+| Chrome local x64 | 158.0.8127.37: 7/7 | 159.0.8154.13: 7/7 | 160.0.8172.0: 7/7 |
+| Chrome local x86 | 158.0.8127.37: 7/7 | 159.0.8154.13: 7/7 | 160.0.8172.0: 7/7 |
+| Chrome native ARM64 CI | 158.0.8127.37: 7/7 | 159.0.8154.13: 7/7 | 160.0.8172.0: 7/7 |
+| Edge local x64 | 157.0.4341.60: 7/7 | 159.0.4402.7: failed | 160.0.4413.0: failed |
+| Edge local x86 | 157.0.4341.60: 7/7 | 159.0.4402.7: failed | 160.0.4413.0: failed |
+| Edge native ARM64 CI | 157.0.4341.60: 7/7 | 159.0.4402.7: failed | 160.0.4413.0: failed |
+
+All six failed Edge cells passed stock rejection, then retained stock decision
+bytes after the full 75-second patched readiness wait. Final module snapshots
+contained only Windows' system `Secur32.dll` and `SspiCli.dll`, not the local
+production proxy. Their reports remained failures; signature/identity/readiness
+assertions were not removed. These tested startup paths cannot be activated by
+changing code inside a DLL that they do not load. The required DLL-only deployment
+was preserved rather than substituting a launcher, another proxy or altered
+browser files.
+
+### Edge Beta and Canary ARM64 follow-up
+
+The user reports that installed Edge SxS Canary 160.0.4415.0 x64 works with
+uBlock Origin 1.76.4 enabled. Its installed `secur32.dll` matches the local x64
+build (`b6f7113216434ddedce9a571913b2cfd8f979bad83ea2cb8c6ffc4e6846afd39`), and
+the installed `msedge.dll` scan recognizes both gates
+(`20975631e3dba6144523dc9ad9f30afc8030de375a940d775d9b83e64014d3f2`). A clean
+copy did not reproduce that report. A local direct x64 attempt also ended before
+gate reads when Edge's GPU process exited with access denied; it is inconclusive.
+This does not invalidate the user's live observation. Artifacts:
+`_scratch/edge-canary-4415-installed-scan.json` and
+`_scratch/edge-canary-4415-root-lifecycle/results.json`.
+
+Edge Stable ARM64 passed the full seven-phase lifecycle in run 44778695275
+(`_scratch/arm64-master-44778695275/edge-stable/crx/results.json`). The latest
+focused tests were Beta 159.0.4402.13 and Canary 160.0.4415.0 ARM64. Both verified
+Edge Update packages extract only versioned `Chrome-bin/<version>/msedge.exe`,
+not the installed top-level `Application/msedge.exe`; the direct DLL-only check
+therefore reports `not_tested`. The CRX harness then passed its stock phase but
+failed the patched-memory assertion with stock bytes `e0fe0736`; diagnostics
+listed only Windows `SspiCli.dll` and `Secur32.dll`. Those CRX runs use the
+test-only `registry-test.dll` to isolate extension registry reads, so they are
+not proof of DLL-only loading. Machine-readable Beta and Canary reports are saved
+under `_scratch/arm64-edge-beta-44826700857/` and
+`_scratch/arm64-edge-canary-44826700537/`.
+
+These ARM64 runs validate the native code and isolated extracted-copy behavior,
+not an installed Beta/Canary launch. A real-layout test needs the top-level
+Application executable and install context. Microsoft's offline installer is
+available for Beta but not Canary; the current verified update payload is not
+that MSI, and no supported unattended Canary install path was established. We
+therefore did not guess installer switches, fall back to the versioned executable,
+copy an authenticated user profile, or use injection as proof. DLL-only support
+for installed Beta/Canary remains unresolved. Native ARM64 CTest passed 17/17 in
+each latest focused run.
+
+Local final native CTest passed 20/20 x64 and 18/18 x86. Native Windows ARM64
+[run 44720250707](https://github.com/Sketchystan1/chrome-mv2-patch/actions/runs/44720250707)
+at `ab88b67` passed 17/17 native tests and the four successful ARM64 browser
+cells; its overall conclusion correctly stayed failure for Edge Beta/Canary.
+Its identical 185,856-byte ARM64 proxy has SHA-256
+`ad014c4cae8d33dff83783281da87b7f60f5ad02d5d86cd881db29121ac972f1`.
+Local tested x64/x86 proxy hashes and sizes are the final-build entries above.
+Source metadata files retain verified installer sizes, SHA-256 values and PE
+architecture/version identities for every case.
+
+Canary advanced while the final tests ran. Unpinned
+[run 44716336096](https://github.com/Sketchystan1/chrome-mv2-patch/actions/runs/44716336096)
+received Chrome 160.0.8172.1 ARM64, browser DLL SHA-256
+`f759d9b2800a57d88f1ae6b753b6c11f2d1b68f3bc5297baccfd0d887da8741a`.
+That build was correctly rejected: three genuine predicate layouts need further
+instruction/side-effect support, and a fourth candidate belongs to FIDO
+credential-protection validation. Those authentication decisions were not
+patched or bypassed. This is a separate unsupported build, not a pass for the
+recorded 160.0.8172.0 snapshot. Vendor metadata later reported 160.0.8173.0;
+that version was not fetched or runtime-tested in this matrix.
+
+The fetcher and workflow now support replaying recorded vendor metadata, so
+reruns test the same immutable inputs while retaining all size/hash/PE/version
+checks. Reproduce the native snapshot with:
+
+```text
+gh workflow run win-arm64-test.yml --ref master -f browser=all -f source_run=44616524962
+python scripts/test_autoscan_runtime_memory.py
+```
+
+The combined machine-readable ledger is `_scratch/t20-final-matrix.json`.
+Detailed final local records are `_scratch/t20-final-local/results.json` and
+the corresponding `f20<arch><case>/` workspaces. Native records, original vendor
+metadata, browser/DLL identities, scans and logs are beneath
+`_scratch/t20-arm64-pinned-final-ci/`; its `summary.json` describes all six
+ARM64 outcomes. Initial and failed exploratory attempts remain separately
+recorded in the earlier directories. No independently reviewed complete core
+address baseline or complete enforcement coverage is claimed.
+
 ## Remaining limits
 
 `complete_enforcement_coverage_proven` remains **false**. New compiler layouts,
 missing function bounds or unsupported instructions can escape recognition.
-Native ARM64 browser behavior, browser updates, broader interactive browsing and
-DRM remain unvalidated. Performance timings use one host, warm files and
-headless/GPU-disabled browsers; controlled cold-disk and desktop-window
-performance were not measured. A new scanner identity refills its cache on first
-use.
+The recorded Edge Beta/Canary test copies did not activate the local proxy, while
+the user reports their installed SxS Canary 160.0.4415.0 x64 works; the isolated
+copy has not reproduced that result. Newer Canary builds, browser updates, broader
+interactive browsing and DRM remain unvalidated or unsupported as recorded above.
+Performance timings use one host, warm files and headless/GPU-disabled browsers;
+controlled cold-disk and desktop-window performance were not measured. A new
+scanner identity refills its cache on first use.

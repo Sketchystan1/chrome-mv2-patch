@@ -2,14 +2,45 @@ name: Test Windows ARM64 browsers
 
 on:
   workflow_dispatch:
+    inputs:
+      browser:
+        description: Browser to test (all channels)
+        type: choice
+        default: all
+        options: [all, edge, chrome]
+      channel:
+        description: Channel to test (all channels by default)
+        type: choice
+        default: all
+        options: [all, stable, beta, canary]
+      source_run:
+        description: Replay vendor installer metadata from this completed test run (empty uses current channels)
+        type: string
+        default: ''
   push:
-    branches: [test/windows-arm64-browser-channels]
+    branches: [master]
+    paths:
+      - 'mv2-mem-patch-win/**'
+      - '!mv2-mem-patch-win/**/*.md'
+      - '!mv2-mem-patch-win/*_test.cpp'
+      - '!mv2-mem-patch-win/install.bat'
+      - '!mv2-mem-patch-win/build.bat'
+      - 'scripts/fetch_arm64_browser.py'
+      - 'scripts/fetch_chrome_binary.py'
+      - 'scripts/test_autoscan_runtime.py'
+      - 'scripts/test_autoscan_runtime_memory.py'
+      - 'scripts/test_autoscan_crx.py'
+      - 'scripts/test_fetch_arm64_browser.py'
+      - 'scripts/test_autoscan_edge_install.py'
+      - 'scripts/autoscan_crx_cdp.mjs'
+      - '.github/workflows/win-arm64-test.yml'
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: win-arm64-${{ github.ref }}
+  group: win-arm64-${{ github.ref }}-${{ inputs.browser || 'all' }}-${{ inputs.channel || 'stable' }}
   cancel-in-progress: true
 
 jobs:
@@ -26,7 +57,10 @@ jobs:
         with:
           arch: amd64_arm64
       - name: Check portable fixtures
-        run: python scripts/run_tests.py --fast
+        run: |
+          python scripts/run_tests.py --only image fetch crx-cdp runner
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          python scripts/test_autoscan_runtime_memory.py
       - name: Build ARM64 patcher and test helpers
         working-directory: mv2-mem-patch-win
         run: |
@@ -34,7 +68,7 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build out/arm64 --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ctest --preset arm64
+          ctest --preset arm64 --parallel 4
       - uses: actions/upload-artifact@v4
         with:
           name: arm64-test-binaries
@@ -54,8 +88,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        browser: [chrome, edge]
-        channel: [stable, beta, canary]
+        browser: ${{ fromJSON(inputs.browser == 'edge' && '["edge"]' || inputs.browser == 'chrome' && '["chrome"]' || '["chrome","edge"]') }}
+        channel: ${{ fromJSON(inputs.channel == 'stable' && '["stable"]' || inputs.channel == 'beta' && '["beta"]' || inputs.channel == 'canary' && '["canary"]' || github.event_name == 'push' && '["stable"]' || '["stable","beta","canary"]') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v6
@@ -67,36 +101,64 @@ jobs:
           name: arm64-test-binaries
           path: mv2-mem-patch-win
       - name: Fetch stock ARM64 browser
-        run: python scripts/fetch_arm64_browser.py --browser ${{ matrix.browser }} --channel ${{ matrix.channel }} --out _scratch/browser
-      - name: Check native discovery
+        id: fetch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ inputs.source_run }}
+          BROWSER: ${{ matrix.browser }}
+          CHANNEL: ${{ matrix.channel }}
         run: |
-          $entry = @(Get-Content -LiteralPath '_scratch/browser/matrix.json' -Raw | ConvertFrom-Json)[0]
-          & ./mv2-mem-patch-win/out/arm64/mv2-scan.exe $entry.binary > _scratch/scan.json 2> _scratch/scan.stderr
-          if ($LASTEXITCODE) {
-            $report = Get-Content -LiteralPath '_scratch/scan.json' -Raw | ConvertFrom-Json
-            throw "ARM64 discovery failed: $($report.error)"
+          $sourceArgs = @()
+          if ($env:SOURCE_RUN) {
+            gh run download $env:SOURCE_RUN --repo $env:GITHUB_REPOSITORY --name "$env:BROWSER-$env:CHANNEL-arm64-results" --dir _scratch/source
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+            $sourceArgs = @('--source', '_scratch/source/browser/source.json')
           }
-      # shortcut: Edge ARM64 discovery currently declines; add its browser lifecycle when recognition is supported.
-      - name: Check signed CRX and MV2 lifecycle
-        if: matrix.browser == 'chrome'
+          python scripts/fetch_arm64_browser.py --browser $env:BROWSER --channel $env:CHANNEL --out _scratch/browser @sourceArgs
+      - name: Direct Edge app-tree diagnostic with a fresh profile
+        id: install_context
+        if: matrix.browser == 'edge' && (matrix.channel == 'beta' || matrix.channel == 'canary')
+        continue-on-error: true
+        run: python scripts/test_autoscan_edge_install.py _scratch/browser/matrix.json --arch arm64 --work _scratch/install
+      - name: Check signed CRX lifecycle
+        id: crx
+        if: always() && steps.fetch.outcome == 'success'
+        continue-on-error: true
         run: python scripts/test_autoscan_crx.py _scratch/browser/matrix.json --arch arm64 --work _scratch/crx
+      - name: Enforce browser test results
+        if: always()
+        env:
+          BROWSER: ${{ matrix.browser }}
+          CHANNEL: ${{ matrix.channel }}
+          INSTALL_CONTEXT: ${{ steps.install_context.outcome }}
+          CRX: ${{ steps.crx.outcome }}
+        run: |
+          $failed = $env:CRX -ne 'success'
+          if ($env:BROWSER -eq 'edge' -and $env:CHANNEL -in @('beta', 'canary') -and $env:INSTALL_CONTEXT -ne 'success') { $failed = $true }
+          if ($failed) { exit 1 }
       - name: Record browser identity and result
         if: always()
         env:
           BROWSER: ${{ matrix.browser }}
           CHANNEL: ${{ matrix.channel }}
           RESULT: ${{ job.status }}
+          INSTALL_CONTEXT: ${{ steps.install_context.outcome }}
         run: |
           "### $env:BROWSER $env:CHANNEL ARM64: $env:RESULT" >> $env:GITHUB_STEP_SUMMARY
+          if ($env:BROWSER -eq 'edge' -and $env:CHANNEL -in @('beta', 'canary')) { "Direct app-tree diagnostic (fresh profile): $env:INSTALL_CONTEXT" >> $env:GITHUB_STEP_SUMMARY }
           if (Test-Path -LiteralPath '_scratch/browser/source.json') {
             $source = Get-Content -LiteralPath '_scratch/browser/source.json' -Raw | ConvertFrom-Json
             "Version: $($source.version)" >> $env:GITHUB_STEP_SUMMARY
             "Installer SHA-256: $($source.sha256)" >> $env:GITHUB_STEP_SUMMARY
           }
-          if (Test-Path -LiteralPath '_scratch/scan.json') {
-            $report = Get-Content -LiteralPath '_scratch/scan.json' -Raw | ConvertFrom-Json
+          if (Test-Path -LiteralPath '_scratch/crx/scan.json') {
+            $report = Get-Content -LiteralPath '_scratch/crx/scan.json' -Raw | ConvertFrom-Json
             "Browser DLL SHA-256: $($report.sha256)" >> $env:GITHUB_STEP_SUMMARY
             "Discovery ready: $($report.ready); error: $($report.error)" >> $env:GITHUB_STEP_SUMMARY
+          }
+          if (Test-Path -LiteralPath '_scratch/install/results.json') {
+            $diagnostic = Get-Content -LiteralPath '_scratch/install/results.json' -Raw | ConvertFrom-Json
+            "Direct app-tree result: $($diagnostic.direct_dll_only); $($diagnostic.error)" >> $env:GITHUB_STEP_SUMMARY
           }
       - uses: actions/upload-artifact@v4
         if: always()
@@ -105,8 +167,8 @@ jobs:
           path: |
             _scratch/browser/source.json
             _scratch/browser/matrix.json
-            _scratch/scan.json
-            _scratch/scan.stderr
+            _scratch/install/*.json
+            _scratch/install/*.log
             _scratch/crx/*.json
             _scratch/crx/*.log
             _scratch/crx/*.stderr

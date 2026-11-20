@@ -305,10 +305,11 @@ struct Program {
       load.op == Op::LoadField && load.width() == 8 && load.src == saved->insn.src && load.disp == saved->insn.disp &&
       !(load.detail & 0x800) && load.dst == sub.imm && cmp.op == Op::Other && cmp.other() == Other::CmpReg && cmp.width() == 8 &&
       ((cmp.dst == loaded && cmp.src == sub.dst) || (cmp.src == loaded && cmp.dst == sub.dst));
-#elif defined(AUTOSCAN_X64)
+#elif defined(AUTOSCAN_X64) || defined(AUTOSCAN_X86)
     auto entry = Lift(pe.code(call.insn.target()), call.insn.target());
-    if (!call.insn.target() || entry.op != Op::Other || entry.other() != Other::CmpReg || entry.width() != 8 ||
-        !entry.memory() || !entry.setsFlags() || !(entry.detail & 0x100)) return false;
+    constexpr unsigned pointerWidth = sizeof(void*);
+    if (!call.insn.target() || entry.op != Op::Other || entry.other() != Other::CmpReg || entry.width() != pointerWidth ||
+        !entry.memory() || !entry.setsFlags() || (!(entry.detail & 0x100) && entry.src != NoReg)) return false;
     auto guard = Lift(pe.code(call.insn.target() + entry.length()), call.insn.target() + entry.length());
     if (!guard.conditional() || guard.condition() != 5 || callEffect(pe, guard.target(), 0)) return false;
     auto simple = [](const LiftedInsn& i) {
@@ -347,12 +348,13 @@ struct Program {
     for (unsigned r = 0; r < regs.size(); ++r) regs[r] = intern(0, r, 0, 0);
     auto memory = [&](const Node& n, unsigned base) {
       if (n.insn.detail & 0x100) return intern(2, 0, 0, static_cast<int64_t>(n.pc) + n.insn.length() + n.insn.disp);
+      if (base == NoReg) return intern(2, 0, 0, static_cast<uint32_t>(n.insn.disp));
       return base < 32 ? intern(2, regs[base], 0, static_cast<uint64_t>(n.insn.disp)) : 0u;
     };
     auto run = [&](const Node& n) {
       const auto& i = n.insn;
       if (i.op == Op::Other && i.other() == Other::Nop) return true;
-      if (i.width() != 8 || i.dst >= 32) return false;
+      if (i.width() != pointerWidth || i.dst >= 32) return false;
       unsigned value = 0;
       if (i.op == Op::LoadField) value = memory(n, i.src);
       else if (i.op == Op::MovReg) value = i.src < 32 ? regs[i.src] : intern(1, 0, 0, static_cast<uint32_t>(i.imm) | (static_cast<uint64_t>(i.detail) << 32));
@@ -365,7 +367,7 @@ struct Program {
     for (size_t n = prefix.size(); n; --n) if (!run(*prefix[n - 1])) return false;
     auto operands = [&](const Node& n, unsigned& left, unsigned& right) {
       const auto& i = n.insn;
-      if (i.width() != 8) return false;
+      if (i.width() != pointerWidth) return false;
       left = i.dst < 32 ? regs[i.dst] : 0; right = i.src < 32 ? regs[i.src] : 0;
       if (i.memory()) { if (i.setsFlags()) right = memory(n, i.src); else left = memory(n, i.dst); }
       return left && right;
@@ -699,11 +701,12 @@ class Evaluator {
       bool registerBranch = i.op == Op::Other && i.other() == Other::RegisterBranch;
       if (i.op == Op::Other) {
         auto o = i.other();
+        if (o == Other::AtomicAdd && (i.detail & 0x4000)) return false;
         if (o == Other::Call || o == Other::CmpReg || o == Other::TestReg || o == Other::TestImm ||
             (StackReg != 31 && (o == Other::AndReg || o == Other::AndImm || o == Other::OrReg || o == Other::OrImm ||
-                              o == Other::XorReg || o == Other::AtomicAdd)) || (o == Other::Overwrite && i.setsFlags())) continue;
+                              o == Other::XorReg || (o == Other::AtomicAdd && !(i.detail & 0x2000)))) || (o == Other::Overwrite && i.setsFlags())) continue;
         if (o != Other::Nop && o != Other::Push && o != Other::Pop && o != Other::Store && o != Other::Overwrite &&
-            o != Other::PairLoad && o != Other::ShiftRight && o != Other::Subtract && !registerBranch) return false;
+            o != Other::PairLoad && o != Other::ShiftRight && o != Other::Subtract && o != Other::AtomicAdd && !registerBranch) return false;
       }
       if (i.conditional() && !registerBranch) return false;
       if ((i.op == Op::Jmp || registerBranch) && !todo.push_back(i.target())) return false;

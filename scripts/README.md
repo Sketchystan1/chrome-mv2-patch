@@ -17,7 +17,7 @@ approaches and platform lessons.
 | Tool | Purpose | Requirements |
 | --- | --- | --- |
 | `fetch_chrome_binary.py` | Fetch a stock Windows DLL, Linux ELF or macOS framework into `_scratch/`; verify the target architecture and name it using the binary's reported version where available. | Python + 7-Zip |
-| `fetch_arm64_browser.py` | Fetch complete stock Windows ARM64 Chrome/Edge Stable, Beta or Canary copies and write a browser-test matrix; verify vendor installer hashes, sizes, PE machines and versions. | Python + 7-Zip |
+| `fetch_arm64_browser.py` | Fetch complete stock Windows Chrome/Edge Stable, Beta or Canary copies for x64, x86 or ARM64 and write a browser-test matrix; verify vendor installer hashes, sizes, PE machines and versions. | Python + 7-Zip |
 | `fetch_symbols.py` | Fetch matching PDB, Linux debug-info or macOS dSYM symbols; reject identity mismatches. | Python standard library |
 | `symbols_from_pdb.py` | Resolve named MV2-related functions through Windows dbghelp. | Windows + matching PDB |
 | `symbols_from_elf.py` | Stream an ELF's function symbols into `nm -S` style text without a full demangle/sort pass. | Python standard library |
@@ -26,6 +26,7 @@ approaches and platform lessons.
 | `check_autoscan_matrix.py` | Evaluate the native scanner against independent, hash-bound reviewed address baselines. | Built `mv2-scan.exe` |
 | `test_autoscan_runtime.py`, `autoscan_cdp.mjs` | Exercise the same deployed DLL on isolated browser copies, including MV2/MV3 controls and cache/removal checks. | Windows, matching x64/x86/ARM64 native test targets, Node 22+, OpenSSL |
 | `test_autoscan_crx.py`, `autoscan_crx_cdp.mjs` | Install signed CRX3 controls through the browser's Downloads page and native confirmation; reject tampered packages and missing developer proofs. | Windows, matching x64/x86/ARM64 native test targets, Node 22+, OpenSSL |
+| `test_autoscan_edge_install.py` | Directly launch an Edge Application tree with only app-local `secur32.dll`; require that DLL path and both patched installer gates in the main process. Reports `not_tested` if the matrix lacks top-level `Application/msedge.exe`. Uses headless mode, the start-menu source flag, Edge's compatibility-relaunch skip, a private desktop and an empty profile. | Windows, matching native test targets, Node 22+ |
 | `macho_insert_dylib.py` | Scratch-copy research for inserting/removing a dylib load command; retained for a future macOS loader. | Python standard library |
 
 `_testutil.py` contains only synthetic PE/ELF/Mach-O fixture builders. The Mach-O
@@ -36,14 +37,23 @@ uses temporary fixtures and does not modify a browser.
 ## Local checks
 
 ```text
+python scripts/run_tests.py --only fetch
+python scripts/run_tests.py --only cdp crx-cdp
+python scripts/test_autoscan_runtime_memory.py
 python scripts/run_tests.py
 python scripts/run_tests.py --fast
 uv run --with capstone --with z3-solver scripts/run_tests.py
 ```
 
-The default run checks the image readers, scanner evaluation, Mach-O load-command
+Use `--only` for the suites affected by a change: `image`, `matrix`, `fetch`,
+`macho`, `scanner`, `installer`, `cdp`, `crx-cdp` and `runner`. For example, a
+download resolver change needs `fetch`; a CDP helper change needs its syntax check
+and the relevant browser lifecycle. An explicitly selected suite fails if its
+platform or Node is unavailable. Docs-only changes need no test run.
+
+The default run checks the image readers, scanner evaluation, browser fetch, Mach-O load-command
 fixtures and Python scanner, plus the Windows batch installer on Windows and CDP
-helper syntax when Node is available. Independent checks run concurrently.
+helper syntax when Node is available, plus suite selection. Independent checks run concurrently.
 `--fast` (or `MV2_TEST_FAST=1`) skips the Windows installer integration suite.
 Capstone/Z3 checks report a skip when those dependencies are unavailable.
 
@@ -57,14 +67,21 @@ Studio Developer Command Prompt:
 
 ```bat
 cd mv2-mem-patch-win
-cmake --build out/x64
-ctest --preset x64
+cmake --build out/x64 --target modules-test autoscan-test --parallel 4
+ctest --preset x64 -R "compact-modules|native-scanner" --parallel 4
 out\x64\mv2-scan.exe "C:\path\to\chrome.dll"
 ```
 
 Use the x86/ARM64 presets for those builds; native ARM64 test execution requires
 ARM64 Windows. Deployment DLLs live in `build/<arch>/`, and diagnostic/test
 executables in `out/<arch>/`.
+
+Build and run the targets covering the change; omit `--target` and `-R` only when
+the complete native suite is necessary. Reuse completed checks until a related
+edit invalidates them, and never rebuild artifacts in use by a browser test.
+The ARM64 workflow skips unrelated pushes, builds once, runs independent native
+checks in parallel and discovers each browser once inside its lifecycle test.
+Manual dispatch can select Edge or Chrome across Stable, Beta and Canary.
 
 ## Fetch and inspect a reference build
 
@@ -142,19 +159,40 @@ separate from the local fixture suite.
 
 `--arch arm64` selects ARM64 helpers and the ARM64 DLL and requires native ARM64
 Windows. The [Windows ARM64 workflow](../.github/workflows/win-arm64-test.yml)
-builds and runs native CTest on `windows-11-arm`, then tests the latest consumer
-Chrome and Edge Stable (release), Beta and Canary in six independent jobs. It
-runs on pushes to `test/windows-arm64-browser-channels` and supports manual
-dispatch. Each job saves vendor download metadata, browser identities and scan
-reports, including on failure. Chrome also runs the seven-phase signed CRX/MV2
-lifecycle. Edge ARM64 discovery currently fails with
-`Edge installer recognition requires x64`; those jobs remain failures, and Edge
-browser lifecycle coverage must be added when its ARM64 recognition is supported.
+builds and runs native CTest on `windows-11-arm`. Pushes to `master` also test
+the latest Stable browser builds; manual dispatch tests Stable, Beta and Canary
+in six independent jobs and can select one browser and channel. Each job saves
+vendor download metadata, browser identities and scan reports, including on failure.
+Both browsers run the seven-phase signed CRX/MV2 lifecycle. Edge Beta and Canary
+also run a direct top-level `Application/msedge.exe` diagnostic with only
+app-local `secur32.dll`; the current Edge Update extraction has no top-level
+executable, so its result is `not_tested` until a verified installed layout is
+available. It uses a fresh empty profile and does not establish behavior with a
+preinstalled extension. The CRX lifecycle's registry test DLL is isolated test
+setup and does not count as DLL-only loading evidence. Use
+`-f browser=edge -f channel=stable` to rerun Edge Stable alone.
 
 ```text
 python scripts/fetch_arm64_browser.py --browser chrome --channel canary --out _scratch/arm64-browser
 python scripts/test_autoscan_crx.py _scratch/arm64-browser/matrix.json --arch arm64 --work _scratch/arm64-crx
 ```
+
+For Edge install-context testing, provide a verified matrix entry with an
+installed top-level Application root and keep its result separate from CRX
+installation. The normal Edge Update package extraction does not provide this
+root today:
+
+```text
+python scripts/fetch_arm64_browser.py --browser edge --channel canary --out _scratch/arm64-edge
+python scripts/test_autoscan_edge_install.py _scratch/arm64-edge/matrix.json --arch arm64 --work _scratch/edge-install
+python scripts/test_autoscan_crx.py _scratch/arm64-edge/matrix.json --arch arm64 --work _scratch/edge-crx
+```
+
+Use `fetch_arm64_browser.py --source <recorded-source.json>` to replay the same
+authenticated vendor metadata and installer hashes after a channel updates.
+The ARM64 workflow's optional `source_run` reuses its saved browser metadata
+from a completed run. Matching browser/channel/architecture, installer identity
+and extracted PE/version checks remain required.
 
 The CRX installation harness uses a single-entry runtime matrix and a new, short
 directory below `_scratch/`. It launches a browser copy on a private Windows
@@ -165,6 +203,13 @@ stock rejection, signed installation, tampered-signature and missing-proof
 rejection, MV2 enablement/request blocking, an MV3 background control, cached and
 empty-cache restarts, and removal. Browser executable and DLL hashes must remain
 unchanged.
+
+The scratch browser copy receives the AppContainer read/execute permissions
+normally supplied by its installer; renderer sandboxing remains enabled. Profiles
+share one private scan cache within the run to avoid rescanning the same DLL for
+signature controls. The cold-restart phase deletes that cache and proves discovery
+still succeeds. Edge removal verifies its stock off-store source rejection;
+Chrome removal verifies MV2 deprecation.
 
 ```text
 python scripts/test_autoscan_crx.py _scratch/runtime-matrix.json --arch x86 --work _scratch/crx-check

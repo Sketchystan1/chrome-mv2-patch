@@ -22,6 +22,7 @@ struct Range {
 };
 struct Section {
   uint32_t rva = 0, raw = 0, size = 0, virtualSize = 0, flags = 0;
+  uint32_t rawSize = 0;
   bool contains(uint32_t p, size_t n = 1) const { return p >= rva && p - rva <= size && n <= size - (p - rva); }
 };
 constexpr uint16_t NativeMachine() {
@@ -80,6 +81,7 @@ class PeImage {
       if ((sections_[n].flags & IMAGE_SCN_MEM_EXECUTE) && sections_[n].contains(rva, length)) return true;
     return false;
   }
+  auto sections() const { return std::span<const Section>{sections_.data(), sectionCount_}; }
  private:
   // Reject damaged headers and overlapping sections before using any address supplied by the file.
   void parse() {
@@ -115,7 +117,7 @@ class PeImage {
           header.VirtualAddress > imageSize || extent > imageSize - header.VirtualAddress) { fail("PE section exceeds file or image"); return; }
       Section section{header.VirtualAddress, header.PointerToRawData,
         header.Misc.VirtualSize ? std::min(header.SizeOfRawData, header.Misc.VirtualSize) : header.SizeOfRawData,
-        extent, header.Characteristics};
+        extent, header.Characteristics, header.SizeOfRawData};
       for (unsigned j = 0; j < sectionCount_; ++j) {
         const auto& other = sections_[j];
         if (extent && other.virtualSize && section.rva < static_cast<uint64_t>(other.rva) + other.virtualSize &&
@@ -326,6 +328,29 @@ class Boundaries {
       if (!entry(n, current) || (n && previous.end > current.begin)) { error = "invalid unwind range or xdata"; return; }
       previous = current;
     }
+  }
+  Range primary(uint32_t position) const {
+    if (pe_.machine != IMAGE_FILE_MACHINE_AMD64) return find(position);
+    auto range = find(position, true);
+    if (!range) return {};
+    uint32_t low = 0, high = entries_;
+    while (low < high) {
+      uint32_t mid = low + (high - low) / 2, begin = 0;
+      tableRead(mid, begin);
+      if (begin <= range.begin) low = mid + 1; else high = mid;
+    }
+    X64RuntimeFunction record{};
+    if (!low || !tableRead(low - 1, record) || record.BeginAddress != range.begin || record.EndAddress != range.end) return {};
+    for (unsigned depth = 0; depth < 8; ++depth) {
+      auto header = pe_.at(record.UnwindInfoAddress, 4);
+      if (!record.UnwindInfoAddress || (!header.empty() && !(header[0] & 0x20))) return range;
+      if (header.empty()) return {};
+      uint32_t offset = 4 + ((header[2] + 1) & ~1u) * 2;
+      if (!pe_.rvaRead(record.UnwindInfoAddress + offset, record) || record.BeginAddress >= record.EndAddress ||
+          !pe_.text.contains(record.BeginAddress, record.EndAddress - record.BeginAddress)) return {};
+      range = {record.BeginAddress, record.EndAddress};
+    }
+    return {};
   }
   bool chainedTo(uint32_t position, uint32_t function) const {
     auto range = find(position, true);

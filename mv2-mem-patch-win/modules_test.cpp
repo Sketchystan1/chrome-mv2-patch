@@ -119,6 +119,24 @@ void lengths() {
         i.memory() && !Writes(i, 4), "locked reference-count decrement updates memory without changing RSP");
   constexpr std::array<uint8_t, 3> invalidLock{0xf0,0xff,0xcc};
   check(LiftX86(invalidLock, 0x1000, true).other() == Other::Unknown, "LOCK on a register cannot masquerade as a memory update");
+  for (bool x64 : {false, true}) {
+    for (auto code : {std::array<uint8_t, 3>{0xff,0x41,8}, {0xff,0x49,8}, {0x19,0x51,8}}) {
+      i = LiftX86(code, 0x1000, x64);
+      check(i.other() == Other::AtomicAdd && i.memory() && i.width() == 4 && i.src == 1 && i.dst == NoReg &&
+            i.disp == 8 && i.setsFlags() && !Writes(i, 1) && !Writes(i, 4) &&
+            bool(i.detail & 0x2000) == (code[0] == 0xff) && bool(i.detail & 0x4000) == (code[0] == 0x19),
+            "scalar memory updates retain the alias, width and INC/DEC carry dependency without writing registers");
+    }
+    constexpr std::array<uint8_t, 4> wordIncrement{0x66,0xff,0x41,2};
+    i = LiftX86(wordIncrement, 0x1000, x64);
+    check(i.other() == Other::AtomicAdd && StoreWidth(i) == 2 && i.src == 1 && i.disp == 2 && (i.detail & 0x2000),
+          "word memory increment retains the complete overlapping write width");
+    constexpr std::array<uint8_t, 4> indexedIncrement{0xff,0x44,0x81,8};
+    constexpr std::array<uint8_t, 4> lockedSbb{0xf0,0x19,0x51,8};
+    check(LiftX86(indexedIncrement, 0x1000, x64).other() == Other::Unknown &&
+          LiftX86(lockedSbb, 0x1000, x64).other() == Other::Unknown,
+          "unmodeled indexed updates and locked SBB retain conservative rejection");
+  }
   constexpr std::array<uint8_t, 8> padding{0x66,0x2e,0x0f,0x1f,0x44,0x00,0,0xc3};
   i = LiftX86(padding, 0x1000, true);
   check(i.length() == 7 && i.other() == Other::Nop, "segment-prefixed indexed NOP is padding");
@@ -145,6 +163,14 @@ void lengths() {
   check(LiftArm64(word, 0x1000).other() == Other::Nop, "writing WZR does not overwrite SP");
   put<uint32_t>(word, 0, 0xf94003ff);
   check(LiftArm64(word, 0x1000).op == Op::Other, "LDR XZR cannot overwrite SP");
+  for (unsigned reg : {0u, 8u, 31u}) {
+    put<uint32_t>(word, 0, 0x6f00e400 | reg);
+    i = LiftArm64(word, 0x1000);
+    check(i.other() == Other::Nop && !i.memory() && !i.setsFlags() && i.dst == NoReg && i.src == NoReg &&
+          !Writes(i, 0) && !Writes(i, 31), "MOVI Vn.2d,#0 preserves all integer registers and verifier flags");
+  }
+  put<uint32_t>(word, 0, 0x6f00e420);
+  check(LiftArm64(word, 0x1000).other() == Other::Unknown, "unlisted SIMD immediate encodings cannot become no-ops");
 }
 void intervals() {
   using namespace autoscan;
@@ -186,6 +212,25 @@ void boundaries() {
   put<uint32_t>(bytes, 0x604, 0x1000); put<uint32_t>(bytes, 0x608, 0x1007); put<uint32_t>(bytes, 0x60c, 0x3000);
   PeImage chain(bytes); Boundaries cyclic(chain);
   check(cyclic.error != nullptr, "cyclic chained unwind records decline");
+  bytes = fixture(IMAGE_FILE_MACHINE_AMD64);
+  put<uint32_t>(bytes, 0x120, 0x2000); put<uint32_t>(bytes, 0x124, 36);
+  for (unsigned n = 0; n < 3; ++n) {
+    put<uint32_t>(bytes, 0x400 + n * 12, 0x1000 + n * 0x40);
+    put<uint32_t>(bytes, 0x404 + n * 12, 0x1010 + n * 0x40);
+    put<uint32_t>(bytes, 0x408 + n * 12, 0x3000 + n * 0x40);
+  }
+  bytes[0x600] = bytes[0x640] = 0x21; bytes[0x680] = 1;
+  put<uint32_t>(bytes, 0x604, 0x1040); put<uint32_t>(bytes, 0x608, 0x1050); put<uint32_t>(bytes, 0x60c, 0x3040);
+  put<uint32_t>(bytes, 0x644, 0x1080); put<uint32_t>(bytes, 0x648, 0x1090); put<uint32_t>(bytes, 0x64c, 0x3080);
+  PeImage cold(bytes); Boundaries ownership(cold);
+  auto owner = ownership.primary(0x1004);
+  check(!ownership.error && owner.begin == 0x1080 && owner.end == 0x1090 && ownership.chainedTo(0x1004, 0x1080),
+        "a cold block before the warm entry resolves its complete canonical unwind owner");
+  check(ownership.primary(0x1084).begin == 0x1080 && !ownership.primary(0x1020) && !ownership.chainedTo(0x1084, 0x1000),
+        "a warm entry owns itself while gaps and reversed ownership remain rejected");
+  put<uint32_t>(bytes, 0x648, 0x1080);
+  PeImage malformedParent(bytes); Boundaries invalidParent(malformedParent);
+  check(invalidParent.error && !invalidParent.primary(0x1004), "an empty chained parent cannot supply a canonical owner");
   bytes = fixture(IMAGE_FILE_MACHINE_AMD64);
   put<uint32_t>(bytes, 0x120, 0x21f4); put<uint32_t>(bytes, 0x124, 12);
   put<uint32_t>(bytes, 0x5f4, 0x1000); put<uint32_t>(bytes, 0x5f8, 0x1007); put<uint32_t>(bytes, 0x5fc, 0x3000);
@@ -339,6 +384,32 @@ void evaluator() {
     Program badProgram; check(badProgram.build(pe, range), "negative predicate still decodes");
     Evaluator invalid(pe, badProgram, head);
     check(!invalid.verify(gate, reason), "wrong location polarity cannot produce a patch");
+#if !defined(AUTOSCAN_ARM64)
+    bytes[wrong] ^= 1;
+    for (bool subtractBorrow : {false, true}) for (bool resetCarry : {false, true}) {
+      auto changed = bytes; size_t at = labels[1];
+      auto append = [&](std::initializer_list<uint8_t> code) { for (auto b : code) changed[at++] = b; };
+      if (subtractBorrow) append({0x19,0x51,8});
+      else append({0xff,0x41,8});
+      if (resetCarry) append({0x31,0xd2});
+      append({0x73,0,0x31,0xc0});
+#if defined(AUTOSCAN_X86)
+      append({0x5d});
+#endif
+      append({0xc3});
+#if defined(AUTOSCAN_X64)
+      for (auto f : fixups) if (f.label == 2) changed[f.at + 1] = byte(static_cast<unsigned>(at - f.at - 2));
+      append({0xcc});
+#endif
+      PeImage flags(changed); Program flagProgram;
+      check(flagProgram.build(flags, {range.begin, 0x1000 + static_cast<uint32_t>(at - 0x200)}),
+            "carry-dependent continuation retains complete instruction boundaries");
+      Evaluator flagSolver(flags, flagProgram, head);
+      bool accepted = flagSolver.verify(gate, reason);
+      check(resetCarry && !subtractBorrow ? accepted : !accepted && reason == "not-affected path consumes unknown flags",
+            "INC preserves carry and SBB consumes carry even when later instructions replace flags");
+    }
+#endif
   }
 }
 int replacement() { return 1; }

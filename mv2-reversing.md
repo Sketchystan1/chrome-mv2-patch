@@ -228,6 +228,40 @@ MV2 request blocking follows MV2's normal permissions. The historical optional
 MV3 `webRequestBlocking` data patches were removed; they are not part of the
 native predicate patch.
 
+ARM64 Edge providers can test bit zero of a private source helper's result with
+either `TBZ` or `TBNZ`. The verified unaffected `TBZ` outcome is its existing
+fall-through, selected with `NOP`; `TBNZ` selects its existing target with `B`.
+The November 20 correction preserves that polarity when generating the optional
+patch. Application independently reconstructs the same outcome. Synthetic Edge
+fixtures cover both forms, rejection of the opposite outcome without writes,
+rollback, idempotence and restored page protection. This fixes plan generation;
+it does not establish that a browser loads the proxy during startup.
+
+Chrome Canary 160.0.8172.0 ARM64 also exposed an unrelated comparison inside
+V8's large AST visitor. Its `UBFX #7,#4; CMP #2; B.GT` tests `Literal::Type`,
+not an extension's manifest version. The matching Chromium DEPS pins V8
+[`3d1328cfbe3838f4213294b34108c1e8a7631619`](https://chromium.googlesource.com/v8/v8/+/3d1328cfbe3838f4213294b34108c1e8a7631619/src/ast/ast.h).
+That source defines a six-bit node kind, a parenthesis bit and four literal-type
+bits; literal node kind 45 and literal types 0/1/2/3/4/5 match the reviewed loads,
+guard and dispatch. Generic AND/UBFX filtering is unsafe: it can also hide a
+genuine predicate whose input is packed or whose extraction is bypassed.
+
+The native exclusion therefore requires the reviewed AST origin, its exclusive
+node-kind guard, one authenticated 60-case read-only switch, and a short table
+case that preserves the nonvolatile table register before revisiting the tag
+load. It rejects unproved entries into the origin, extraction, loop or dispatch
+prefix, scanning every backed executable byte, including alignment padding.
+Relocations affecting executable bytes, the switch table or relocation metadata
+decline the exclusion. The ordinary function, node and proof budgets stay
+unchanged; any other compiler shape retains the original unresolved candidate.
+
+The hash-bound source/disassembly proof and rejected alternative strategies are
+retained in `_scratch/t20-arm64-canary-source-proof.json`. RVAs in that evidence
+are review output, never scanner inputs or version-table entries. Native
+fixtures cover ordinary predicates, generic packed inputs, guard bypasses,
+register clobbers, table mutations and loader adjustments; exact artifact and
+browser outcomes belong in [PERFORMANCE.md](mv2-mem-patch-win/PERFORMANCE.md).
+
 ## 6. Failed approaches and lasting lessons
 
 | Approach | Observed failure | Required lesson |

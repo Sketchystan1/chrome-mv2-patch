@@ -125,8 +125,8 @@ static unsigned flushes = 0;
 static BOOL WINAPI failFirstFlush(HANDLE process, LPCVOID address, SIZE_T size) {
   return ++flushes == 1 ? FALSE : FlushInstructionCache(process, address, size);
 }
-static void application(const Bytes& bytes) {
-  auto plan = MakePlan(Discover(bytes)); check(!plan.status && plan.count == 4, "native plan includes both optional gates automatically");
+static void application(const Bytes& bytes, unsigned expectedCount = 4) {
+  auto plan = MakePlan(Discover(bytes)); check(!plan.status && plan.count == expectedCount, "native plan includes both optional gates automatically");
   auto memory = static_cast<uint8_t*>(VirtualAlloc(nullptr, 0x5000, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE));
   check(memory != nullptr, "allocate isolated application fixture");
   PeImage pe(bytes); auto text = pe.at(pe.text.rva, pe.text.size);
@@ -136,8 +136,23 @@ static void application(const Bytes& bytes) {
   StockImage stock(bytes); std::string_view reason;
   auto apply = [&](const WirePlan& candidate, MemoryOps ops = {}) { return ApplyPlan({memory, 0x5000}, stock, candidate, reason, ops); };
   auto unchanged = [&] { return !std::memcmp(memory + pe.text.rva, text.data(), text.size()); };
-  auto wrong = plan; std::swap(wrong.offstoreRva, wrong.crxDownloadRva);
-  check(apply(wrong) == ApplyResult::declined && unchanged(), "swapped optional metadata cannot modify code");
+  auto wrong = plan;
+  if (!pe.isEdge()) {
+    std::swap(wrong.offstoreRva, wrong.crxDownloadRva);
+    check(apply(wrong) == ApplyResult::declined && unchanged(), "swapped optional metadata cannot modify code");
+  }
+  wrong = plan; wrong.offstoreRva = wrong.crxDownloadRva;
+  check(apply(wrong) == ApplyResult::declined && unchanged(), "overlapping optional metadata cannot modify code");
+#if defined(AUTOSCAN_ARM64)
+  wrong = plan;
+  for (unsigned n = 0; n < wrong.count; ++n) if (wrong.sites[n].rva == wrong.offstoreRva) {
+    auto& site = wrong.sites[n]; auto jump = Lift(pe.code(site.rva), site.rva);
+    uint32_t opposite = ReadInsn<uint32_t>(site.patch.data()) == 0xd503201f ?
+      0x14000000 | ((static_cast<int64_t>(jump.target()) - site.rva) / 4 & 0x03ffffff) : 0xd503201f;
+    std::memcpy(site.patch.data(), &opposite, sizeof opposite);
+  }
+  check(apply(wrong) == ApplyResult::declined && unchanged(), "reversed ARM64 source outcome cannot modify code");
+#endif
   flushes = 0;
   check(apply(plan, {VirtualProtect, failFirstFlush}) == ApplyResult::declined && unchanged(), "failure rolls core and optional edits back together");
   check(apply(plan) == ApplyResult::applied, "verified native branches apply");
@@ -148,6 +163,191 @@ static void application(const Bytes& bytes) {
   check(info.Protect == PAGE_EXECUTE_READ, "application restores execute/read protection");
   VirtualFree(memory, 0, MEM_RELEASE);
 }
+#if defined(AUTOSCAN_ARM64)
+static void edgeProviderResult() {
+  for (bool nonzero : {false, true}) {
+    auto bytes = fixture();
+    IMAGE_EXPORT_DIRECTORY exports{}; exports.Name = 0x4480;
+    put(bytes, 0x1c00, exports); std::memcpy(bytes.data() + 0x1c80, "msedge.dll", sizeof("msedge.dll"));
+    put<uint32_t>(bytes, 0x108, 0x4400); put<uint32_t>(bytes, 0x10c, sizeof exports);
+    // The provider tests its private helper result; its shared source classifier stays intact.
+    const uint32_t provider[] = {
+      0xa9bf7bf3, 0xaa0203f3, 0xaa0103e0, 0x9400011d,
+      nonzero ? 0x370000c0u : 0x36000080u,
+      nonzero ? 0x52802008u : 0x2a1f03e0u,
+      nonzero ? 0xb9000268u : 0xa8c17bf3u,
+      nonzero ? 0x52800020u : 0xd65f03c0u,
+      nonzero ? 0xa8c17bf3u : 0x52802008u,
+      nonzero ? 0xd65f03c0u : 0xb9000268u,
+      nonzero ? 0x2a1f03e0u : 0x52800020u,
+      0xa8c17bf3, 0xd65f03c0,
+    };
+    const uint32_t helper[] = {0x39495008, 0x37180068, 0x2a1f03e0, 0xd65f03c0, 0x52800020, 0xd65f03c0};
+    std::fill(bytes.begin() + 0x680, bytes.begin() + 0x800, 0);
+    std::memcpy(bytes.data() + 0x680, provider, sizeof provider);
+    std::memcpy(bytes.data() + 0xb00, helper, sizeof helper);
+    put<uint32_t>(bytes, 0x141c, 1 | (sizeof provider / 4) << 2);
+    uint32_t count = ReadInsn<uint32_t>(bytes.data() + 0x124) / 8;
+    put<uint32_t>(bytes, 0x1400 + count * 8, 0x1700);
+    put<uint32_t>(bytes, 0x1404 + count * 8, 1 | (sizeof helper / 4) << 2);
+    put<uint32_t>(bytes, 0x124, (count + 1) * 8);
+    auto report = Discover(bytes); auto plan = MakePlan(report);
+    check(report.ready() && plan.count == 2 && plan.offstoreRva == 0x1290 && plan.crxDownloadRva == 0x1508,
+          "Edge recognizes both installer decisions through its private ARM64 provider result");
+    auto source = std::find_if(report.gates.begin(), report.gates.end(), [](const auto& gate) { return gate.optional == InstallVerifier; });
+    check(source != report.gates.end() && ReadInsn<uint32_t>(source->patch.data()) == (nonzero ? 0x14000006 : 0xd503201f) &&
+          source->unaffected == (nonzero ? 0x12a8u : 0x1294u),
+          "TBZ selects the verified fall-through with NOP and TBNZ selects its original target with B");
+    application(bytes, 2);
+  }
+}
+static void unsupportedBitField() {
+  auto bytes = fixture();
+  auto predicate = hex("1f0800716d000054e0031f2ac0035fd63f200071a8ffff54482180525f1400710825c11a44184a7ae9079f1a1f01007220119f1ac0035fd6");
+  put<uint32_t>(bytes, 0xc00, 0x53072800); // UBFX W0,W0,#7,#4: a packed tag, not an integer manifest version.
+  put<uint32_t>(bytes, 0xc04, 0xaa0403fb); // An unrelated register move can be interleaved.
+  std::copy(predicate.begin(), predicate.end(), bytes.begin() + 0xc08);
+  uint32_t count = ReadInsn<uint32_t>(bytes.data() + 0x124) / 8;
+  put<uint32_t>(bytes, 0x1400 + count * 8, 0x1800);
+  put<uint32_t>(bytes, 0x1404 + count * 8, 1 | (static_cast<uint32_t>(predicate.size() / 4) + 2) << 2);
+  put<uint32_t>(bytes, 0x124, (count + 1) * 8);
+  auto report = Discover(bytes);
+  check(!report.ready() && !report.unresolved.empty(),
+        "a generic packed input remains unsupported without reviewed AST provenance");
+  put<uint32_t>(bytes, 0xc00, 0xd503201f);
+  report = Discover(bytes);
+  check(report.ready() && report.gates.size() == 5,
+        "the same predicate on an unmodified full-width integer remains recognized");
+  for (uint32_t word : {0x53007c00u, 0x533f2800u}) {
+    put<uint32_t>(bytes, 0xc00, word);
+    report = Discover(bytes);
+    check(!report.ready() && !report.unresolved.empty(),
+          "full-width or invalid bitfield encodings retain rejection of an unsupported candidate");
+  }
+  put<uint32_t>(bytes, 0xc00, 0x53072800);
+  for (uint32_t word : {0x97ffff7fu, 0x14000001u, 0x34000020u, 0xd65f03c0u, 0xd4200000u, 0xffffffffu}) {
+    put<uint32_t>(bytes, 0xc04, word);
+    report = Discover(bytes);
+    check(!report.ready() && !report.unresolved.empty(),
+          "calls, control flow and unknown writes cannot prove the packed comparison input");
+  }
+  put<uint32_t>(bytes, 0xc00, 0x14000002);
+  put<uint32_t>(bytes, 0xc04, 0x53072800);
+  report = Discover(bytes);
+  check(report.ready() && report.gates.size() == 5,
+        "a branch bypassing a packed extraction preserves a genuine full-width predicate");
+  put<uint32_t>(bytes, 0xc00, 0x53072800);
+  put<uint32_t>(bytes, 0xc04, 0xaa0403fb);
+  put<uint32_t>(bytes, 0x1400 + count * 8, 0x1808);
+  put<uint32_t>(bytes, 0x1404 + count * 8, 1 | static_cast<uint32_t>(predicate.size() / 4) << 2);
+  report = Discover(bytes);
+  check(report.ready() && report.gates.size() == 5,
+        "an earlier function's extraction cannot hide a full-width predicate entry");
+}
+static Bytes astFixture() {
+  auto bytes = fixture();
+  auto instruction = [&](uint32_t pc, uint32_t word) { put<uint32_t>(bytes, pc - 0x1000 + 0x400, word); };
+  auto conditional = [](uint32_t pc, uint32_t target, unsigned condition) {
+    return 0x54000000u | ((static_cast<uint32_t>((int64_t{target} - pc) / 4) & 0x7ffff) << 5) | condition;
+  };
+  auto branch = [](uint32_t pc, uint32_t target) {
+    return 0x14000000u | (static_cast<uint32_t>((int64_t{target} - pc) / 4) & 0x3ffffff);
+  };
+  const uint32_t dispatch[] = {
+    0xf0000014, 0x91140294, 0xb9400497, 0x120016e8, 0x7100ed1f,
+    conditional(0x1814, 0x19e0, 8), 0x924016e8, 0x10000009,
+    0xb8a87a8a, 0x8b0a0129, 0xd61f0120,
+  };
+  for (unsigned n = 0; n < std::size(dispatch); ++n) instruction(0x1800 + n * 4, dispatch[n]);
+  instruction(0x183c, branch(0x183c, 0x19e0));
+  const uint32_t loop[] = {0xaa0103e4, 0x36000040, 0xd503201f, 0x97ffff6d,
+                          0xd503201f, 0xf9400484, 0x7100001f, conditional(0x185c, 0x1808, 2), 0xd65f03c0};
+  for (unsigned n = 0; n < std::size(loop); ++n) instruction(0x1840 + n * 4, loop[n]);
+  const uint32_t origin[] = {0xf9400482, 0xb940044f, 0x120015e8, 0x7100b51f,
+                            conditional(0x1890, 0x1900, 0), 0xd65f03c0};
+  for (unsigned n = 0; n < std::size(origin); ++n) instruction(0x1880 + n * 4, origin[n]);
+  instruction(0x18fc, branch(0x18fc, 0x19e0));
+  instruction(0x1900, 0x530729e0); instruction(0x1904, 0xaa0403fb);
+  auto predicate = hex("1f0800716d000054e0031f2ac0035fd63f200071a8ffff54482180525f1400710825c11a44184a7ae9079f1a1f01007220119f1ac0035fd6");
+  std::copy(predicate.begin(), predicate.end(), bytes.begin() + 0xd08);
+  instruction(0x19e0, 0xd65f03c0);
+  for (unsigned n = 0; n < 60; ++n)
+    put<int32_t>(bytes, 0x1d00 + n * 4, (n == 11 || n == 49 ? 0x1840 : 0x1880) - 0x181c);
+  uint32_t count = ReadInsn<uint32_t>(bytes.data() + 0x124) / 8;
+  put<uint32_t>(bytes, 0x1400 + count * 8, 0x1800);
+  put<uint32_t>(bytes, 0x1404 + count * 8, 1 | ((0x19e4 - 0x1800) / 4) << 2);
+  put<uint32_t>(bytes, 0x124, (count + 1) * 8);
+  return bytes;
+}
+static void astExclusion() {
+  auto bytes = astFixture(); auto report = Discover(bytes);
+  if (!report.ready()) std::fprintf(stderr, "AST fixture: error=%.*s unresolved=%zu gates=%zu\n",
+    static_cast<int>(report.error.size()), report.error.data(), report.unresolved.size(), report.gates.size());
+  check(report.ready() && report.gates.size() == 4 && report.unresolved.empty(),
+        "reviewed AST literal origin and preserving dispatch loop cannot masquerade as MV2");
+  for (auto [at, word] : {
+    std::pair<size_t, uint32_t>{0xc10, 0x7100f11f}, // Incorrect dispatch bound.
+    {0xc18, 0x92401ae8},                        // Incorrect dispatch mask.
+    {0xc48, 0xaa0403f4},                        // X20 is overwritten in the loop.
+    {0xc48, 0x11000694},                        // A W20 write also destroys X20.
+    {0xc48, 0xffffffff},                        // Unknown loop effects.
+    {0xc3c, 0xd503201f},                        // An unproven fall-through enters the loop.
+    {0xc5c, 0x54fffda2},                        // Reentry skips the complete tag load.
+    {0xc8c, 0x7100b91f},                        // Non-literal node type.
+    {0xc88, 0x120015ef},                        // The guard overwrites the packed flags.
+    {0xc80, 0xd503201f},                        // No AST node pointer origin.
+    {0xcfc, 0xd503201f},                        // An unproven fall-through enters the extraction.
+    {0xd00, 0x530009e0},                        // An identity-on-valid-versions extraction.
+    {0xde0, 0xd65f0120},                        // RET X9 is not a proved ABI return.
+    {0xdd0, 0xd61f0120},                        // A second indirect branch.
+    {0x1d00, 0x1908 - 0x181c},                 // An indirect entry skips the extraction.
+    {0x1d00, 0x1884 - 0x181c},                 // An indirect entry skips the origin.
+    {0x1d00, 0x1848 - 0x181c},                 // An indirect entry skips part of the loop.
+    {0x1d00, 0x7fffffff},                       // Target outside the owned function.
+    {0x1d00, 0x80000000},                       // Signed target underflow.
+    {0x1fc, 0xc0000040},                        // Writable table section.
+    {0x1fc, 0x00000040},                        // Unreadable table section.
+  }) {
+    auto changed = bytes; put<uint32_t>(changed, at, word);
+    auto declined = Discover(changed);
+    check(!declined.ready() && !declined.unresolved.empty(), "unproven AST data or control flow keeps the candidate unresolved");
+  }
+  for (uint32_t target : {0x1900u, 0x1908u, 0x1884u, 0x1848u, 0x1810u}) {
+    auto changed = bytes;
+    put<uint32_t>(changed, 0xb00, 0x14000000 | (static_cast<uint32_t>((int64_t{target} - 0x1700) / 4) & 0x3ffffff));
+    auto declined = Discover(changed);
+    check(!declined.ready() && !declined.unresolved.empty(), "outside direct entries cannot bypass the AST proof");
+  }
+  for (uint32_t opcode : {0x5400000eu, 0x54000010u}) {
+    auto changed = bytes;
+    put<uint32_t>(changed, 0xb00, opcode | (((0x1908 - 0x1700) / 4) << 5));
+    check(!Discover(changed).ready(), "always-taken and newer conditional branches cannot bypass the AST proof");
+  }
+  auto relocated = bytes;
+  put<uint32_t>(relocated, 0x130, 0x4700); put<uint32_t>(relocated, 0x134, 12);
+  put<uint32_t>(relocated, 0x1f00, 0x4000); put<uint32_t>(relocated, 0x1f04, 12);
+  put<uint16_t>(relocated, 0x1f08, 0xa500);
+  check(!Discover(relocated).ready(), "loader relocations cannot alter authenticated switch data");
+  put<uint32_t>(relocated, 0x1f04, 11);
+  check(!Discover(relocated).ready(), "malformed loader relocation blocks preserve rejection");
+  for (uint16_t entry : {uint16_t{0x3700}, uint16_t{0x383c}, uint16_t{0x38fc}}) {
+    relocated = bytes;
+    put<uint32_t>(relocated, 0x130, 0x4700); put<uint32_t>(relocated, 0x134, 12);
+    put<uint32_t>(relocated, 0x1f00, 0x1000); put<uint32_t>(relocated, 0x1f04, 12);
+    put<uint16_t>(relocated, 0x1f08, entry);
+    check(!Discover(relocated).ready(), "executable relocations cannot change outside entries or preceding terminators");
+  }
+  auto otherCode = bytes;
+  put<uint32_t>(otherCode, 0x1fc, 0x60000040);
+  put<uint32_t>(otherCode, 0x1e00, 0x14000000 | (static_cast<uint32_t>((int64_t{0x1908} - 0x4600) / 4) & 0x3ffffff));
+  check(!Discover(otherCode).ready(), "entries from another executable section cannot bypass the AST proof");
+  auto padding = bytes;
+  put<uint32_t>(padding, 0x190, 0xfff);
+  put<uint32_t>(padding, 0x13fc, 0x14000000 | (static_cast<uint32_t>((int64_t{0x1908} - 0x1ffc) / 4) & 0x3ffffff));
+  check(!Discover(padding).ready(), "backed executable padding cannot bypass the AST proof");
+}
+
+#endif
 #if defined(AUTOSCAN_X86)
 static Bytes downloadCalleeFixture(size_t nops, const char* tail) {
   auto bytes = fixture();
@@ -223,6 +423,89 @@ static void downloadArithmetic() {
           "unmodeled arithmetic cannot discard a stack-derived address and hide an overlapping write");
   }
   application(bytes);
+}
+static Bytes downloadReceiverFixture(const char* arithmetic = "") {
+  auto bytes = fixture(); Bytes code;
+  auto emit = [&](const char* text) { auto part = hex(text); code.insert(code.end(), part.begin(), part.end()); };
+  auto call = [&](uint32_t target) {
+    int32_t displacement = target - (0x1500 + static_cast<uint32_t>(code.size()) + 5);
+    code.push_back(0xe8);
+    for (unsigned n = 0; n < 4; ++n) code.push_back(static_cast<uint8_t>(displacement >> (n * 8)));
+  };
+  emit("5589e583ec28"); call(0x1640);
+  emit("84c089ce740e8b442404c7802c010000020000008d44241050"); call(0x1660);
+  emit("83c40450"); call(0x1680); emit(arithmetic);
+  emit("8b742404"); call(0x1660);
+  emit("89f789f98d44240850"); call(0x1400); emit("83c4285dc3");
+  check(code.size() <= 0x100, "saved-receiver caller fits its fabricated function");
+  std::fill(bytes.begin() + 0x900, bytes.begin() + 0xa00, 0xcc);
+  std::copy(code.begin(), code.end(), bytes.begin() + 0x900);
+  return bytes;
+}
+static void downloadReceiver() {
+  auto bytes = downloadReceiverFixture("8d542408ff4200");
+  auto report = Discover(bytes);
+  check(report.ready() && report.gates.size() == 4 && has(report, CrxDownload),
+        "TEST/MOV/JE and a receiver copied through preserved registers retain the download decision");
+  for (auto arithmetic : {"8d542404ff4200", "8d54240266ff4202", "194c2404", "83c404"}) {
+    auto found = Discover(downloadReceiverFixture(arithmetic));
+    check(found.ready() && found.gates.size() == 3 && has(found, InstallVerifier) && !has(found, CrxDownload),
+          "aliased INC/SBB writes, partial overlaps and stack adjustments cannot preserve the installer slot");
+  }
+  for (auto mutation : {std::pair{"84c089ce", "84c089c8"}, {"84c089ce", "84c001ce"},
+                       {"89f789f9", "89d789f9"}, {"8b742404", "8b742408"}}) {
+    auto changed = bytes;
+    replace(changed, mutation.first, mutation.second);
+    auto found = Discover(changed);
+    check(found.ready() && found.gates.size() == 3 && has(found, InstallVerifier) && !has(found, CrxDownload),
+          "result/flag clobbers and unrelated receiver copies cannot produce a download patch");
+  }
+  application(bytes);
+}
+static Bytes inlineFormatFixture() {
+  auto bytes = downloadReceiverFixture();
+  IMAGE_EXPORT_DIRECTORY exports{}; exports.Name = 0x4480;
+  put(bytes, 0x1c00, exports);
+  std::memcpy(bytes.data() + 0x1c80, "msedge.dll", sizeof("msedge.dll"));
+  put<uint32_t>(bytes, 0xf8, 0x4400); put<uint32_t>(bytes, 0xfc, sizeof exports);
+  Bytes code;
+  auto emit = [&](const char* text) { auto part = hex(text); code.insert(code.end(), part.begin(), part.end()); };
+  auto call = [&](uint32_t target) {
+    int32_t displacement = target - (0x1400 + static_cast<uint32_t>(code.size()) + 5);
+    code.push_back(0xe8);
+    for (unsigned n = 0; n < 4; ++n) code.push_back(static_cast<uint8_t>(displacement >> (n * 8)));
+  };
+  emit("5589e583ec2089cf31f683b92c010000007514"); call(0x1640);
+  emit("68a0414000"); call(0x1680); emit("be01000000");
+  emit("8d55e08972089090909089f952"); call(0x1680); emit("83c4205dc20400");
+  check(code.size() <= 0x100, "inline-format installer fits its fabricated function");
+  std::fill(bytes.begin() + 0x800, bytes.begin() + 0x900, 0xcc);
+  std::copy(code.begin(), code.end(), bytes.begin() + 0x800);
+  return bytes;
+}
+static void inlineFormat() {
+  auto bytes = inlineFormatFixture(); auto report = Discover(bytes);
+  if (!report.ready()) std::fprintf(stderr, "inline format: provider=%.*s download=%.*s\n",
+    static_cast<int>(report.installVerifier.size()), report.installVerifier.data(),
+    static_cast<int>(report.crxDownload.size()), report.crxDownload.data());
+  check(report.ready() && report.gates.size() == 2 && has(report, InstallVerifier) && has(report, CrxDownload),
+        "Edge's inlined zero external format and named webstore format reach the same private request");
+  auto formatTwo = bytes; replace(formatTwo, "be01000000", "be02000000");
+  check(Discover(formatTwo).ready(), "both reviewed webstore verifier formats retain the external zero path");
+  auto otherField = bytes; replace(otherField, "90909090", "ff420090");
+  check(Discover(otherField).ready(), "a disjoint request-field update preserves the verified format field");
+  auto inputRequest = bytes;
+  replace(inputRequest, "8d55e0", "8d5508"); replace(inputRequest, "897208", "8972b0");
+  check(!Discover(inputRequest).ready(), "a local format field cannot prove a request based in caller input slots");
+  for (auto mutation : {std::pair{"be01000000", "be03000000"}, {"31f6", "31ff"},
+                       {"8d55e0", "8d55fc"}, {"89f952", "89d952"},
+                       {"90909090", "ff420890"}, {"90909090", "66ff420a"}, {"90909090", "83c40490"}}) {
+    auto changed = bytes;
+    replace(changed, mutation.first, mutation.second);
+    auto found = Discover(changed);
+    check(!found.ready() && has(found, InstallVerifier) && !has(found, CrxDownload),
+          "unsupported formats, unproved zero, control-slot overlap and constructor alias changes decline Edge support");
+  }
 }
 static void framedExternalVerifier() {
   auto bytes = fixture();
@@ -336,6 +619,9 @@ int main() {
   }
 #if defined(AUTOSCAN_ARM64)
   compareFilter();
+  edgeProviderResult();
+  unsupportedBitField();
+  astExclusion();
   for (auto mutation : {std::pair{"48218052", "68218052"}, {"44184a7a", "40184a7a"}, {"20119f1a", "20019f1a"}}) {
     auto changed = bytes; replace(changed, mutation.first, mutation.second);
     check(!Discover(changed).ready(), "changed membership, conditional flags or select cannot satisfy the MV2 predicate");
@@ -347,6 +633,8 @@ int main() {
   providerReload();
   largeDownloadCallee();
   downloadArithmetic();
+  downloadReceiver();
+  inlineFormat();
 #endif
   std::printf("PASS: %u native optional checks\n", checks);
 }

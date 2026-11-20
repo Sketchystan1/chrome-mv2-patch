@@ -8,15 +8,17 @@
 static std::wstring testRoot;
 static auto realOpen = ::RegOpenKeyExW;
 static auto realCreate = ::RegCreateKeyExW;
-// Only matching Chrome extension keys are redirected into the test area named by MV2_TEST_REGISTRY.
+// Only browser extension keys are redirected into the test area named by MV2_TEST_REGISTRY.
 static std::wstring redirect(HKEY& root, LPCWSTR key) {
-  const wchar_t* prefix = L"Software\\Google\\Chrome\\Extensions";
-  size_t length = wcslen(prefix);
-  if (!key || (root != HKEY_CURRENT_USER && root != HKEY_LOCAL_MACHINE) ||
-      _wcsnicmp(key, prefix, length) || (key[length] && key[length] != L'\\')) return {};
-  std::wstring path = testRoot + (root == HKEY_CURRENT_USER ? L"\\user\\" : L"\\machine\\") + key;
-  root = HKEY_CURRENT_USER;
-  return path;
+  if (!key || (root != HKEY_CURRENT_USER && root != HKEY_LOCAL_MACHINE)) return {};
+  for (const wchar_t* prefix : {L"Software\\Google\\Chrome\\Extensions", L"Software\\Microsoft\\Edge\\Extensions"}) {
+    size_t length = wcslen(prefix);
+    if (_wcsnicmp(key, prefix, length) || (key[length] && key[length] != L'\\')) continue;
+    std::wstring path = testRoot + (root == HKEY_CURRENT_USER ? L"\\user\\" : L"\\machine\\") + key;
+    root = HKEY_CURRENT_USER;
+    return path;
+  }
+  return {};
 }
 static LSTATUS WINAPI openKey(HKEY root, LPCWSTR key, DWORD options, REGSAM access, PHKEY out) {
   auto path = redirect(root, key);

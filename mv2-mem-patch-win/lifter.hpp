@@ -201,9 +201,13 @@ inline LiftedInsn LiftX86(std::span<const uint8_t> bytes, uint32_t pc, bool x64)
   if (escaped && second == 0xc1 && mod != 3 && !repeat) {
     other(Other::AtomicAdd); out.dst = reg; out.src = base; return out;
   }
-  if (!escaped && op == 0xff && group == 1 && mod != 3 && !repeat && !segment && !indexed && !addressOverride) {
-    // Memory DEC updates no register; the memory result remains unknown.
-    other(Other::AtomicAdd); out.src = base; return out;
+  if (!escaped && mod != 3 && !repeat && !segment && !indexed && !addressOverride &&
+      ((op == 0xff && (group == 0 || group == 1)) || (op == 0x19 && !lock))) {
+    // Memory INC/DEC/SBB update no register; their result and flags remain unknown.
+    other(Other::AtomicAdd); out.src = base; out.encoding |= 0x40;
+    if (op == 0xff) out.detail |= 0x2000; // INC/DEC preserve carry; they cannot discharge an unknown carry dependency.
+    else out.detail |= 0x4000; // SBB consumes carry before writing its result and flags.
+    return out;
   }
   if (lock) return out;
   if ((op == 0x90 && !rex) || (escaped && second == 0x1f && group == 0)) { other(Other::Nop); return out; }
@@ -446,6 +450,8 @@ inline LiftedInsn LiftArm64(std::span<const uint8_t> bytes, uint32_t pc) {
   if ((word & 0xfffffc1f) == 0xd63f0000) { other(Other::Call); return out; }
   if ((word & 0xffe0001f) == 0xd4200000) { other(Other::Trap); return out; }
   if (word == 0xd503201f) { other(Other::Nop); return out; }
+  // Zeroing a SIMD register leaves the integer verifier result and flags intact.
+  if ((word & 0xffffffe0) == 0x6f00e400) { other(Other::Nop); out.dst = out.src = NoReg; return out; }
   if ((word & 0x7fe0ffe0) == 0x2a0003e0) {
     if (out.dst == 31) { other(Other::Nop); return out; }
     out.op = Op::MovReg; out.src = (word >> 16) & 31;

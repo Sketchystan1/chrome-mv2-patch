@@ -86,6 +86,25 @@ macOS, Linux ARM64 or Windows ARM64 runtime behavior.
 
 ## Verification
 
+For every task, run only checks that cover the changed behavior and its callers.
+Reuse a passing result until a related edit or new failure invalidates it. Docs-only
+changes need no builds or browser runs. Prefer a named Python suite and build only
+the affected CMake targets, then select their CTest names with `-R`. Independent
+checks may run in parallel; never rebuild a DLL or scanner while a browser test
+uses it. Do not remove signature, rollback, identity, sandbox or bounds checks to
+save time. Changes to shared discovery/application code need the affected native
+architecture fixtures; real-browser runs are needed for browser behavior changes
+and any browser/architecture/channel matrix explicitly requested by the user.
+
+```text
+python scripts/run_tests.py --only fetch
+python scripts/run_tests.py --only cdp crx-cdp
+cmake --build out/x64 --target modules-test arm64-modules-test arm64-optional-test autoscan-test --parallel 4
+ctest --preset x64 -R "compact-modules|arm64-analysis-modules|arm64-optional-gates|native-scanner" --parallel 4
+```
+
+The complete suite is available when the change warrants it:
+
 ```text
 python scripts/run_tests.py
 uv run --with capstone --with z3-solver scripts/run_tests.py
@@ -93,8 +112,8 @@ uv run --with capstone --with z3-solver scripts/run_tests.py
 
 The first command runs the portable fixtures and the Windows installer suite on
 Windows; Python scanner checks skip if their optional dependencies are absent.
-The second includes those research checks. `--fast` skips the Windows installer
-integration suite. Native scanner, proxy, application and cache tests remain in
+The second includes those research checks. `--only` selects named suites;
+`--fast` skips the Windows installer integration suite. Native scanner, proxy, application and cache tests remain in
 CMake; after building the test targets, run `ctest --preset <arch>` in
 `mv2-mem-patch-win/`. Native ARM64 execution needs ARM64 Windows.
 

@@ -21,7 +21,7 @@ import time
 import uuid
 import winreg
 
-from test_autoscan_runtime import digest, memory_check, sandbox_check, delete_registry
+from test_autoscan_runtime import digest, memory_check, sandbox_check, sandbox_read, delete_registry
 
 REPO = Path(__file__).resolve().parent.parent
 U = C.WinDLL('user32', use_last_error=True)
@@ -55,9 +55,9 @@ def without_developer_proofs(crx):
     return crx[:8] + struct.pack('<I', len(output)) + output + crx[12 + length:]
 
 
-def cdp(profile, action, extension_id, value='', download_path=''):
+def cdp(profile, action, extension_id, value=''):
     output = subprocess.check_output(['node', str(REPO / 'scripts/autoscan_crx_cdp.mjs'),
-        str(profile), action, extension_id, str(value), str(download_path)], timeout=40,
+        str(profile), action, extension_id, str(value)], timeout=40,
         text=True, encoding='utf-8', stderr=subprocess.STDOUT)
     return json.loads(output) if output.strip() else None
 
@@ -70,22 +70,30 @@ def main():
     parser.add_argument('--work', type=Path, required=True)
     parser.add_argument('--phases', default='stock,valid,tampered,no-proof,restart,cold-restart,restore')
     args = parser.parse_args()
+    dll = (args.dll or REPO / 'mv2-mem-patch-win/build' / args.arch / 'secur32.dll').resolve()
+    if dll.name.lower() != 'secur32.dll':
+        parser.error('--dll must be named secur32.dll')
     work = args.work.resolve()
     assert work.is_relative_to((REPO / '_scratch').resolve())
     work.mkdir(parents=True, exist_ok=False)
     entry, = json.loads(args.matrix.read_text(encoding='utf-8'))
     source_exe, source_binary = Path(entry['executable']).resolve(), Path(entry['binary']).resolve()
+    edge = source_exe.name.lower() == 'msedge.exe'
+    # Keep the isolated Edge process from relaunching outside the test launcher's lifetime.
+    edge_flags = ['--edge-skip-compat-layer-relaunch'] if edge else []
     source_hash = digest(source_binary)
     executable_hash = digest(source_exe)
     build = REPO / 'mv2-mem-patch-win/out' / args.arch
-    dll = (args.dll or REPO / 'mv2-mem-patch-win/build' / args.arch / 'secur32.dll').resolve()
     dll_hash = digest(dll)
     app = work / 'app'
+    application = Path(entry.get('application', source_exe.parent)).resolve()
+    assert source_exe.is_relative_to(application) and source_binary.is_relative_to(application)
     def ignore(directory, names):
-        return [name for name in names if Path(directory) == source_exe.parent and name.lower() in
+        return [name for name in names if name.lower() in
                 ('secur32.dll', 'secur32.dll.disabled', 'version.dll', 'version.dll.disabled')]
-    shutil.copytree(source_exe.parent, app, ignore=ignore)
-    exe, binary = app / source_exe.name, app / source_binary.relative_to(source_exe.parent)
+    shutil.copytree(application, app, ignore=ignore)
+    sandbox_read(app)
+    exe, binary = app / source_exe.relative_to(application), app / source_binary.relative_to(application)
     scan = subprocess.run([str(build / 'mv2-scan.exe'), str(binary)], capture_output=True, text=True, timeout=60)
     report = json.loads(scan.stdout)
     (work / 'scan.json').write_text(json.dumps(report, indent=2))
@@ -129,19 +137,20 @@ def main():
         (ext / 'manifest.json').write_text(json.dumps(manifest))
         (ext / 'background.js').write_text(code + f"fetch('{origin}/mv{version}-started');")
     subprocess.run([str(exe), '--headless=new', '--no-message-box', '--no-first-run',
-        '--user-data-dir=' + str(work / 'packing'), '--pack-extension=' + str(mv2)], check=True,
+        '--user-data-dir=' + str(work / 'packing'), '--pack-extension=' + str(mv2)] + edge_flags, check=True,
         capture_output=True, timeout=40, creationflags=subprocess.CREATE_NO_WINDOW)
     crx = mv2.with_suffix('.crx').read_bytes()
     public = subprocess.check_output([shutil.which('openssl') or 'C:/Program Files/Git/usr/bin/openssl.exe',
         'pkey', '-in', str(mv2.with_suffix('.pem')), '-pubout', '-outform', 'DER'])
     extension_id = ''.join(chr(ord('a') + int(char, 16)) for char in hashlib.sha256(public).hexdigest()[:32])
     altered = bytearray(crx); altered[-1] ^= 1
-    packages.update({'/valid.crx': crx, '/tampered.crx': bytes(altered), '/no-proof.crx': without_developer_proofs(crx)})
+    packages.update({'/valid.crx': crx, '/restore.crx': crx, '/tampered.crx': bytes(altered), '/no-proof.crx': without_developer_proofs(crx)})
     for name, body in packages.items():
         (work / name[1:]).write_bytes(body)
     registry = 'Software\\MV2AutoScan-' + uuid.uuid4().hex
+    browser_registry = 'Software\\Microsoft\\Edge\\Extensions' if edge else 'Software\\Google\\Chrome\\Extensions'
     for branch in ('user', 'machine'):
-        winreg.CreateKey(winreg.HKEY_CURRENT_USER, registry + '\\' + branch + '\\Software\\Google\\Chrome\\Extensions').Close()
+        winreg.CreateKey(winreg.HKEY_CURRENT_USER, registry + '\\' + branch + '\\' + browser_registry).Close()
     desktop_name = 'MV2Crx-' + uuid.uuid4().hex
     desktop = U.CreateDesktopW(desktop_name, None, None, 0, 0x10000000, None)
     assert desktop, C.WinError(C.get_last_error())
@@ -160,12 +169,13 @@ def main():
                 assert proxy.resolve().is_relative_to(work)
                 proxy.rename(app / 'secur32.dll.disabled')
             profile = work / ('pv' if phase in ('valid', 'restart', 'cold-restart', 'restore') else 'p-' + phase)
-            profile.mkdir(exist_ok=True); local = profile / 'local'; local.mkdir(exist_ok=True)
+            profile.mkdir(exist_ok=True); local = work / 'local'; local.mkdir(exist_ok=True)
             downloads = profile / 'downloads'; downloads.mkdir(exist_ok=True)
             default = profile / 'Default'; default.mkdir(exist_ok=True)
             preferences = default / 'Preferences'
             prefs = json.loads(preferences.read_text()) if preferences.exists() else {}
             prefs.setdefault('download', {})['default_directory'] = str(downloads)
+            prefs['download']['prompt_for_download'] = False
             preferences.write_text(json.dumps(prefs))
             cache = local / 'chrome-mv2-patch/autoscan' / (hashlib.sha256((dll_hash + report['blake3']).encode()).hexdigest() + '.bin')
             if phase == 'cold-restart':
@@ -175,7 +185,7 @@ def main():
             flags = [str(exe), '--remote-debugging-port=0', '--disable-gpu', '--no-first-run', '--no-default-browser-check',
                      '--disable-background-networking', '--disable-component-update', '--enable-unsafe-extension-debugging',
                      '--force-renderer-accessibility', '--lang=en-US', '--enable-logging', '--log-file=' + str(work / (phase + '.log')),
-                     '--user-data-dir=' + str(profile), 'about:blank']
+                     '--user-data-dir=' + str(profile), 'about:blank'] + edge_flags
             phase_result = dict(phase=phase)
             primary_error = None
             with (work / (phase + '.stderr')).open('wb') as log:
@@ -192,23 +202,28 @@ def main():
                         inspected = subprocess.run([str(build / 'browser-ui.exe'), desktop_name, str(pid), str(exe), 'inspect'],
                             capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=25,
                             creationflags=subprocess.CREATE_NO_WINDOW)
-                        (work / (phase + '-startup-ui.txt')).write_text(inspected.stdout + inspected.stderr)
+                        (work / (phase + '-startup-ui.txt')).write_text(inspected.stdout + inspected.stderr, encoding='utf-8')
                     assert port_file.exists(), 'test browser did not expose DevTools'
-                    memory_check(pid, report, patched, True); phase_result['memory_gates_checked'] = len(report['gates'])
+                    memory_check(pid, report, patched, True, binary.name); phase_result['memory_gates_checked'] = len(report['gates'])
                     cdp(profile, 'mv3', extension_id, mv3)
                     if phase in ('stock', 'valid', 'tampered', 'no-proof', 'restore'):
-                        name = phase if phase in ('tampered', 'no-proof') else 'valid'
-                        cdp(profile, 'download', extension_id, origin + '/download/' + name + '.crx', downloads)
+                        name = phase if phase in ('tampered', 'no-proof', 'restore') else 'valid'
+                        cdp(profile, 'download', extension_id, origin + '/download/' + name + '.crx')
                         item = None
-                        for attempt in range(30):
+                        download_deadline = time.monotonic() + 30
+                        while time.monotonic() < download_deadline:
                             items = cdp(profile, 'downloads', extension_id)
                             (work / (phase + '-downloads.json')).write_text(json.dumps(items, indent=2))
-                            item = next((item for item in items['items'] if item.get('url') == origin + '/' + name + '.crx'), None)
+                            item = next((item for item in items['items'] if item.get('url') == origin + '/' + name + '.crx'
+                                         or (edge and item.get('fileName') == name + '.crx')), None)
                             if item:
                                 break
                             time.sleep(.2)
-                        assert item, 'download did not appear in the real Downloads page'
-                        assert Path(item['filePath']).resolve().is_relative_to(work), 'download must stay in the private workspace'
+                        assert item, f'download did not appear in the real Downloads page; server requests: {state}'
+                        if item.get('filePath'):
+                            assert Path(item['filePath']).resolve().is_relative_to(work), 'download must stay in the private workspace'
+                        else:
+                            assert edge and item.get('isDangerous'), 'download path is unavailable'
                         # Untrusted CRXs remain in a temporary download until
                         # Keep is confirmed. Chrome then opens them automatically
                         # and may delete the source after verification fails.
@@ -218,13 +233,12 @@ def main():
                             phase_result['download_warning_confirmed'] = True
                         else:
                             cdp(profile, 'open', extension_id, item['id'])
-                        time.sleep(1)
                         def ui(action):
                             response = subprocess.run([str(build / 'browser-ui.exe'), desktop_name, str(pid), str(exe), action],
                                 capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=25,
                                 creationflags=subprocess.CREATE_NO_WINDOW)
                             (work / (phase + '-ui-' + re.sub(r'[^A-Za-z0-9_-]', '-', action) + '.txt')).write_text(
-                                f'exit_code={response.returncode}\n' + response.stdout + response.stderr)
+                                f'exit_code={response.returncode}\n' + response.stdout + response.stderr, encoding='utf-8')
                             return response
                         if phase == 'valid':
                             accepted = ui('Add extension'); assert accepted.returncode == 0, accepted.stdout + accepted.stderr
@@ -246,15 +260,20 @@ def main():
                             time.sleep(.1)
                         assert info['extension']['state'] == 'ENABLED' and state.get('/mv2-started')
                         assert state.get('/blocked-success') and not state.get('/blocked'), 'MV2 request blocking failed'
-                        assert cache.exists()
-                        stamp = digest(cache), cache.stat().st_mtime_ns
-                        phase_result['cache_reused'] = cache_stamp == stamp
-                        if phase == 'restart':
-                            assert phase_result['cache_reused']
-                        cache_stamp = stamp
+                        if patched:
+                            assert cache.exists()
+                            stamp = digest(cache), cache.stat().st_mtime_ns
+                            phase_result['cache_reused'] = cache_stamp == stamp
+                            if phase == 'restart':
+                                assert phase_result['cache_reused']
+                            cache_stamp = stamp
                     elif phase == 'restore':
                         assert info.get('extension') and info['extension']['state'] == 'DISABLED'
-                        assert info['extension']['isAffectedByMV2Deprecation'] and not state.get('/mv2-started')
+                        assert not state.get('/mv2-started')
+                        if edge:
+                            assert info['extension']['disableReasons']['suspiciousInstall']
+                        else:
+                            assert info['extension']['isAffectedByMV2Deprecation']
                     else:
                         assert not info.get('extension')
                     mv3_deadline = time.monotonic() + 5
@@ -269,10 +288,18 @@ def main():
                 except BaseException as error:
                     primary_error = error
                     phase_result['error'] = str(error)
+                    result['phases'].append(phase_result)
+                    if phase_result.get('pid'):
+                        try:
+                            inspected = subprocess.run([str(build / 'browser-ui.exe'), desktop_name, str(phase_result['pid']), str(exe), 'inspect'],
+                                capture_output=True, text=True, encoding='utf-8', errors='replace', timeout=25,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+                            (work / (phase + '-error-ui.txt')).write_text(inspected.stdout + inspected.stderr, encoding='utf-8')
+                        except (OSError, subprocess.SubprocessError) as inspection_error:
+                            phase_result['inspection_error'] = str(inspection_error)
                     if getattr(error, 'output', None):
                         phase_result['error_output'] = error.output
-                        (work / (phase + '-error-output.txt')).write_text(error.output)
-                    result['phases'].append(phase_result)
+                        (work / (phase + '-error-output.txt')).write_text(error.output, encoding='utf-8')
                     raise
                 finally:
                     if process.poll() is None:

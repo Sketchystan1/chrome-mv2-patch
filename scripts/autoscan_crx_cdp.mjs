@@ -1,7 +1,7 @@
 // Drive the real download/open path; package verification and native confirmation
 // remain in Chrome. UI confirmation is performed separately on a private desktop.
 import fs from 'node:fs';
-const [profile, action, extensionId, value, downloadPath] = process.argv.slice(2);
+const [profile, action, extensionId, value] = process.argv.slice(2);
 const [port, browserPath] = fs.readFileSync(profile + '/DevToolsActivePort', 'utf8').trim().split('\n');
 async function connect(url) {
   const ws = new WebSocket(url);
@@ -21,6 +21,9 @@ async function connect(url) {
   }};
 }
 const browser = await connect(`ws://127.0.0.1:${port}${browserPath.trim()}`);
+const browserVersion = await browser.call('Browser.getVersion');
+const scheme = /\bEdg\//.test(browserVersion.result?.userAgent ?? '') ? 'edge' : 'chrome';
+const downloadsUrl = scheme + '://downloads/';
 if (action === 'close') {
   await browser.call('Browser.close'); browser.ws.close();
 } else {
@@ -29,14 +32,14 @@ if (action === 'close') {
     if (loaded.error || !loaded.result?.id) throw new Error(JSON.stringify(loaded));
     console.log(JSON.stringify(loaded.result)); browser.ws.close();
   } else {
-    const url = ['downloads', 'open', 'keep'].includes(action) ? 'chrome://downloads/' :
-      action === 'download' ? value : action === 'probe' ? value : 'chrome://extensions/';
+    const url = ['downloads', 'open', 'keep'].includes(action) ? downloadsUrl :
+      action === 'download' ? value : action === 'probe' ? value : scheme + '://extensions/';
     let targets = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json();
     const targetFile = profile + '/crx-download-target';
-    let target = url === 'chrome://downloads/' && fs.existsSync(targetFile) ?
+    let target = url === downloadsUrl && fs.existsSync(targetFile) ?
       targets.find(item => item.id === fs.readFileSync(targetFile, 'utf8').trim()) :
       targets.find(item => item.type === 'page' && item.url === url);
-    if (url === 'chrome://downloads/' && !target) throw new Error('Original download tab is unavailable');
+    if (url === downloadsUrl && !target) throw new Error('Original download tab is unavailable');
     if (!target) target = await (await fetch(`http://127.0.0.1:${port}/json/new?${encodeURIComponent(url)}`, {method: 'PUT'})).json();
     if (action === 'download') fs.writeFileSync(targetFile, target.id);
     const client = await connect(target.webSocketDebuggerUrl);
@@ -49,7 +52,7 @@ if (action === 'close') {
     }
     for (let attempt = 0; attempt < 30; ++attempt) {
       const ready = action === 'download' ? 'document.readyState === "complete" && !!document.querySelector("a#download")' :
-        ['downloads', 'open', 'keep'].includes(action) ? 'document.readyState === "complete" && !!document.querySelector("downloads-manager")' :
+        ['downloads', 'open', 'keep'].includes(action) ? `document.readyState === "complete" && !!document.querySelector("${scheme === 'edge' ? 'downloads-full-page-app' : 'downloads-manager'}")` :
         action === 'info' || action === 'enable' ? 'document.readyState === "complete" && !!chrome.developerPrivate' : 'document.readyState === "complete"';
       if (await evaluate(ready)) break;
       await new Promise(resolve => setTimeout(resolve, 100));
@@ -58,7 +61,9 @@ if (action === 'close') {
     async function clickControl(selector, warning = false) {
       let point;
       for (let attempt = 0; attempt < 50; ++attempt) {
-        point = await evaluate(`(()=>{function find(root){for(const node of root.querySelectorAll('*')){if(${warning ? "node.tagName==='DOWNLOADS-BYPASS-WARNING-CONFIRMATION-DIALOG'" : "node.tagName==='DOWNLOADS-ITEM'&&node.data?.id===" + JSON.stringify(value)})return node;if(node.shadowRoot){const found=find(node.shadowRoot);if(found)return found}}}const item=find(document);const link=item?.shadowRoot?.querySelector(${JSON.stringify(selector)});if(!link||link.disabled)return null;link.scrollIntoView({block:'center'});const r=link.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2,width:r.width,height:r.height}})()`);
+        const match = warning ? `node.tagName==='${scheme === 'edge' ? 'DOWNLOADS-MODAL-DIALOG' : 'DOWNLOADS-BYPASS-WARNING-CONFIRMATION-DIALOG'}'` :
+          scheme === 'edge' ? "node.tagName==='DOWNLOAD-ITEM'&&node.id===" + JSON.stringify(value) : "node.tagName==='DOWNLOADS-ITEM'&&node.data?.id===" + JSON.stringify(value);
+        point = await evaluate(`(()=>{function find(root){for(const node of root.querySelectorAll('*')){if(${match})return node;if(node.shadowRoot){const found=find(node.shadowRoot);if(found)return found}}}const item=find(document);const link=item?.shadowRoot?.querySelector(${JSON.stringify(selector)});if(!link||link.disabled)return null;link.scrollIntoView({block:'center'});const r=link.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2,width:r.width,height:r.height}})()`);
         if (point?.width && point?.height) break;
         await new Promise(resolve => setTimeout(resolve, 100));
       }
@@ -69,12 +74,20 @@ if (action === 'close') {
       }
     }
     if (action === 'download') {
-      const behavior = await browser.call('Browser.setDownloadBehavior', {behavior: 'allow', downloadPath, eventsEnabled: true});
-      if (behavior.error) throw new Error(JSON.stringify(behavior));
-      result = await evaluate('document.querySelector("a#download").click(); true');
+      const point = await evaluate('(()=>{const r=document.querySelector("a#download").getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2}})()');
+      for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) {
+        const reply = await client.call('Input.dispatchMouseEvent', {type,...point,button:'left',clickCount:1});
+        if (reply.error) throw new Error(JSON.stringify(reply));
+      }
+      result = true;
     } else if (action === 'downloads') {
-      result = await evaluate(`(()=>{const manager=document.querySelector('downloads-manager');const items=manager?.items_??manager?.items;return {items:items?.map(item=>({id:item.id,fileName:item.fileName,filePath:item.filePath,state:item.state,isDangerous:item.isDangerous,isInsecure:item.isInsecure,dangerType:item.dangerType,url:item.url}))??[]}})()`);
+      result = scheme === 'edge' ? await evaluate(`(()=>{const items=[];function walk(root){for(const node of root.querySelectorAll('*')){if(node.tagName==='DOWNLOAD-ITEM'){const icon=node.icon??node._icon;const path=icon?.startsWith('edge://fileicon/')?new URL(icon).searchParams.get('path'):null;items.push({id:node.id,fileName:path?path.replace(/^.*[\\\\/]/,''):node.title?.match(/^.*?\\.crx/)?.[0],filePath:path,state:node.state,isDangerous:node.state?.startsWith('dangerous')})}if(node.shadowRoot)walk(node.shadowRoot)}}walk(document);return{items}})()`) :
+        await evaluate(`(()=>{const manager=document.querySelector('downloads-manager');const items=manager?.items_??manager?.items;return {items:items?.map(item=>({id:item.id,fileName:item.fileName,filePath:item.filePath,state:item.state,isDangerous:item.isDangerous,isInsecure:item.isInsecure,dangerType:item.dangerType,url:item.url}))??[]}})()`);
     } else if (action === 'keep') {
+      if (scheme === 'edge') {
+        await clickControl('[data-action="keepDangerous"]');
+        result = true;
+      } else {
       await clickControl('#more-actions');
       await clickControl('#save-dangerous');
       let saved = false;
@@ -86,10 +99,11 @@ if (action === 'close') {
       }
       if (!saved) throw new Error('Download warning was not confirmed');
       result = true;
+      }
     } else if (action === 'open') {
       // Downloads checks real input interaction separately from V8's gesture
       // flag. Dispatch a click to the actual file link in this browser page.
-      await clickControl('#fileLink');
+      await clickControl(scheme === 'edge' ? '[data-action="openFile"],[data-action="open"]' : '#fileLink');
       result = true;
     } else if (action === 'probe') {
       result = true;

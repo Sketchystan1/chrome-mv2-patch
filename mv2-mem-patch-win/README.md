@@ -4,6 +4,14 @@ Version **2.0.0**. A native `secur32.dll` for Windows x64, x86 and ARM64. It
 patches recognized Chrome/Chromium MV2 decisions and optional off-store extension
 and CRX installation checks in memory. Edge uses separate installer checks.
 
+The user reports that installed Edge SxS Canary 160.0.4415.0 x64 works with
+uBlock Origin 1.76.4. Edge Stable ARM64 passed the seven-phase lifecycle. The
+latest extracted-copy Edge Beta/Canary ARM64 tests read stock gate bytes; their
+verified payloads lack the installed top-level `Application/msedge.exe`, so the
+separate direct DLL-only check reports `not_tested`. Installed Beta/Canary
+support remains unresolved. See
+[PERFORMANCE.md](PERFORMANCE.md#edge-beta-and-canary-arm64-follow-up).
+
 Browser files on disk stay unchanged. Close the browser and remove the added DLL
 to restore its original checks on the next launch. Support depends on recognizing
 the browser's code; future versions can change those checks or remove MV2 entirely.
@@ -262,19 +270,35 @@ artifacts; a new DLL or browser build needs fresh validation.
 | Recorded browser | Verified behavior |
 | --- | --- |
 | Chrome 157.0.8103.79 x64 | Packed external MV2 enablement, request blocking, cached/empty-cache restarts and removal. |
-| Chrome Stable 158.0.8127.37 x64/x86 | Signed CRX3 installation and MV2 lifecycle; x86 requires the November 18 discovery fix. |
+| Chrome Stable 158.0.8127.37 x64/x86/ARM64 | Signed CRX3 installation and MV2 lifecycle; x86 requires the November 18 discovery fix. |
 | Chrome Beta 159.0.8154.6 x86 | Signed CRX3 installation and MV2 lifecycle. |
+| Chrome Beta 159.0.8154.13 ARM64 | Signed CRX3 installation and MV2 lifecycle on native Windows ARM64 CI. |
 | Chrome Dev 160.0.8157.0 x86 | Signed CRX3 installation and MV2 lifecycle. |
 | Chrome Canary 160.0.8168.0 x64/x86 | Signed CRX3 installation and MV2 lifecycle. |
+| Chrome Canary 160.0.8171.0 ARM64 | Signed CRX3 installation and MV2 lifecycle on native Windows ARM64 CI. |
 | Chrome Canary 160.0.8166.2 x86 | Signed CRX3 installation and MV2 lifecycle. |
 | Chrome Canary 160.0.8167.0 x86 | External MV2 lifecycle; the tested DLL did not recognize the CRX download check. |
 | Edge 157.0.4341.46 x64 | Signed CRX3 installation, MV2 execution, restart and removal; tampered packages and missing developer proofs rejected. |
+| Edge Stable/Beta/Canary ARM64, initial November 19 CI | Scanner declined before the architecture fixes. |
+
+The November 20 frozen matrix passed all nine Chrome cells and Edge Stable across
+all three architectures using `secur32.dll` alone. Native tests passed 20/20 x64,
+18/18 x86 and 17/17 ARM64. Edge Stable ARM64's follow-up seven-phase lifecycle
+passed. Newer Canary 160.0.8172.1 ARM64 was separately rejected because its
+candidate layouts were unsupported; 160.0.8173.0 remains unvalidated. Exact
+identities and limits are in [PERFORMANCE.md](PERFORMANCE.md#final-recorded-dll-only-matrix-november-20-2026).
+
+Edge Beta/Canary ARM64 remains unresolved: current verified package extractions
+lack the installed Application entrypoint, and the isolated CRX harness uses a
+test-only registry shim. It preserves hard memory and signature checks but does
+not establish DLL-only loading in the installed launch context. See
+[PERFORMANCE.md](PERFORMANCE.md#edge-beta-and-canary-arm64-follow-up).
 
 Chrome CRX lifecycle runs include native confirmation, tampered-signature and
 missing-developer-proof rejection, MV3 controls, both restart types and removal.
 The November 18 x86 Stable/Beta/Dev/Canary validation passed **28/28 browser
 phases and 18/18 native tests** with the identical corrected DLL.
+The November 19 ARM64 Stable/Beta/Canary validation passed **21/21 Chrome browser
+phases and 17/17 native tests** with an identical ARM64 DLL.
 Earlier intermittent startup failures remain unexplained in the validation
-record. ARM64 has scanner/fixture and cross-build evidence only; native browser
-execution, browser updates, broader interactive browsing and DRM remain
-unvalidated.
+record. Browser updates, broader interactive browsing and DRM remain unvalidated.

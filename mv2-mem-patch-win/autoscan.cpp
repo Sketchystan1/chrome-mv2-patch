@@ -31,6 +31,177 @@ bool prefilter(const PeImage& pe, Head head, Range range, bool* complete = nullp
   }
   return (constants & 28) == 28 && (bit || (constants & 3) == 3);
 }
+#if defined(AUTOSCAN_ARM64)
+int directTarget(uint32_t word, uint32_t pc, uint32_t& target) {
+  int32_t relative;
+  if ((word & 0x7c000000) == 0x14000000) relative = static_cast<int32_t>(word << 6) >> 6;
+  else if ((word & 0xff000000) == 0x54000000 || (word & 0x7e000000) == 0x34000000)
+    relative = static_cast<int32_t>(word << 8) >> 13;
+  else if ((word & 0x7e000000) == 0x36000000) relative = static_cast<int32_t>(word << 13) >> 18;
+  else return 0;
+  return RelativeTarget(pc, 0, int64_t{relative} * 4, target) ? 1 : -1;
+}
+struct AstFlow {
+  Range literal{}, origin{}, prefix{}, loop{};
+  uint32_t guardedBy = 0, reentry = 0;
+};
+bool unrelocated(const PeImage& pe, Range table) {
+  const auto& directory = pe.directory(IMAGE_DIRECTORY_ENTRY_BASERELOC);
+  if (!directory.Size) return true;
+  auto bytes = pe.at(directory.VirtualAddress, directory.Size);
+  if (bytes.size() != directory.Size) return false;
+  for (size_t at = 0; at < bytes.size();) {
+    if (bytes.size() - at < 8) return false;
+    auto block = ReadInsn<IMAGE_BASE_RELOCATION>(bytes.data() + at);
+    if (block.SizeOfBlock < 8 || block.SizeOfBlock > bytes.size() - at || (block.SizeOfBlock & 1) ||
+        (block.VirtualAddress & 4095) || block.VirtualAddress >= pe.imageSize) return false;
+    for (unsigned n = 8; n < block.SizeOfBlock; n += 2) {
+      uint16_t entry = ReadInsn<uint16_t>(bytes.data() + at + n);
+      unsigned type = entry >> 12;
+      if (type == IMAGE_REL_BASED_ABSOLUTE) continue;
+      unsigned width = type == IMAGE_REL_BASED_DIR64 ? 8 : type == IMAGE_REL_BASED_HIGHLOW ? 4 : 0;
+      uint64_t address = uint64_t{block.VirtualAddress} + (entry & 4095);
+      if (!width || address >= pe.imageSize || width > pe.imageSize - address) return false;
+      if (address < pe.headersSize ||
+          (address < uint64_t{directory.VirtualAddress} + directory.Size && address + width > directory.VirtualAddress)) return false;
+      // The incoming-edge proof uses stock instructions, including their preceding terminators.
+      for (const auto& section : pe.sections()) if ((section.flags & IMAGE_SCN_MEM_EXECUTE) &&
+          address < uint64_t{section.rva} + section.virtualSize && address + width > section.rva) return false;
+      if (address < table.end && address + width > table.begin) return false;
+    }
+    at += block.SizeOfBlock;
+  }
+  return true;
+}
+bool readonlySwitch(const PeImage& pe, Range bounds, uint32_t pc, AstFlow& flow) {
+  if (pc - bounds.begin < 32) return false;
+  auto word = [&](uint32_t at) { return ReadInsn<uint32_t>(pe.at(at, 4).data()); };
+  unsigned destination = (word(pc) >> 5) & 31;
+  uint32_t add = word(pc - 4), load = word(pc - 8), adr = word(pc - 12), mask = word(pc - 16);
+  unsigned offset = load & 31, tableReg = (load >> 5) & 31, index = (load >> 16) & 31;
+  if (destination == 31 || offset == 31 || tableReg == 31 || index == 31 ||
+      destination == offset || destination == tableReg || destination == index || index == tableReg || offset == tableReg ||
+      (add & 0xffe0fc00) != 0x8b000000 || (add & 31) != destination ||
+      ((add >> 5) & 31) != destination || ((add >> 16) & 31) != offset ||
+      (load & 0xffe0fc00) != 0xb8a07800 || (adr & 0x9f000000) != 0x10000000 ||
+      (adr & 31) != destination || (mask & 0xfffffc00) != 0x92401400 || (mask & 31) != index) return false;
+  auto compare = Lift(pe.at(pc - 24, 4), pc - 24);
+  auto tagLoad = Lift(pe.at(pc - 32, 4), pc - 32);
+  uint32_t mask32 = word(pc - 28);
+  if ((word(pc - 20) & 0xff00001f) != 0x54000008 || compare.op != Op::CmpImm ||
+      compare.width() != 4 || compare.dst != index || compare.imm != 59 ||
+      (mask32 & 0xfffffc00) != 0x12001400 || (mask32 & 1023) != (mask & 1023) ||
+      tagLoad.op != Op::LoadField || tagLoad.width() != 4 || tagLoad.disp != 4 ||
+      tagLoad.dst != ((mask32 >> 5) & 31) || tagLoad.dst == tableReg || tagLoad.src == tableReg ||
+      tagLoad.src == 31 || (tagLoad.detail & 0x800)) return false;
+  uint32_t table = 0, initialized = 0; int64_t adjustment = 0;
+  for (uint32_t at = pc - 36, steps = 0; at >= bounds.begin && steps < 32; at -= 4, ++steps) {
+    auto i = Lift(pe.at(at, 4), at);
+    if (Terminal(i) || i.conditional() || i.op == Op::Jmp ||
+        (i.op == Op::Other && i.other() == Other::Call)) return false;
+    if (!Writes(i, tableReg)) continue;
+    if (i.op == Op::AddImm && i.width() == 8 && i.dst == tableReg && i.src == tableReg && i.imm >= 0 && i.imm < 4096) {
+      adjustment += i.imm; continue;
+    }
+    uint32_t address = word(at);
+    if ((address & 0x1f000000) != 0x10000000 || (address & 31) != tableReg) return false;
+    int32_t relative = static_cast<int32_t>((((address >> 3) & 0x1ffffc) | ((address >> 29) & 3)) << 11) >> 11;
+    bool page = address & 0x80000000;
+    if (!RelativeTarget(page ? at & ~4095u : at, 0, int64_t{relative} * (page ? 4096 : 1) + adjustment, table)) return false;
+    initialized = at; break;
+  }
+  if (!initialized || !(pe.rdata.flags & IMAGE_SCN_MEM_READ) || (pe.rdata.flags & IMAGE_SCN_MEM_WRITE) ||
+      !pe.rdata.contains(table, 60 * 4)) return false;
+  int32_t relative = static_cast<int32_t>((((adr >> 3) & 0x1ffffc) | ((adr >> 29) & 3)) << 11) >> 11;
+  uint32_t anchor = 0;
+  if (!RelativeTarget(pc - 12, 0, relative, anchor)) return false;
+  flow.prefix = {initialized + 4, pc + 4}; flow.reentry = pc - 32;
+  std::array<uint32_t, 60> targets{};
+  for (unsigned n = 0; n < targets.size(); ++n) {
+    int32_t displacement = 0;
+    if (!pe.rvaRead(table + n * 4, displacement) || !RelativeTarget(anchor, 0, displacement, targets[n]) ||
+        (targets[n] & 3) || !bounds.contains(targets[n]) || flow.prefix.contains(targets[n]) ||
+        flow.literal.contains(targets[n]) || flow.origin.contains(targets[n])) return false;
+  }
+  // A table case may revisit the tag load, but it must preserve the table register on every path.
+  for (uint32_t at = bounds.begin; at < bounds.end; at += 4) {
+    uint32_t target = 0;
+    if (directTarget(word(at), at, target) != 1 || target != flow.reentry) continue;
+    uint32_t start = 0;
+    for (auto entry : targets) if (entry <= at && entry > start) start = entry;
+    if (!start || at - start > 124 || start == bounds.begin) return false;
+    auto before = Lift(pe.at(start - 4, 4), start - 4);
+    if (!Terminal(before) && before.op != Op::Jmp) return false;
+    Range loop{start, at + 4};
+    if (flow.loop && (flow.loop.begin != loop.begin || flow.loop.end != loop.end)) return false;
+    for (uint32_t point = start; point <= at; point += 4) {
+      auto i = Lift(pe.at(point, 4), point);
+      if (!i.length() || Writes(i, tableReg) ||
+          (i.op == Op::Other && i.other() == Other::Call && VolatileReg(tableReg))) return false;
+      if (point != at && Terminal(i)) return false;
+      uint32_t next = 0; int direct = directTarget(word(point), point, next);
+      bool call = i.op == Op::Other && i.other() == Other::Call;
+      if (call && direct == 1 && bounds.contains(next) && next != bounds.begin) return false;
+      if ((word(point) & 0xfe000000) == 0xd6000000 && !call) return false;
+    }
+    flow.loop = loop;
+  }
+  for (auto target : targets) if (flow.loop.contains(target) && target != flow.loop.begin) return false;
+  return unrelocated(pe, {table, table + 60 * 4});
+}
+bool astLiteralInput(const PeImage& pe, Range bounds, uint32_t cp, uint32_t jumpPc, unsigned reg) {
+  if (!bounds || ((bounds.begin | bounds.end | cp | jumpPc) & 3) ||
+      !bounds.contains(cp) || !bounds.contains(jumpPc) || bounds.end - bounds.begin > 262144 ||
+      pe.at(bounds.begin, bounds.end - bounds.begin).size() != bounds.end - bounds.begin) return false;
+  uint32_t writer = 0; unsigned flags = 0;
+  for (unsigned back = 4; back <= 16 && back <= cp - bounds.begin; back += 4) {
+    uint32_t at = cp - back; auto previous = Lift(pe.at(at, 4), at);
+    if (Terminal(previous) || previous.conditional() || previous.op == Op::Jmp ||
+        (previous.op == Op::Other && previous.other() == Other::Call)) return false;
+    if (!Writes(previous, reg)) continue;
+    uint32_t word = ReadInsn<uint32_t>(pe.at(at, 4).data());
+    if ((word & 0xfffffc00) != 0x53072800 || (word & 31) != reg) return false;
+    writer = at; flags = (word >> 5) & 31; break;
+  }
+  if (!writer || writer == bounds.begin || flags == 31) return false;
+  auto before = Lift(pe.at(writer - 4, 4), writer - 4);
+  if (!Terminal(before) && before.op != Op::Jmp) return false;
+  AstFlow flow; flow.literal = {writer, jumpPc + 4};
+  for (uint32_t at = bounds.begin + 16; at < bounds.end; at += 4) {
+    uint32_t branch = ReadInsn<uint32_t>(pe.at(at, 4).data()), target = 0;
+    if (directTarget(branch, at, target) != 1 || target != writer) continue;
+    if (flow.guardedBy || (branch & 0xff00001f) != 0x54000000) return false;
+    auto compare = Lift(pe.at(at - 4, 4), at - 4);
+    uint32_t mask = ReadInsn<uint32_t>(pe.at(at - 8, 4).data());
+    auto packed = Lift(pe.at(at - 12, 4), at - 12), node = Lift(pe.at(at - 16, 4), at - 16);
+    if (compare.op != Op::CmpImm || compare.width() != 4 || compare.imm != 45 || compare.dst == flags ||
+        (mask & 0xfffffc00) != 0x12001400 || (mask & 31) != compare.dst || ((mask >> 5) & 31) != flags ||
+        packed.op != Op::LoadField || packed.width() != 4 || packed.dst != flags || packed.disp != 4 ||
+        node.op != Op::LoadField || node.width() != 8 || node.dst != packed.src || node.disp != 8 ||
+        (packed.detail & 0x800) || (node.detail & 0x800)) return false;
+    flow.guardedBy = at; flow.origin = {at - 12, at + 4};
+  }
+  if (!flow.guardedBy) return false;
+  // shortcut: this reviewed AST family has one 60-case switch and one short preserving loop; other shapes remain unresolved.
+  for (uint32_t at = bounds.begin; at < bounds.end; at += 4) {
+    uint32_t word = ReadInsn<uint32_t>(pe.at(at, 4).data());
+    if ((word & 0xfe000000) != 0xd6000000) continue;
+    if (word == 0xd65f03c0 || (word & 0xfffffc1f) == 0xd63f0000) continue;
+    if ((word & 0xfffffc1f) != 0xd61f0000 || flow.prefix || !readonlySwitch(pe, bounds, at, flow)) return false;
+  }
+  if (!flow.prefix) return false;
+  for (const auto& section : pe.sections()) if (section.flags & IMAGE_SCN_MEM_EXECUTE)
+    for (uint32_t offset = (4 - (section.rva & 3)) & 3; offset <= section.rawSize && section.rawSize - offset >= 4; offset += 4) {
+      uint32_t at = section.rva + offset, target = 0;
+      if (directTarget(ReadInsn<uint32_t>(pe.bytes().data() + section.raw + offset), at, target) != 1) continue;
+      if (flow.literal.contains(target) && !(target == writer && at == flow.guardedBy)) return false;
+      if (flow.origin.contains(target)) return false;
+      if (flow.prefix.contains(target) && !(target == flow.reentry && flow.loop.contains(at))) return false;
+      if (flow.loop.contains(target) && !flow.loop.contains(at)) return false;
+    }
+  return true;
+}
+#endif
 bool makePatch(const PeImage& pe, Gate& gate, bool inverted) {
   // Describe a change to the browser's existing branch, keeping its original bytes for validation and rollback.
   auto jump = Lift(pe.code(gate.rva), gate.rva);
@@ -43,7 +214,7 @@ bool makePatch(const PeImage& pe, Gate& gate, bool inverted) {
   uint32_t word = inverted ? 0xd503201f : (ReadInsn<uint32_t>(gate.stock.data()) & ~15u) | 14;
   if (gate.optional == InstallVerifier) {
     gate.kind = 5;
-    word = 0x14000000 | ((static_cast<int64_t>(jump.target()) - gate.rva) / 4 & 0x03ffffff);
+    word = inverted ? 0xd503201f : 0x14000000 | ((static_cast<int64_t>(jump.target()) - gate.rva) / 4 & 0x03ffffff);
   }
   std::memcpy(gate.patch.data(), &word, 4);
 #else
@@ -186,7 +357,7 @@ bool references(const PeImage& pe, uint32_t literal, FixedList<uint32_t, 64>& fo
 bool providerProgram(const PeImage& pe, const Boundaries& boundaries, Program& program, Range range) {
   if (!program.build(pe, range)) return false;
   if (!pe.isEdge()) return true;
-  // shortcut: merge forward x64 cold blocks only; extend with ownership tests if Edge moves them before the provider.
+  // Chained unwind records prove ownership even when cold blocks precede the entry.
   for (unsigned pass = 0; pass < 4; ++pass) {
     FixedList<uint32_t, 16> entries;
     for (const auto& n : program.nodes) {
@@ -199,7 +370,7 @@ bool providerProgram(const PeImage& pe, const Boundaries& boundaries, Program& p
     for (auto pc : entries) {
       auto body = boundaries.find(pc, true);
       Program cold;
-      if (pc < range.begin || !cold.build(pe, {pc, body.end})) return false;
+      if (!body || !cold.build(pe, {pc, body.end})) return false;
       for (const auto& n : cold.nodes) {
         bool present = false;
         for (const auto& old : program.nodes) if (n.pc < old.pc + old.insn.length() && old.pc < n.pc + n.insn.length()) {
@@ -215,39 +386,50 @@ bool providerProgram(const PeImage& pe, const Boundaries& boundaries, Program& p
   }
   return false;
 }
+#endif
 bool trueReturn(const PeImage& pe, const Boundaries& boundaries, uint32_t pc, uint32_t function) {
-  if (!boundaries.chainedTo(pc, function)) return false;
+  auto owned = [&](uint32_t at) {
+#if defined(AUTOSCAN_X64)
+    return boundaries.chainedTo(at, function);
+#else
+    return boundaries.find(function).contains(at);
+#endif
+  };
+  if (!owned(pc)) return false;
   auto i = Lift(pe.code(pc), pc);
   if (i.op != Op::MovReg || i.dst != 0 || i.src != NoReg || i.imm != 1 || i.detail || (i.width() != 1 && i.width() != 4)) return false;
   for (unsigned steps = 0; steps < 8; ++steps) {
     pc += i.length(); i = Lift(pe.code(pc), pc);
-    if (!i.length() || !boundaries.chainedTo(pc, function)) return false;
+    if (!i.length() || !owned(pc)) return false;
     if (i.op == Op::Ret) return true;
+#if defined(AUTOSCAN_ARM64)
+    if (i.op == Op::Other && i.other() == Other::PairLoad && i.width() == 8 && i.src == StackReg &&
+        i.dst != 0 && i.imm != 0) continue;
+    if (i.op == Op::LoadField && i.width() == 8 && i.src == StackReg && i.dst != 0) continue;
+#endif
     if ((i.op != Op::AddImm || i.dst != StackReg || i.src != StackReg || i.imm <= 0) &&
         (i.op != Op::Other || i.other() != Other::Pop || i.dst == StackReg || i.dst == 0)) return false;
   }
   return false;
 }
-#endif
 
 #if defined(AUTOSCAN_X86)
-bool providerStackArgument(const PeImage& pe, const Program& program, uint32_t pc, unsigned reg) {
+bool providerInputSlot(const PeImage& pe, const Program& program, uint32_t pc, unsigned base, int32_t displacement, int32_t slot) {
   // DCHECK providers reload their Extension* parameter after calls. Require a
   // fixed EBP frame, an exact input-slot load, and untouched/unexposed inputs on
   // every incoming path; arbitrary writes and hidden frame aliases still decline.
-  const auto* load = program.predecessor(pc);
   const auto* push = program.at(program.range.begin);
   const auto* frame = push ? program.at(push->pc + push->insn.length()) : nullptr;
   int64_t address = 0;
-  if (!load || load->insn.op != Op::LoadField || load->insn.width() != 4 || load->insn.dst != reg || load->insn.src != 5 ||
-      !push || push->insn.op != Op::Other || push->insn.other() != Other::Push || push->insn.dst != 5 ||
+  if (base != 5 || !push || push->insn.op != Op::Other || push->insn.other() != Other::Push || push->insn.memory() ||
+      push->insn.width() != 4 || push->insn.dst != 5 ||
       !frame || frame->insn.op != Op::MovReg || frame->insn.dst != 5 || frame->insn.src != StackReg || frame->insn.width() != 4 ||
-      !program.stackAddress(load->pc, 5, address, true) || address + load->insn.disp != 4) return false;
+      !program.stackAddress(pc, 5, address, true) || address + displacement != slot) return false;
   uint32_t cookie = 0;
   const auto& config = pe.directory(IMAGE_DIRECTORY_ENTRY_LOAD_CONFIG);
   constexpr uint32_t cookieOffset = offsetof(IMAGE_LOAD_CONFIG_DIRECTORY32, SecurityCookie);
   if (config.Size >= cookieOffset + 4) pe.rvaRead(config.VirtualAddress + cookieOffset, cookie);
-  FixedList<uint32_t, 512> todo, seen; todo.push_back(load->pc); bool entry = false;
+  FixedList<uint32_t, 512> todo, seen; todo.push_back(pc); bool entry = false;
   while (!todo.empty()) {
     auto at = todo.back(); --todo.count;
     if (at == program.range.begin) { entry = true; continue; }
@@ -294,6 +476,32 @@ bool providerStackArgument(const PeImage& pe, const Program& program, uint32_t p
   }
   return entry;
 }
+bool providerStackArgument(const PeImage& pe, const Program& program, uint32_t pc, unsigned reg, int32_t slot = 4) {
+  if (reg >= 32) return false;
+  struct Point { uint32_t pc; unsigned reg; };
+  FixedList<Point, 256> todo, seen; todo.push_back({pc, reg}); bool input = false;
+  while (!todo.empty()) {
+    auto point = todo.back(); --todo.count;
+    bool repeat = false; for (auto old : seen) repeat |= old.pc == point.pc && old.reg == point.reg;
+    if (repeat) continue;
+    if (point.pc == program.range.begin || !seen.push_back(point)) return false;
+    bool previous = false;
+    for (const auto& n : program.nodes) if (program.follows(n, point.pc)) {
+      previous = true; const auto& i = n.insn; unsigned source = point.reg;
+      if (i.op == Op::Other && i.other() == Other::Call && VolatileReg(source)) return false;
+      if (Writes(i, source)) {
+        if (i.op == Op::LoadField && i.width() == 4 && providerInputSlot(pe, program, n.pc, i.src, i.disp, slot)) {
+          input = true; continue;
+        }
+        if (i.op != Op::MovReg || i.width() != 4 || i.src >= 32) return false;
+        source = i.src;
+      }
+      if (!todo.push_back({n.pc, source})) return false;
+    }
+    if (!previous) return false;
+  }
+  return input;
+}
 #endif
 
 void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& program, const std::array<int64_t, 5>& layout, Report& report, RefBatch& batch) {
@@ -332,6 +540,8 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
     if (!bounded) { report.installVerifier = "unbounded provider vtable"; return; }
   }
   FixedList<Gate, 16> candidates;
+  constexpr unsigned reasonArgument = sizeof(void*) == 4 ? NoReg : StackReg == 31 ? 2 : 8;
+  constexpr int32_t reasonSlot = sizeof(void*) == 4 ? 8 : 0;
   struct ProviderCall { uint32_t target; Gate gate; };
   FixedList<ProviderCall, 16> helpers;
   for (auto start : methods) {
@@ -347,19 +557,39 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
       const auto& i = n.insn;
       if (i.op != Op::Other || i.other() != Other::Store || i.width() != 4 || (i.detail & 0x400)) continue;
       auto value = i.src == NoReg ? SymVal::constant(static_cast<uint32_t>(i.imm)) : program.constantBefore(pe, n.pc, i.src);
-      reason |= value.kind == SymKind::Const && value.value == 0x100 &&
-        (!pe.isEdge() || program.fromArgument(n.pc, i.dst, 8));
+      if (value.kind != SymKind::Const || value.value != 0x100) continue;
+      bool output = program.fromArgument(n.pc, i.dst, reasonArgument, reasonSlot);
+#if defined(AUTOSCAN_X86)
+      output |= pe.isEdge() && providerStackArgument(pe, program, n.pc, i.dst, 8);
+#endif
+      reason |= !pe.isEdge() || output;
     }
     if (!reason) continue;
-#if defined(AUTOSCAN_X64)
     if (pe.isEdge()) for (const auto& n : program.nodes) {
       const auto& call = n.insn;
-      if (call.op != Op::Other || call.other() != Other::Call || !call.target() || !program.fromArgument(n.pc, 1, 2)) continue;
+      if (call.op != Op::Other || call.other() != Other::Call || !call.target()) continue;
       const auto* test = program.at(n.pc + call.length());
+#if defined(AUTOSCAN_ARM64)
+      if (!program.fromArgument(n.pc, 0, 1) || !test || test->insn.other() != Other::RegisterBranch ||
+          test->insn.src != 0 || test->insn.disp != 1 || test->insn.width() != 4) continue;
+      const auto* jump = test;
+#else
+#if defined(AUTOSCAN_X86)
+      const auto* argument = program.predecessor(n.pc);
+      if (!argument || argument->insn.op != Op::Other || argument->insn.other() != Other::Push) continue;
+      const auto& push = argument->insn;
+      bool extension = push.memory() ? providerInputSlot(pe, program, argument->pc, push.dst, push.disp, 4) :
+        program.fromArgument(argument->pc, push.dst, NoReg, 4) || providerStackArgument(pe, program, argument->pc, push.dst);
+      if (!extension || !test || test->insn.op != Op::AddImm || test->insn.dst != StackReg || test->insn.imm != 8) continue;
+      test = program.at(test->pc + test->insn.length());
+#else
+      if (!program.fromArgument(n.pc, 1, 2)) continue;
+#endif
       const auto* jump = test ? program.at(test->pc + test->insn.length()) : nullptr;
       if (!test || test->insn.op != Op::Other || test->insn.other() != Other::TestReg || test->insn.memory() ||
-          test->insn.width() != 1 || test->insn.dst != 0 || test->insn.src != 0 || !jump || !jump->insn.conditional() ||
-          (jump->insn.condition() != 4 && jump->insn.condition() != 5)) continue;
+          test->insn.width() != 1 || test->insn.dst != 0 || test->insn.src != 0) continue;
+#endif
+      if (!jump || !jump->insn.conditional() || (jump->insn.condition() != 4 && jump->insn.condition() != 5)) continue;
       bool zero = jump->insn.condition() == 4;
       Gate gate; gate.compare = test->pc; gate.rva = jump->pc; gate.function = range.begin;
       gate.affected = zero ? jump->insn.target() : jump->pc + jump->insn.length();
@@ -367,7 +597,6 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
       bool seen = false; for (const auto& old : helpers) seen |= old.gate.rva == gate.rva;
       if (!seen && (!makePatch(pe, gate, zero) || !helpers.push_back({call.target(), gate}))) { report.installVerifier = "too many provider helpers"; return; }
     }
-#endif
     for (const auto& n : program.nodes) {
       const auto& test = n.insn;
       const auto* decision = program.at(n.pc + test.length());
@@ -419,7 +648,6 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
       if (!makePatch(pe, gate, false) || !candidates.push_back(gate)) { report.installVerifier = "too many provider candidates"; return; }
     }
   }
-#if defined(AUTOSCAN_X64)
   // Reuse the caller's Program for helpers to keep analysis within its bounded stack reserve.
   for (const auto& helper : helpers) {
     auto body = boundaries.find(helper.target);
@@ -427,15 +655,19 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
     for (const auto& node : program.nodes) {
       const auto& test = node.insn;
       const auto* jump = program.at(node.pc + test.length());
+#if defined(AUTOSCAN_ARM64)
+      if (test.op != Op::LoadField || test.width() != 1 || !program.fromArgument(node.pc, test.src, 0) ||
+          !jump || jump->insn.other() != Other::RegisterBranch || jump->insn.src != test.dst || jump->insn.disp != 4) continue;
+#else
       if (test.op != Op::Other || test.other() != Other::TestImm || !test.memory() || test.width() != 1 || test.imm != 8 ||
-          !program.fromArgument(node.pc, test.dst, 1) || !jump || !jump->insn.conditional() || jump->insn.condition() != 5 ||
-          !trueReturn(pe, boundaries, jump->insn.target(), body.begin)) continue;
+          !program.fromArgument(node.pc, test.dst, sizeof(void*) == 4 ? NoReg : 1, sizeof(void*) == 4 ? 4 : 0)) continue;
+#endif
+      if (!jump || !jump->insn.conditional() || jump->insn.condition() != 5 || !trueReturn(pe, boundaries, jump->insn.target(), body.begin)) continue;
       // Change only the "must remain disabled" decision; the shared store check also controls content verification.
       bool seen = false; for (const auto& old : candidates) seen |= old.rva == helper.gate.rva;
       if (!seen && !candidates.push_back(helper.gate)) { report.installVerifier = "too many provider candidates"; return; }
     }
   }
-#endif
   report.installVerifier = candidates.empty() ? "no recognized provider gate" : candidates.size() == 1 ? "structurally verified provider gate" : "ambiguous provider gates";
   if (candidates.size() == 1) report.gates.push_back(candidates.front());
 }
@@ -443,11 +675,21 @@ void installVerifier(const PeImage& pe, const Boundaries& boundaries, Program& p
 #if defined(AUTOSCAN_X86)
 bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Program& program,
                    uint32_t from, uint32_t to, int32_t slot) {
+  Program calleeProgram;
   auto cleanup = [&](auto&& self, uint32_t target, unsigned depth, int32_t& pop) -> bool {
     if (!target || depth == 4) return false;
     auto range = boundaries.find(target);
-    if (!range || range.begin != target) return false;
-    // Larger helpers still need a complete, bounded walk of every returning path.
+    if (!range) return false;
+    if (range.begin != target) {
+      auto push = Lift(pe.code(target), target);
+      auto frame = Lift(pe.code(target + push.length()), target + push.length());
+      if (push.op != Op::Other || push.other() != Other::Push || push.memory() || push.width() != 4 || push.dst != 5 ||
+          frame.op != Op::MovReg || frame.width() != 4 || frame.dst != 5 || frame.src != StackReg) return false;
+      range.begin = target;
+    }
+    if (!calleeProgram.build(pe, range)) return false;
+    auto noReturns = calleeProgram.noReturns;
+    // Reuse one Program across recursion; each caller keeps only its proved non-returning calls.
     FixedList<uint32_t, 4096> todo, seen; todo.push_back(target); bool found = false;
     auto accept = [&](int32_t value) { if (found && value != pop) return false; found = true; pop = value; return true; };
     while (!todo.empty()) {
@@ -469,6 +711,8 @@ bool downloadFrame(const PeImage& pe, const Boundaries& boundaries, const Progra
       if (!i.length()) return false;
       if (i.op == Op::Ret) { if (!accept(i.imm)) return false; continue; }
       if (Terminal(i)) continue;
+      bool noReturn = false; for (auto call : noReturns) noReturn |= call == pc;
+      if (noReturn) continue;
       if ((i.conditional() || i.op == Op::Jmp) && !todo.push_back(i.target())) return false;
       if (i.op != Op::Jmp && !todo.push_back(pc + i.length())) return false;
     }
@@ -594,6 +838,96 @@ bool externalVerifierZero(const PeImage& pe, const Boundaries& boundaries, uint3
   return ret.op == Op::Ret && (!framed || !ret.imm);
 }
 
+#if defined(AUTOSCAN_X86)
+bool framedProgram(const PeImage& pe, Program& program, Range& range, uint32_t reference) {
+  // CFG tables can group direct functions; advance only past a decoded return into a complete EBP prologue.
+  for (unsigned pass = 0; pass < 16; ++pass) {
+    if (!program.build(pe, range) || program.nodes.empty()) return false;
+    if (program.at(reference)) return true;
+    const auto& last = program.nodes.back();
+    uint32_t next = last.pc + last.insn.length();
+    if ((!Terminal(last.insn) && !program.isNoReturn(last.pc)) || next > reference || !range.contains(next)) return false;
+    auto push = Lift(pe.code(next), next), frame = Lift(pe.code(next + push.length()), next + push.length());
+    if (push.op != Op::Other || push.other() != Other::Push || push.memory() || push.width() != 4 || push.dst != 5 ||
+        frame.op != Op::MovReg || frame.width() != 4 || frame.dst != 5 || frame.src != StackReg) return false;
+    range.begin = next;
+  }
+  return false;
+}
+
+bool inlineFormat(const PeImage& pe, const Program& program, const Node& compare, const Node& jump, uint32_t literal) {
+  if (jump.insn.condition() != 5 || jump.insn.target() <= literal) return false;
+  auto flow = [&](uint32_t from, uint32_t to, unsigned reg, bool webstore) {
+    struct Point { uint32_t pc; int64_t value; };
+    FixedList<Point, 256> todo, seen; todo.push_back({from, 0}); bool reached = false, named = false;
+    while (!todo.empty()) {
+      auto point = todo.back(); --todo.count;
+      named |= point.pc == literal;
+      if (point.pc == to) {
+        if (webstore ? point.value != 1 && point.value != 2 : point.value != 0) return false;
+        reached = true; continue;
+      }
+      bool repeat = false; for (auto old : seen) repeat |= old.pc == point.pc && old.value == point.value;
+      if (repeat) continue;
+      const auto* node = program.at(point.pc);
+      if (!node || !seen.push_back(point)) return false;
+      const auto& i = node->insn;
+      if (Terminal(i) || (i.op == Op::Other && i.other() == Other::Unknown) ||
+          (i.op == Op::Other && i.other() == Other::Call && VolatileReg(reg))) return false;
+      if (Writes(i, reg)) {
+        if (!webstore || i.width() != 4) return false;
+        if (i.op == Op::MovReg && i.src == NoReg) point.value = i.imm;
+        else if (i.op == Op::Other && i.other() == Other::XorReg && !i.memory() && i.dst == i.src) point.value = 0;
+        else if (i.op == Op::AddImm && i.src == reg) point.value += i.imm;
+        else return false;
+        if (point.value < 0 || point.value > 2) return false;
+      }
+      if ((i.conditional() || i.op == Op::Jmp) && !todo.push_back({i.target(), point.value})) return false;
+      if (i.op != Op::Jmp && !todo.push_back({point.pc + i.length(), point.value})) return false;
+    }
+    return reached && (!webstore || named);
+  };
+  unsigned matches = 0;
+  for (const auto& node : program.nodes) {
+    const auto& store = node.insn;
+    if (node.pc < jump.insn.target() || store.op != Op::Other || store.other() != Other::Store ||
+        store.width() != 4 || (store.detail & 0x400) || store.src >= 8) continue;
+    auto value = program.constantBefore(pe, compare.pc, store.src); int64_t slot = 0;
+    if (value.kind != SymKind::Const || value.value || !program.stackAddress(node.pc, store.dst, slot, true) ||
+        store.disp < 0 || slot >= -4 || slot + store.disp + 4 > -4 ||
+        !flow(jump.pc + jump.insn.length(), jump.insn.target(), store.src, true) ||
+        !flow(jump.insn.target(), node.pc, store.src, false)) continue;
+    bool passed = false;
+    uint32_t at = node.pc + store.length();
+    for (unsigned steps = 0; steps < 32; ++steps) {
+      const auto* next = program.at(at); if (!next) break;
+      const auto& i = next->insn;
+      if (i.op == Op::Other && i.other() == Other::Push && !i.memory() && i.dst == store.dst) {
+        const auto* call = program.at(at + i.length());
+        passed = call && call->insn.op == Op::Other && call->insn.other() == Other::Call && call->insn.target() &&
+          program.fromArgument(call->pc, 1, 1);
+        break;
+      }
+      if (Terminal(i) || i.conditional() || i.op == Op::Jmp || Writes(i, store.dst) || Writes(i, StackReg) ||
+          (i.op == Op::Other && (i.other() == Other::Call || i.other() == Other::Unknown ||
+                               (i.other() == Other::Overwrite && i.memory())))) break;
+      bool write = i.op == Op::Other && (i.other() == Other::Store || i.other() == Other::AtomicAdd || (i.memory() &&
+        (i.other() == Other::AndReg || i.other() == Other::OrReg || i.other() == Other::XorReg ||
+         i.other() == Other::AndImm || i.other() == Other::OrImm)));
+      if (write) {
+        int64_t address = 0;
+        unsigned base = i.other() == Other::AtomicAdd ? i.src : i.dst;
+        if (!program.stackAddress(at, base, address, true) ||
+            (address + i.disp < slot + store.disp + 4 && address + i.disp + StoreWidth(i) > slot + store.disp)) break;
+      }
+      at += i.length();
+    }
+    matches += passed;
+  }
+  return matches == 1;
+}
+#endif
+
 void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& program, Report& report, RefBatch& batch) {
   // Recognize the optional CRX extension-package download decision without changing package verification or confirmation.
   auto data = pe.at(pe.rdata.rva, pe.rdata.size), code = pe.at(pe.text.rva, pe.text.size);
@@ -603,15 +937,30 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
   literal = batch.gallery;
   if (!literal) { report.crxDownload = "gallery switch absent"; return; }
   auto call = [](const Node* n) { return n && n->insn.op == Op::Other && n->insn.other() == Other::Call && n->insn.target(); };
+  auto destination = [&](const Node* n) {
+    for (unsigned steps = 0; n && steps < 8; ++steps) {
+      if (n->insn.op != Op::Jmp) return n;
+      n = program.at(n->insn.target());
+    }
+    return static_cast<const Node*>(nullptr);
+  };
   FixedList<uint32_t, 64> refs;
   if (!references(pe, literal, refs, batch)) { report.crxDownload = "too many gallery references"; return; }
   for (auto pc : refs) {
-    auto range = boundaries.find(pc);
-    if (!range || range.end - range.begin > 1024 || !program.build(pe, range) || !program.at(pc)) continue;
+    auto range = pe.isEdge() ? boundaries.primary(pc) : boundaries.find(pc);
+    if (!range || range.end - range.begin > 1024) continue;
+#if defined(AUTOSCAN_X64)
+    if (!providerProgram(pe, boundaries, program, range)) continue;
+#elif defined(AUTOSCAN_X86)
+    if (!framedProgram(pe, program, range, pc)) continue;
+#else
+    if (!program.build(pe, range)) continue;
+#endif
+    if (!program.at(pc)) continue;
     for (const auto& node : program.nodes) {
       const auto& cmp = node.insn;
       const auto* jump = program.at(node.pc + cmp.length());
-      if (!jump || !jump->insn.conditional() || jump->insn.condition() != 4) continue;
+      if (!jump || !jump->insn.conditional() || (jump->insn.condition() != 4 && jump->insn.condition() != 5)) continue;
 #if defined(AUTOSCAN_ARM64)
       if (cmp.op != Op::LoadField || cmp.width() != 4 || cmp.disp <= 0 ||
           jump->insn.other() != Other::RegisterBranch || jump->insn.disp || jump->insn.src != cmp.dst ||
@@ -620,8 +969,16 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
       if (cmp.op != Op::CmpImm || !cmp.memory() || cmp.width() != 4 || cmp.imm || cmp.disp <= 0 ||
           !program.fromArgument(node.pc, cmp.dst, argumentReg)) continue;
 #endif
-      const auto* external = program.at(jump->pc + jump->insn.length());
-      const auto* webstore = program.at(jump->insn.target());
+#if defined(AUTOSCAN_X86)
+      if (pe.isEdge() && inlineFormat(pe, program, node, *jump, pc)) {
+        if (installer && (installer != range.begin || reasonOffset != cmp.disp)) { report.crxDownload = "ambiguous CRX installers"; return; }
+        installer = range.begin; reasonOffset = cmp.disp;
+        continue;
+      }
+#endif
+      bool zero = jump->insn.condition() == 4;
+      const auto* external = destination(program.at(zero ? jump->pc + jump->insn.length() : jump->insn.target()));
+      const auto* webstore = destination(program.at(zero ? jump->insn.target() : jump->pc + jump->insn.length()));
       if (!call(external) || !call(webstore)) continue;
       uint32_t end = webstore->pc + webstore->insn.length();
       for (unsigned steps = 0; end < pc && steps < 3; ++steps) {
@@ -630,11 +987,17 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
         end += move->insn.length();
       }
       if (end != pc) continue;
-      const auto* join = program.at(external->pc + external->insn.length());
-      if (!join || join->insn.op != Op::Jmp || join->insn.target() <= pc || !range.contains(join->insn.target())) continue;
+      uint32_t joinPc = external->pc + external->insn.length();
+      const Node* bridge = zero ? program.at(joinPc) : nullptr;
+      if (!zero) for (const auto& n : program.nodes)
+        if (n.pc + n.insn.length() == external->pc && n.insn.op == Op::Jmp) bridge = &n;
+      if (!bridge || bridge->insn.op != Op::Jmp || bridge->insn.target() <= pc) continue;
+      if (zero) joinPc = bridge->insn.target();
+      else if (bridge->insn.target() != joinPc) continue;
+      if (!program.at(joinPc)) continue;
       if (!externalVerifierZero(pe, boundaries, external->insn.target())) continue;
       bool format = false;
-      for (uint32_t at = join->insn.target(), steps = 0; steps < 24; ++steps) {
+      for (uint32_t at = joinPc, steps = 0; steps < 24; ++steps) {
         const auto* next = program.at(at); if (!next) break;
         const auto& i = next->insn;
 #if defined(AUTOSCAN_X86)
@@ -668,28 +1031,28 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
     }
     if (Lift(pe.code(pc), pc).target() != installer) continue;
     auto range = boundaries.find(pc);
-    if (!range || !program.build(pe, range) || !call(program.at(pc))) continue;
+    if (!range) continue;
+#if defined(AUTOSCAN_X86)
+    if (!framedProgram(pe, program, range, pc)) continue;
+#else
+    if (!program.build(pe, range)) continue;
+#endif
+    if (!call(program.at(pc))) continue;
     const Node* argument = program.predecessor(pc);
     unsigned installerReg = argumentReg;
-#if defined(AUTOSCAN_X64)
     for (unsigned steps = 0; argument && steps < 64; ++steps) {
       const auto& i = argument->insn;
       if (i.op == Op::LoadField && i.dst == installerReg) break;
-      if (i.conditional() || i.op == Op::Jmp || Writes(i, StackReg) ||
+      bool push = sizeof(void*) == 4 && i.op == Op::Other && i.other() == Other::Push;
+      if (i.conditional() || i.op == Op::Jmp || (!push && Writes(i, StackReg)) ||
           (i.op == Op::Other && i.other() == Other::Call && VolatileReg(installerReg))) { argument = nullptr; break; }
       if (Writes(i, installerReg)) {
-        if (i.op != Op::MovReg || i.width() != sizeof(void*) || i.src >= 16) { argument = nullptr; break; }
+        constexpr unsigned registers = StackReg == 31 ? 31 : sizeof(void*) == 8 ? 16 : 8;
+        if (i.op != Op::MovReg || i.width() != sizeof(void*) || i.src >= registers) { argument = nullptr; break; }
         installerReg = i.src;
       }
       argument = program.predecessor(argument->pc);
     }
-#else
-    for (unsigned steps = 0; argument && steps < 4 && !Writes(argument->insn, argumentReg); ++steps) {
-      bool push = sizeof(void*) == 4 && argument->insn.op == Op::Other && argument->insn.other() == Other::Push;
-      if (call(argument) || argument->insn.conditional() || argument->insn.op == Op::Jmp || (!push && Writes(argument->insn, StackReg))) { argument = nullptr; break; }
-      argument = program.predecessor(argument->pc);
-    }
-#endif
     if (!argument || argument->insn.op != Op::LoadField || argument->insn.dst != installerReg ||
         argument->insn.src != StackReg || argument->insn.width() != sizeof(void*)) continue;
     for (const auto& node : program.nodes) {
@@ -713,6 +1076,9 @@ void crxDownload(const PeImage& pe, const Boundaries& boundaries, Program& progr
           !call(program.predecessor(jump->pc))) continue;
 #else
       test = program.predecessor(jump->pc);
+      for (unsigned steps = 0; test && steps < 4 && test->insn.op == Op::MovReg &&
+           !test->insn.setsFlags() && !Writes(test->insn, 0); ++steps)
+        test = program.predecessor(test->pc);
       if (!test || test->insn.op != Op::Other || test->insn.other() != Other::TestReg || test->insn.memory() ||
           test->insn.width() != 1 || test->insn.dst != 0 || test->insn.src != 0) continue;
       const auto* before = program.predecessor(test->pc);
@@ -790,17 +1156,13 @@ Report Analyze(std::span<const uint8_t> bytes) {
   if (boundaries.error) { report.error = boundaries.error; return report; }
   Program program;
   if (pe.isEdge()) {
-    // Edge uses a separate recognized layout: both installer decisions are required, and only x64 is supported.
-#if defined(AUTOSCAN_X64)
+    // Edge's installer path requires both independently recognized decisions.
     RefBatch batch(pe);
     installVerifier(pe, boundaries, program, {}, report, batch);
     crxDownload(pe, boundaries, program, report, batch);
     if (report.gates.size() != 2 || report.gates[0].optional != InstallVerifier || report.gates[1].optional != CrxDownload)
       report.error = "need both verified Edge source and CRX download gates";
     std::sort(report.gates.begin(), report.gates.end(), [](const Gate& a, const Gate& b) { return a.rva < b.rva; });
-#else
-    report.error = "Edge installer recognition requires x64";
-#endif
     return report;
   }
   auto issue = [&](uint32_t pc, std::string_view reason) {
@@ -825,6 +1187,9 @@ Report Analyze(std::span<const uint8_t> bytes) {
 #endif
       auto cmp = Lift(pe.code(cp), cp);
       if (cp + cmp.length() != jumpPc || !threshold(cmp, jump)) continue;
+#if defined(AUTOSCAN_ARM64)
+      auto bounds = boundaries.find(cp); if (!bounds) continue;
+#endif
       bool inverted = jump.condition() == 12 || jump.condition() == 14;
       Head head{cp, jumpPc, inverted ? jump.target() : jumpPc + jump.length(),
                 inverted ? jumpPc + jump.length() : jump.target(), inverted};
@@ -833,8 +1198,14 @@ Report Analyze(std::span<const uint8_t> bytes) {
       auto raw = boundaries.find(cp, true); bool complete = true;
       if (raw && !prefilter(pe, head, raw, &complete) && complete) continue;
 #endif
+#if !defined(AUTOSCAN_ARM64)
       auto bounds = boundaries.find(cp); if (!bounds) continue;
+#endif
       if (!prefilter(pe, head, bounds)) continue;
+#if defined(AUTOSCAN_ARM64)
+      // Only the reviewed AST literal input is excluded; unsupported bitfields remain candidates.
+      if (astLiteralInput(pe, bounds, cp, jumpPc, cmp.dst)) continue;
+#endif
       plausible = true;
       if (program.range.begin != bounds.begin || program.range.end != bounds.end) program.build(pe, bounds);
       if (program.complete && program.at(cp) && program.at(jumpPc)) variants.push_back({head, bounds});

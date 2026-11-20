@@ -48,6 +48,13 @@ def digest(path):
         return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
+def sandbox_read(app):
+    assert app.resolve().is_relative_to((REPO / '_scratch').resolve())
+    # Extracted copies need the AppContainer read access normally supplied by the installer.
+    subprocess.run(['icacls', str(app), '/grant', '*S-1-15-2-1:(OI)(CI)(RX)',
+                    '*S-1-15-2-2:(OI)(CI)(RX)', '/T', '/Q'], check=True, capture_output=True, timeout=60)
+
+
 def probe_requests(state, probe):
     # A restored tab can still probe while this phase deliberately disables MV2.
     return {key[len(probe):] if key.startswith(probe + '/') else key: value
@@ -55,7 +62,34 @@ def probe_requests(state, probe):
             if not key.startswith('/probe/') or (key.startswith(probe + '/') and key != probe + '/ready')}
 
 
-def memory_check(pid, report, patched, allow_offstore):
+def security_modules(pid):
+    for attempt in range(50):
+        snapshot = K.CreateToolhelp32Snapshot(0x18, pid)
+        if snapshot != C.c_void_p(-1).value:
+            break
+        error = C.get_last_error()
+        if error != 24 or attempt == 49:
+            return [{'snapshot_error': str(C.WinError(error))}]
+        time.sleep(.02)
+    try:
+        module = Module(); module.dwSize = C.sizeof(module)
+        C.set_last_error(0)
+        if not K.Module32FirstW(snapshot, C.byref(module)):
+            return [{'snapshot_error': str(C.WinError(C.get_last_error()))}]
+        paths = []
+        while True:
+            if module.szModule.lower() in ('secur32.dll', 'sspicli.dll'):
+                paths.append({'name': module.szModule, 'path': module.szExePath})
+            C.set_last_error(0)
+            if not K.Module32NextW(snapshot, C.byref(module)):
+                if C.get_last_error() not in (0, 18):
+                    paths.append({'snapshot_error': str(C.WinError(C.get_last_error()))})
+                return paths
+    finally:
+        K.CloseHandle(snapshot)
+
+
+def memory_check(pid, report, patched, allow_offstore, module_name='chrome.dll'):
     for attempt in range(50):
         snapshot = K.CreateToolhelp32Snapshot(0x18, pid)
         if snapshot != C.c_void_p(-1).value:
@@ -72,15 +106,30 @@ def memory_check(pid, report, patched, allow_offstore):
     try:
         module = Module(); module.dwSize = C.sizeof(module)
         ok = K.Module32FirstW(snapshot, C.byref(module))
-        while ok and module.szModule.lower() != 'chrome.dll':
+        while ok and module.szModule.lower() != module_name.lower():
             ok = K.Module32NextW(snapshot, C.byref(module))
-        assert ok, 'chrome.dll is not loaded'
-        for gate in report['gates']:
-            selected = patched and (not gate['optional'] or allow_offstore)
-            expected = bytes.fromhex(gate['patch' if selected else 'stock'])
-            actual = C.create_string_buffer(len(expected)); got = C.c_size_t()
-            assert K.ReadProcessMemory(process, module.modBaseAddr + gate['rva'], actual, len(expected), C.byref(got))
-            assert got.value == len(expected) and actual.raw == expected, f"memory decision differs at {gate['rva']:#x}: {actual.raw.hex()}"
+        assert ok, module_name + ' is not loaded'
+        base = module.modBaseAddr
+        # DevTools can become ready before the delay-loaded proxy and its bounded scan finish.
+        deadline = time.monotonic() + 75
+        while True:
+            waiting = False
+            for gate in report['gates']:
+                selected = patched and (not gate['optional'] or allow_offstore)
+                expected = bytes.fromhex(gate['patch' if selected else 'stock'])
+                actual = C.create_string_buffer(len(expected)); got = C.c_size_t()
+                if not K.ReadProcessMemory(process, base + gate['rva'], actual, len(expected), C.byref(got)):
+                    raise AssertionError(f'ReadProcessMemory failed: {C.WinError(C.get_last_error())}; '
+                                         f'loaded security DLLs: {security_modules(pid)}')
+                assert got.value == len(expected), 'incomplete decision read'
+                if actual.raw != expected:
+                    if not (selected and actual.raw == bytes.fromhex(gate['stock']) and time.monotonic() < deadline):
+                        raise AssertionError(f"memory decision differs at {gate['rva']:#x}: {actual.raw.hex()}; "
+                                             f"loaded security DLLs: {security_modules(pid)}")
+                    waiting = True
+            if not waiting:
+                return
+            time.sleep(.1)
     finally:
         K.CloseHandle(snapshot); K.CloseHandle(process)
 
@@ -128,6 +177,8 @@ def delete_registry(path, root):
 
 def run_build(entry, args, extensions, state, port, crx, extension_id):
     source_exe, source_binary = Path(entry['executable']).resolve(), Path(entry['binary']).resolve()
+    application = Path(entry.get('application', source_exe.parent)).resolve()
+    assert source_exe.is_relative_to(application) and source_binary.is_relative_to(application)
     original = digest(source_binary)
     assert digest(args.dll) == args.dll_sha256, 'DLL changed during the matrix run'
     workspace = args.work / re.sub(r'[^A-Za-z0-9.-]', '_', entry['version'])
@@ -135,10 +186,11 @@ def run_build(entry, args, extensions, state, port, crx, extension_id):
     app = workspace / 'app'
     assert app.resolve().is_relative_to(args.work)
     def skip_previous_proxy(directory, names):
-        return [name for name in names if Path(directory) == source_exe.parent and
+        return [name for name in names if
                 name.lower() in ('version.dll', 'version.dll.disabled', 'secur32.dll', 'secur32.dll.disabled')]
-    shutil.copytree(source_exe.parent, app, ignore=skip_previous_proxy)
-    exe, binary = app / source_exe.name, app / source_binary.relative_to(source_exe.parent)
+    shutil.copytree(application, app, ignore=skip_previous_proxy)
+    sandbox_read(app)
+    exe, binary = app / source_exe.relative_to(application), app / source_binary.relative_to(application)
     proxy = app / args.dll.name
     assert not proxy.exists(), 'source browser already contains a proxy'
     scan = subprocess.run([str(args.build / 'mv2-scan.exe'), str(binary)], capture_output=True, text=True, timeout=60)
@@ -219,7 +271,7 @@ def run_build(entry, args, extensions, state, port, crx, extension_id):
                         time.sleep(.2)
                     assert port_file.exists(), 'DevTools unavailable'
                     phase_result['startup_seconds'] = round(time.monotonic() - started, 3)
-                    memory_check(pid, report, patched, allow_offstore)
+                    memory_check(pid, report, patched, allow_offstore, binary.name)
                     phase_result['memory_gates_checked'] = len(report['gates'])
                     if patched:
                         identity = original if phase == 'core-only' else report['blake3']

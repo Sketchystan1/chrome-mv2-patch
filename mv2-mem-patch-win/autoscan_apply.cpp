@@ -131,11 +131,13 @@ ApplyResult ApplyPlan(std::span<uint8_t> image, const StockImage& stockImage,
     uint32_t word = ReadInsn<uint32_t>(site.stock.data());
     uint32_t replacement = 0;
     if (offstore || crxDownload) {
-      if (offstore ? (word & 0xfff80000) != 0x37180000 || (word & 31) == 31 : (word & 0xfff8001f) != 0x36000000)
+      bool flagSource = (word & 0xfff80000) == 0x37180000 && (word & 31) != 31;
+      bool edgeSource = pe.isEdge() && (word & 0xfef8001f) == 0x36000000;
+      if (offstore ? !flagSource && !edgeSource : (word & 0xfff8001f) != 0x36000000)
         return decline("optional ARM64 decision metadata differs");
       int32_t offset = static_cast<int32_t>(word << 13) >> 18;
       target = static_cast<int64_t>(site.rva) + int64_t{offset} * 4;
-      replacement = offstore ? 0x14000000 | (static_cast<uint32_t>(offset) & 0x03ffffff) : 0xd503201f;
+      replacement = offstore && (word & 0x01000000) ? 0x14000000 | (static_cast<uint32_t>(offset) & 0x03ffffff) : 0xd503201f;
     } else {
       unsigned cc = word & 15;
       if ((word & 0xff000010) != 0x54000000 || cc < 10 || cc > 13) return decline("unsupported decision instruction");
