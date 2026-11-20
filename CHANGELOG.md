@@ -1,8 +1,8 @@
 # Changelog
 
-## [2.0.1] - 2026-11-18
+## [2.0.1] - 2026-11-21
 
-- Fix Chrome x86 off-store CRX bug.
+- Fix Chrome x86, Edge 158+ off-store CRX bugs.
 
 ## [2.0.0] - 2026-11-17
 
